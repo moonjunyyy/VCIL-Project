@@ -684,3 +684,47 @@
 [INFO] L2P.py:339 > Train | Sample # 4984 | train_loss 40.4413 | train_acc 0.6771 | lr 0.006726 | running_time 1:06:05 | ETA 9:56:56
 [INFO] L2P.py:339 > Train | Sample # 4992 | train_loss 40.3447 | train_acc 0.7578 | lr 0.006709 | running_time 1:06:08 | ETA 9:56:20
 [INFO] L2P.py:339 > Train | Sample # 5000 | train_loss 40.7143 | train_acc 0.6250 | lr 0.006693 | running_time 1:06:11 | ETA 9:55:43
+[INFO] L2P.py:349 > Test | Sample # 5000 | test_loss 1225.0865 | test_acc 0.3751 | 
+[INFO] L2P.py:349 > Test | Sample # 5000 | test_loss 1225.0529 | test_acc 0.3751 | 
+[INFO] main.py:147 > [2-4] Update the information for the current task
+[INFO] main.py:151 > [2-5] Report task result
+[INFO] main.py:123 > [2-1] Prepare a datalist for the current task
+[INFO] L2P.py:339 > Train | Sample # 5008 | train_loss 42.8098 | train_acc 0.5625 | lr 0.006677 | running_time 1:07:53 | ETA 10:09:54
+[INFO] L2P.py:339 > Train | Sample # 5016 | train_loss 43.5380 | train_acc 0.5599 | lr 0.006661 | running_time 1:07:56 | ETA 10:09:17
+[INFO] L2P.py:339 > Train | Sample # 5024 | train_loss 41.8945 | train_acc 0.5208 | lr 0.006645 | running_time 1:07:59 | ETA 10:08:39
+[INFO] L2P.py:339 > Train | Sample # 5032 | train_loss 42.2331 | train_acc 0.5599 | lr 0.006629 | running_time 1:08:02 | ETA 10:08:02
+[INFO] L2P.py:339 > Train | Sample # 5040 | train_loss 42.4052 | train_acc 0.6016 | lr 0.006614 | running_time 1:08:05 | ETA 10:07:25
+[INFO] L2P.py:339 > Train | Sample # 5048 | train_loss 41.2298 | train_acc 0.6354 | lr 0.006598 | running_time 1:08:08 | ETA 10:06:47
+[INFO] L2P.py:339 > Train | Sample # 5056 | train_loss 42.1489 | train_acc 0.5938 | lr 0.006582 | running_time 1:08:11 | ETA 10:06:10
+[INFO] L2P.py:339 > Train | Sample # 5064 | train_loss 43.7597 | train_acc 0.5521 | lr 0.006566 | running_time 1:08:14 | ETA 10:05:33
+[INFO] L2P.py:339 > Train | Sample # 5072 | train_loss 41.8005 | train_acc 0.5833 | lr 0.006550 | running_time 1:08:17 | ETA 10:04:56
+[INFO] L2P.py:339 > Train | Sample # 5080 | train_loss 41.4101 | train_acc 0.6615 | lr 0.006535 | running_time 1:08:20 | ETA 10:04:19
+[INFO] L2P.py:339 > Train | Sample # 5088 | train_loss 41.8748 | train_acc 0.6016 | lr 0.006519 | running_time 1:08:23 | ETA 10:03:42
+[INFO] L2P.py:339 > Train | Sample # 5096 | train_loss 41.5703 | train_acc 0.5990 | lr 0.006503 | running_time 1:08:26 | ETA 10:03:05
+[INFO] L2P.py:349 > Test | Sample # 5100 | test_loss 1225.6550 | test_acc 0.4000 | 
+[INFO] L2P.py:339 > Train | Sample # 5104 | train_loss 41.0671 | train_acc 0.7083 | lr 0.006488 | running_time 1:09:23 | ETA 10:10:25
+[INFO] L2P.py:339 > Train | Sample # 5112 | train_loss 41.8308 | train_acc 0.5911 | lr 0.006472 | running_time 1:09:26 | ETA 10:09:48
+[INFO] L2P.py:339 > Train | Sample # 5120 | train_loss 41.0979 | train_acc 0.6458 | lr 0.006457 | running_time 1:09:29 | ETA 10:09:10
+[INFO] L2P.py:339 > Train | Sample # 5128 | train_loss 42.6139 | train_acc 0.5260 | lr 0.006441 | running_time 1:09:32 | ETA 10:08:33
+[INFO] L2P.py:339 > Train | Sample # 5136 | train_loss 41.8924 | train_acc 0.6589 | lr 0.006426 | running_time 1:09:35 | ETA 10:07:56
+[INFO] L2P.py:339 > Train | Sample # 5144 | train_loss 41.2443 | train_acc 0.6510 | lr 0.006410 | running_time 1:09:38 | ETA 10:07:19
+[INFO] L2P.py:339 > Train | Sample # 5152 | train_loss 41.4958 | train_acc 0.5651 | lr 0.006395 | running_time 1:09:41 | ETA 10:06:43
+[INFO] L2P.py:339 > Train | Sample # 5160 | train_loss 41.3561 | train_acc 0.5599 | lr 0.006380 | running_time 1:09:44 | ETA 10:06:06
+[INFO] L2P.py:339 > Train | Sample # 5168 | train_loss 42.2003 | train_acc 0.5781 | lr 0.006364 | running_time 1:09:47 | ETA 10:05:30
+[INFO] L2P.py:339 > Train | Sample # 5176 | train_loss 41.1839 | train_acc 0.6719 | lr 0.006349 | running_time 1:09:50 | ETA 10:04:53
+[INFO] L2P.py:339 > Train | Sample # 5184 | train_loss 43.0268 | train_acc 0.5755 | lr 0.006334 | running_time 1:09:54 | ETA 10:04:17
+[INFO] L2P.py:339 > Train | Sample # 5192 | train_loss 41.4762 | train_acc 0.5990 | lr 0.006319 | running_time 1:09:57 | ETA 10:03:41
+[INFO] L2P.py:339 > Train | Sample # 5200 | train_loss 40.8927 | train_acc 0.6797 | lr 0.006304 | running_time 1:10:00 | ETA 10:03:05
+[INFO] L2P.py:349 > Test | Sample # 5200 | test_loss 1225.4038 | test_acc 0.4163 | 
+[INFO] L2P.py:339 > Train | Sample # 5208 | train_loss 41.5433 | train_acc 0.6458 | lr 0.006288 | running_time 1:10:56 | ETA 10:10:12
+[INFO] L2P.py:339 > Train | Sample # 5216 | train_loss 40.8627 | train_acc 0.6536 | lr 0.006273 | running_time 1:10:59 | ETA 10:09:35
+[INFO] L2P.py:339 > Train | Sample # 5224 | train_loss 41.3653 | train_acc 0.5859 | lr 0.006258 | running_time 1:11:02 | ETA 10:08:58
+[INFO] L2P.py:339 > Train | Sample # 5232 | train_loss 41.7857 | train_acc 0.6068 | lr 0.006243 | running_time 1:11:05 | ETA 10:08:22
+[INFO] L2P.py:339 > Train | Sample # 5240 | train_loss 41.8042 | train_acc 0.5703 | lr 0.006228 | running_time 1:11:09 | ETA 10:07:46
+[INFO] L2P.py:339 > Train | Sample # 5248 | train_loss 41.5411 | train_acc 0.6615 | lr 0.006213 | running_time 1:11:12 | ETA 10:07:09
+[INFO] L2P.py:339 > Train | Sample # 5256 | train_loss 41.3045 | train_acc 0.6276 | lr 0.006199 | running_time 1:11:15 | ETA 10:06:33
+[INFO] L2P.py:339 > Train | Sample # 5264 | train_loss 41.0511 | train_acc 0.6901 | lr 0.006184 | running_time 1:11:18 | ETA 10:05:57
+[INFO] L2P.py:339 > Train | Sample # 5272 | train_loss 41.5107 | train_acc 0.5885 | lr 0.006169 | running_time 1:11:21 | ETA 10:05:21
+[INFO] L2P.py:339 > Train | Sample # 5280 | train_loss 42.4940 | train_acc 0.6172 | lr 0.006154 | running_time 1:11:24 | ETA 10:04:45
+[INFO] L2P.py:339 > Train | Sample # 5288 | train_loss 41.8975 | train_acc 0.6328 | lr 0.006139 | running_time 1:11:27 | ETA 10:04:09
+[INFO] L2P.py:339 > Train | Sample # 5296 | train_loss 41.2853 | train_acc 0.6484 | lr 0.006125 | running_time 1:11:30 | ETA 10:03:33
