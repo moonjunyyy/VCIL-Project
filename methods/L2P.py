@@ -47,10 +47,6 @@ writer = SummaryWriter("tensorboard")
 
 T = TypeVar('T', bound = 'nn.Module')
 
-
-# os.environ["TORCH_DISTRIBUTED_DEBUG"]="DETAIL"
-# os.environ['CUDA_LAUNCH_BLOCKING'] = "1"
-
 default_cfgs['vit_base_patch16_224_l2p'] = _cfg(
         url='https://storage.googleapis.com/vit_models/imagenet21k/ViT-B_16.npz',
         num_classes=21843)
@@ -225,6 +221,11 @@ class L2P(ER):
 
         self.model = L2P_Model(backbone_name='vit_base_patch16_224_l2p').to(self.device)
         self.criterion = self.model.loss_fn
+        
+        params = [param for name, param in self.model.named_parameters() if 'head' not in name]
+        opt = optim.Adam(params, lr=0.001, weight_decay=0)
+        opt.add_param_group({'params': self.backbone.model.head.parameters()})
+        self.scheduler = select_scheduler(self.sched_name, self.optimizer, self.lr_gamma)
 
     def online_step(self, sample, sample_num, n_worker):
         if sample['klass'] not in self.exposed_classes:
@@ -251,14 +252,14 @@ class L2P(ER):
 
         self.model.backbone.head.to(self.device)
         with torch.no_grad():
-            if self.num_learned_class > 1:
+            if self.num_learned_class == 1:
+                self.model.backbone.head.weight.zero_()
+                self.model.backbone.head.bias.zero_()
+            elif self.num_learned_class > 1:
                 self.model.backbone.head.weight[:self.num_learned_class - 1] = prev_weight
                 self.model.backbone.head.bias[:self.num_learned_class - 1]   = prev_bias
-        for param in self.optimizer.param_groups[1]['params']:
-            if param in self.optimizer.state.keys():
-                del self.optimizer.state[param]
-        del self.optimizer.param_groups[1]
-        self.optimizer.add_param_group({'params': self.model.backbone.head.parameters()})
+        self.optimizer = optim.Adam(self.model.parameters(), lr=0.001)
+        self.scheduler = select_scheduler(self.sched_name, self.optimizer, self.lr_gamma)
         self.memory.add_new_class(cls_list=self.exposed_classes)
         if 'reset' in self.sched_name:
             self.update_schedule(reset=True)

@@ -24,9 +24,9 @@ def main():
     logging.config.fileConfig("./configuration/logging.conf")
     logger = logging.getLogger()
 
-    os.makedirs(f"results/{args.dataset}/{args.note}", exist_ok=True)
-    os.makedirs(f"tensorboard/{args.dataset}/{args.note}", exist_ok=True)
-    fileHandler = logging.FileHandler(f'results/{args.dataset}/{args.note}/seed_{args.rnd_seed}.log', mode="w")
+    os.makedirs(f"{args.log_path}/logs/{args.dataset}/{args.note}", exist_ok=True)
+    os.makedirs(f"{args.log_path}/tensorboard/{args.dataset}/{args.note}", exist_ok=True)
+    fileHandler = logging.FileHandler(f'{args.log_path}/logs/{args.dataset}/{args.note}/seed_{args.rnd_seed}.log', mode="w")
 
     formatter = logging.Formatter(
         "[%(levelname)s] %(filename)s:%(lineno)d > %(message)s"
@@ -151,13 +151,13 @@ def main():
         logger.info("[2-5] Report task result")
         writer.add_scalar("Metrics/TaskAcc", task_acc, cur_iter)
 
-    np.save(f"results/{args.dataset}/{args.note}/seed_{args.rnd_seed}.npy", task_records["task_acc"])
+    np.save(f"{args.log_path}/logs/{args.dataset}/{args.note}/seed_{args.rnd_seed}.npy", task_records["task_acc"])
 
     if args.mode == 'gdumb':
         eval_results, task_records = method.evaluate_all(test_datalist, args.memory_epoch, args.batchsize, args.n_worker)
     if args.eval_period is not None:
-        np.save(f'results/{args.dataset}/{args.note}/seed_{args.rnd_seed}_eval.npy', eval_results['test_acc'])
-        np.save(f'results/{args.dataset}/{args.note}/seed_{args.rnd_seed}_eval_time.npy', eval_results['data_cnt'])
+        np.save(f'{args.log_path}/logs/{args.dataset}/{args.note}/seed_{args.rnd_seed}_eval.npy', eval_results['test_acc'])
+        np.save(f'{args.log_path}/logs/{args.dataset}/{args.note}/seed_{args.rnd_seed}_eval_time.npy', eval_results['data_cnt'])
 
     # Accuracy (A)
     A_auc = np.mean(eval_results["test_acc"])

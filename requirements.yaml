@@ -1,4 +1,4 @@
-name: puridiver
+name: iblurry
 channels:
   - pytorch
   - nvidia
@@ -184,4 +184,4 @@ dependencies:
       - torch-tb-profiler==0.4.0
       - tqdm==4.64.1
       - urllib3==1.26.13
-prefix: /home/moonjunyyy/anaconda3/envs/puridiver
+prefix: /data/junyeong/anaconda3/envs/iblurry
