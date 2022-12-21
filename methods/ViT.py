@@ -76,15 +76,17 @@ class ViT(ER):
         self.batch_size     = kwargs["batchsize"]
         self.n_worker       = kwargs["n_worker"]
 
-        self.model =  timm.create_model('vit_base_patch16_224_l2p', pretrained=True, num_classes=10).to(self.device)
+        self.model =  timm.create_model('vit_base_patch16_224_l2p', pretrained=True, num_classes=1).to(self.device)
         for param in self.model.parameters():
             param.requires_grad = False
         self.model.head.weight.requires_grad = True
         self.model.head.bias.requires_grad = True
 
+        self.model.parameters()
+        
         params = [param for name, param in self.model.named_parameters() if 'head' not in name]
-        opt = optim.Adam(params, lr=0.001, weight_decay=0)
-        opt.add_param_group({'params': self.model.head.parameters()})
+        self.optimizer = optim.Adam(params, lr=self.lr, weight_decay=0)
+        self.optimizer.add_param_group({'params': self.model.head.parameters()})
 
         self.scheduler = select_scheduler(self.sched_name, self.optimizer, self.lr_gamma)
         self.criterion = criterion.to(self.device)

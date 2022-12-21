@@ -52,7 +52,7 @@ if [ "$DATASET" == "cifar10" ]; then
 elif [ "$DATASET" == "cifar100" ]; then
     MEM_SIZE=2000 ONLINE_ITER=3
     MODEL_NAME="resnet34" EVAL_PERIOD=100
-    BATCHSIZE=16; LR=0.03 OPT_NAME="sgd" SCHED_NAME="cos" MEMORY_EPOCH=256
+    BATCHSIZE=16; LR=0.001 OPT_NAME="sgd" SCHED_NAME="cos" MEMORY_EPOCH=256
 
 elif [ "$DATASET" == "tinyimagenet" ]; then
     MEM_SIZE=4000 ONLINE_ITER=3

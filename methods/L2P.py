@@ -219,12 +219,12 @@ class L2P(ER):
         self.batch_size     = kwargs["batchsize"]
         self.n_worker       = kwargs["n_worker"]
 
-        self.model = L2P_Model(backbone_name='vit_base_patch16_224_l2p').to(self.device)
+        self.model = L2P_Model(backbone_name='vit_base_patch16_224_l2p', class_num=1).to(self.device)
         self.criterion = self.model.loss_fn
         
         params = [param for name, param in self.model.named_parameters() if 'head' not in name]
-        opt = optim.Adam(params, lr=0.03, weight_decay=0)
-        opt.add_param_group({'params': self.model.backbone.head.parameters()})
+        self.optimizer = optim.Adam(params, lr=self.lr, weight_decay=0)
+        self.optimizer.add_param_group({'params': self.model.backbone.head.parameters()})
         self.scheduler = select_scheduler(self.sched_name, self.optimizer, self.lr_gamma)
 
     def online_step(self, sample, sample_num, n_worker):

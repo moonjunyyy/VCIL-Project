@@ -36,8 +36,8 @@ python --version
 NOTE="L2P_iblurry_cifar100_5epoch" # Short description of the experiment. (WARNING: logs/results with the same note will be overwritten!)
 MODE="L2P"
 DATASET="cifar100" # cifar10, cifar100, tinyimagenet, imagenet
-N_TASKS=10
-N=50
+N_TASKS=5
+N=0
 M=10
 GPU_TRANSFORM="--gpu_transform"
 USE_AMP="--use_amp"
