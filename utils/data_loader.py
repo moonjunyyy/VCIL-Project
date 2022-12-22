@@ -1,6 +1,6 @@
 import logging.config
 import os
-from typing import List
+from typing import List, Optional, Callable
 import time
 
 import PIL
@@ -9,10 +9,10 @@ import pandas as pd
 import torch
 from torchvision import transforms
 from torch.utils.data import Dataset
+from datasets import *
 from time import perf_counter
 
 logger = logging.getLogger()
-
 
 class ImageDataset(Dataset):
     def __init__(self, data_frame: pd.DataFrame, dataset: str, transform=None, cls_list=None, data_dir=None,
@@ -112,51 +112,28 @@ class ImageDataset(Dataset):
         data['label'] = torch.LongTensor(labels)
         return data
 
-
 class StreamDataset(Dataset):
-    def __init__(self, datalist, dataset, transform, cls_list, data_dir=None, device=None, transform_on_gpu=False):
-        self.images = []
-        self.labels = []
-        self.dataset = dataset
-        self.transform = transform
-        self.cls_list = cls_list
-        self.data_dir = data_dir
-        self.device = device
+    def __init__(self, sample, transform :Optional[Callable]=None, cls_list=None):
+        self.images     = []
+        self.labels     = []
+        self.cls_list   = torch.tensor(cls_list)
+        self.transform  = transform
 
-        self.transform_on_gpu = transform_on_gpu
-        mean, std, n_classes, inp_size, _ = get_statistics(dataset=self.dataset)
-
-        if self.transform_on_gpu:
-            self.transform_cpu = transforms.Compose(
-                [
-                    transforms.Resize((inp_size, inp_size)),
-                    transforms.PILToTensor()
-                ])
-            self.transform_gpu = transform
-        for data in datalist:
-            try:
-                img_name = data['file_name']
-            except KeyError:
-                img_name = data['filepath']
-            if self.data_dir is None:
-                img_path = os.path.join("dataset", self.dataset, img_name)
-            else:
-                img_path = os.path.join(self.data_dir, img_name)
-            if self.transform_on_gpu:
-                self.images.append(self.transform_cpu(PIL.Image.open(img_path).convert('RGB')))
-            else:
-                self.images.append(PIL.Image.open(img_path).convert('RGB'))
-            self.labels.append(self.cls_list.index(data['klass']))
+        for _, (image, label) in enumerate(sample):
+            for img in image:
+                self.images.append(img)
+            for lbl in label:
+                self.labels.append((self.cls_list==lbl).nonzero()[0].squeeze())
 
     def __len__(self):
         return len(self.images)
 
     def __getitem__(self, idx):
-        sample = dict()
+        sample  = dict()
         if torch.is_tensor(idx):
             idx = idx.tolist()
-        image = self.images[idx]
-        label = self.labels[idx]
+        image   = self.images[idx]
+        label   = self.labels[idx]
         if self.transform:
             image = self.transform(image)
         sample["image"] = image
@@ -169,10 +146,8 @@ class StreamDataset(Dataset):
         images = []
         labels = []
         for i, image in enumerate(self.images):
-            if self.transform_on_gpu:
-                images.append(self.transform_gpu(image.to(self.device)))
-            else:
-                images.append(self.transform(image))
+            image = transforms.ToPILImage()(image)
+            images.append(self.transform(image))
             labels.append(self.labels[i])
         data['image'] = torch.stack(images)
         data['label'] = torch.LongTensor(labels)
@@ -180,14 +155,13 @@ class StreamDataset(Dataset):
 
 
 class MemoryDataset(Dataset):
-    def __init__(self, dataset, transform=None, cls_list=None, device=None, test_transform=None,
-                 data_dir=None, transform_on_gpu=True, save_test=None, keep_history=False):
+    def __init__(self, transform=None, test_transform=None, cls_list=None, save_test=None, keep_history=False):
+        
         self.datalist = []
         self.labels = []
         self.images = []
-        self.dataset = dataset
         self.transform = transform
-        self.cls_list = []
+        self.cls_list = cls_list
         self.cls_dict = {cls_list[i]:i for i in range(len(cls_list))}
         self.cls_count = []
         self.cls_idx = []
@@ -195,22 +169,9 @@ class MemoryDataset(Dataset):
         self.score = []
         self.others_loss_decrease = np.array([])
         self.previous_idx = np.array([], dtype=int)
-        self.device = device
         self.test_transform = test_transform
-        self.data_dir = data_dir
         self.keep_history = keep_history
 
-        self.transform_on_gpu = transform_on_gpu
-        mean, std, n_classes, inp_size, _ = get_statistics(dataset=self.dataset)
-        if self.transform_on_gpu:
-            self.transform_cpu = transforms.Compose(
-            [
-                transforms.Resize((inp_size, inp_size)),
-                transforms.PILToTensor()
-            ])
-            self.transform_gpu = transform
-            self.test_transform = transforms.Compose([transforms.ConvertImageDtype(torch.float32),
-            transforms.Normalize(mean, std)])
         self.save_test = save_test
         if self.save_test is not None:
             self.device_img = []
@@ -222,7 +183,7 @@ class MemoryDataset(Dataset):
         self.cls_list = cls_list
         self.cls_count.append(0)
         self.cls_idx.append([])
-        self.cls_dict = {self.cls_list[i]:i for i in range(len(self.cls_list))}
+        self.cls_dict = {self.cls_list[i].item():i for i in range(len(self.cls_list))}
         self.cls_train_cnt = np.append(self.cls_train_cnt, 0)
 
     def __getitem__(self, idx):
@@ -244,57 +205,33 @@ class MemoryDataset(Dataset):
             self.score[idx] = score
 
     def replace_sample(self, sample, idx=None):
-        self.cls_count[self.cls_dict[sample['klass']]] += 1
-        if idx is None:
-            self.cls_idx[self.cls_dict[sample['klass']]].append(len(self.images))
-            self.datalist.append(sample)
-            try:
-                img_name = sample['file_name']
-            except KeyError:
-                img_name = sample['filepath']
-            if self.data_dir is None:
-                img_path = os.path.join("dataset", self.dataset, img_name)
+        x, y = sample
+        for i, _y in enumerate(y):
+            _y = _y.item()
+            self.cls_count[self.cls_dict[_y]] += 1
+
+            if idx is None:
+                self.cls_idx[self.cls_dict[_y]].append(len(self.images))
+                self.datalist.append(sample)
+                self.images.append(x[i])
+                self.labels.append(self.cls_dict[_y])
+                # self.device_img.append(x[i].unsqueeze(0))
+                if self.cls_count[self.cls_dict[_y]] == 1:
+                    self.others_loss_decrease = np.append(self.others_loss_decrease, 0)
+                else:
+                    self.others_loss_decrease = np.append(self.others_loss_decrease, np.mean(self.others_loss_decrease[self.cls_idx[self.cls_dict[_y]][:-1]]))
             else:
-                img_path = os.path.join(self.data_dir, img_name)
-            img = PIL.Image.open(img_path).convert('RGB')
-            if self.transform_on_gpu:
-                img = self.transform_cpu(img)
-            self.images.append(img)
-            self.labels.append(self.cls_dict[sample['klass']])
-            if self.save_test == 'gpu':
-                self.device_img.append(self.test_transform(img).to(self.device).unsqueeze(0))
-            elif self.save_test == 'cpu':
-                self.device_img.append(self.test_transform(img).unsqueeze(0))
-            if self.cls_count[self.cls_dict[sample['klass']]] == 1:
-                self.others_loss_decrease = np.append(self.others_loss_decrease, 0)
-            else:
-                self.others_loss_decrease = np.append(self.others_loss_decrease, np.mean(self.others_loss_decrease[self.cls_idx[self.cls_dict[sample['klass']]][:-1]]))
-        else:
-            self.cls_count[self.labels[idx]] -= 1
-            self.cls_idx[self.labels[idx]].remove(idx)
-            self.datalist[idx] = sample
-            self.cls_idx[self.cls_dict[sample['klass']]].append(idx)
-            try:
-                img_name = sample['file_name']
-            except KeyError:
-                img_name = sample['filepath']
-            if self.data_dir is None:
-                img_path = os.path.join("dataset", self.dataset, img_name)
-            else:
-                img_path = os.path.join(self.data_dir, img_name)
-            img = PIL.Image.open(img_path).convert('RGB')
-            if self.transform_on_gpu:
-                img = self.transform_cpu(img)
-            self.images[idx] = img
-            self.labels[idx] = self.cls_list.index(sample['klass'])
-            if self.save_test == 'gpu':
-                self.device_img[idx] = self.test_transform(img).to(self.device).unsqueeze(0)
-            elif self.save_test == 'cpu':
-                self.device_img[idx] = self.test_transform(img).unsqueeze(0)
-            if self.cls_count[self.cls_dict[sample['klass']]] == 1:
-                self.others_loss_decrease[idx] = np.mean(self.others_loss_decrease)
-            else:
-                self.others_loss_decrease[idx] = np.mean(self.others_loss_decrease[self.cls_idx[self.cls_dict[sample['klass']]][:-1]])
+                self.cls_count[self.labels[idx]] -= 1
+                self.cls_idx[self.labels[idx]].remove(idx)
+                self.datalist[idx] = sample
+                self.cls_idx[self.cls_dict[_y]].append(idx)
+                self.images[idx] = x[i]
+                self.labels[idx] = self.cls_list.index(_y)
+                # self.device_img[idx] = x[i].unsqueeze(0)
+                if self.cls_count[self.cls_dict[_y]] == 1:
+                    self.others_loss_decrease[idx] = np.mean(self.others_loss_decrease)
+                else:
+                    self.others_loss_decrease[idx] = np.mean(self.others_loss_decrease[self.cls_idx[self.cls_dict[_y]][:-1]])
 
     def get_weight(self):
         weight = np.zeros(len(self.images))
@@ -314,15 +251,9 @@ class MemoryDataset(Dataset):
         labels = []
         for i in indices:
             if transform is None:
-                if self.transform_on_gpu:
-                    images.append(self.transform_gpu(self.images[i].to(self.device)))
-                else:
-                    images.append(self.transform(self.images[i]))
+                images.append(self.images[i])
             else:
-                if self.transform_on_gpu:
-                    images.append(transform(self.images[i].to(self.device)))
-                else:
-                    images.append(transform(self.images[i]))
+                images.append(self.images[i])
             labels.append(self.labels[i])
             self.cls_train_cnt[self.labels[i]] += 1
         data['image'] = torch.stack(images)

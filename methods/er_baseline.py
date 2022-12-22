@@ -76,9 +76,8 @@ class ER:
         self.scheduler = select_scheduler(self.sched_name, self.optimizer, self.lr_gamma)
 
         self.criterion = criterion.to(self.device)
-        self.memory = MemoryDataset(self.dataset, self.train_transform, self.exposed_classes,
-                                    test_transform=self.test_transform, data_dir=self.data_dir, device=self.device,
-                                    transform_on_gpu=self.gpu_transform)
+        self.memory = MemoryDataset(self.train_transform, cls_list=self.exposed_classes,
+                                    test_transform=self.test_transform)
         self.temp_batch = []
         self.num_updates = 0
         self.train_count = 0
@@ -89,8 +88,10 @@ class ER:
         self.total_samples = num_samples[self.dataset]
 
     def online_step(self, sample, sample_num, n_worker):
-        if sample['klass'] not in self.exposed_classes:
-            self.add_new_class(sample['klass'])
+        x, y = sample
+        for label in y:
+            if label not in self.exposed_classes:
+                self.add_new_class(label)
 
         self.temp_batch.append(sample)
         self.num_updates += self.online_iter
@@ -125,9 +126,8 @@ class ER:
     def online_train(self, sample, batch_size, n_worker, iterations=1, stream_batch_size=1):
         total_loss, correct, num_data = 0.0, 0.0, 0.0
         if stream_batch_size > 0:
-            sample_dataset = StreamDataset(sample, dataset=self.dataset, transform=self.train_transform,
-                                           cls_list=self.exposed_classes, data_dir=self.data_dir, device=self.device,
-                                           transform_on_gpu=self.gpu_transform)
+            sample_dataset = StreamDataset(sample, transform=self.train_transform, cls_list=self.exposed_classes)
+
         if len(self.memory) > 0 and batch_size - stream_batch_size > 0:
             memory_batch_size = min(len(self.memory), batch_size - stream_batch_size)
 
@@ -136,9 +136,9 @@ class ER:
             x = []
             y = []
             if stream_batch_size > 0:
-                stream_data = sample_dataset.get_data()
-                x.append(stream_data['image'])
-                y.append(stream_data['label'])
+                sample = sample_dataset.get_data()
+                x.append(sample['image'])
+                y.append(sample['label'])
             if len(self.memory) > 0 and batch_size - stream_batch_size > 0:
                 memory_data = self.memory.get_batch(memory_batch_size)
                 x.append(memory_data['image'])
@@ -220,22 +220,7 @@ class ER:
         else:
             self.scheduler.step()
 
-    def online_evaluate(self, test_list, sample_num, batch_size, n_worker):
-        test_df = pd.DataFrame(test_list)
-        exp_test_df = test_df[test_df['klass'].isin(self.exposed_classes)]
-        test_dataset = ImageDataset(
-            exp_test_df,
-            dataset=self.dataset,
-            transform=self.test_transform,
-            cls_list=self.exposed_classes,
-            data_dir=self.data_dir
-        )
-        test_loader = DataLoader(
-            test_dataset,
-            shuffle=True,
-            batch_size=batch_size,
-            num_workers=n_worker,
-        )
+    def online_evaluate(self, test_loader, sample_num):
         eval_dict = self.evaluation(test_loader, self.criterion)
         self.report_test(sample_num, eval_dict["avg_loss"], eval_dict["avg_acc"])
         return eval_dict
@@ -270,8 +255,7 @@ class ER:
         self.model.eval()
         with torch.no_grad():
             for i, data in enumerate(test_loader):
-                x = data["image"]
-                y = data["label"]
+                x,y = data
                 x = x.to(self.device)
                 y = y.to(self.device)
                 logit = self.model(x)
