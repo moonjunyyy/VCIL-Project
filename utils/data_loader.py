@@ -116,14 +116,14 @@ class StreamDataset(Dataset):
     def __init__(self, sample, transform :Optional[Callable]=None, cls_list=None):
         self.images     = []
         self.labels     = []
-        self.cls_list   = torch.tensor(cls_list)
+        self.cls_list   = cls_list
         self.transform  = transform
 
         for _, (image, label) in enumerate(sample):
             for img in image:
                 self.images.append(img)
             for lbl in label:
-                self.labels.append((self.cls_list==lbl).nonzero().squeeze())
+                self.labels.append(self.cls_list.index(lbl.item()))
 
     def __len__(self):
         return len(self.images)
@@ -212,11 +212,11 @@ class MemoryDataset(Dataset):
 
             if idx is None:
                 self.cls_idx[self.cls_dict[_y]].append(len(self.images))
-                self.datalist.append(sample)
+                self.datalist.append([x[i], _y])
                 self.images.append(x[i])
                 self.labels.append(self.cls_dict[_y])
                 if self.save_test:
-                    self.device_img.append(x[i].unsqueeze(0))
+                    self.device_img.append(self.test_transform(transforms.ToPILImage()(x[i])).unsqueeze(0))
                 if self.cls_count[self.cls_dict[_y]] == 1:
                     self.others_loss_decrease = np.append(self.others_loss_decrease, 0)
                 else:
@@ -224,12 +224,12 @@ class MemoryDataset(Dataset):
             else:
                 self.cls_count[self.labels[idx]] -= 1
                 self.cls_idx[self.labels[idx]].remove(idx)
-                self.datalist[idx] = sample
+                self.datalist[idx] = [x[i], _y]
                 self.cls_idx[self.cls_dict[_y]].append(idx)
                 self.images[idx] = x[i]
                 self.labels[idx] = self.cls_dict[_y]
                 if self.save_test:
-                    self.device_img[idx] = x[i].unsqueeze(0)
+                    self.device_img[idx] = self.test_transform(transforms.ToPILImage()(x[i])).unsqueeze(0)
                 if self.cls_count[self.cls_dict[_y]] == 1:
                     self.others_loss_decrease[idx] = np.mean(self.others_loss_decrease)
                 else:
