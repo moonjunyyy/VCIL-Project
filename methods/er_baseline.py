@@ -91,7 +91,7 @@ class ER:
         x, y = sample
         for label in y:
             if label not in self.exposed_classes:
-                self.add_new_class(label)
+                self.add_new_class(label.item())
 
         self.temp_batch.append(sample)
         self.num_updates += self.online_iter
@@ -255,7 +255,8 @@ class ER:
         self.model.eval()
         with torch.no_grad():
             for i, data in enumerate(test_loader):
-                x,y = data
+                x, y = data
+                y = (torch.tensor(self.exposed_classes) == y.unsqueeze(1)).nonzero()[:, 1]
                 x = x.to(self.device)
                 y = y.to(self.device)
                 logit = self.model(x)

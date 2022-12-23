@@ -4,3 +4,5 @@ results/
 *.pyc
 *.log
 *.err
+data/
+test.py

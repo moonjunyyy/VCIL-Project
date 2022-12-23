@@ -183,7 +183,7 @@ class MemoryDataset(Dataset):
         self.cls_list = cls_list
         self.cls_count.append(0)
         self.cls_idx.append([])
-        self.cls_dict = {self.cls_list[i].item():i for i in range(len(self.cls_list))}
+        self.cls_dict = {self.cls_list[i]:i for i in range(len(self.cls_list))}
         self.cls_train_cnt = np.append(self.cls_train_cnt, 0)
 
     def __getitem__(self, idx):

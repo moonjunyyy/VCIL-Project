@@ -135,7 +135,7 @@ def main():
         logger.info("[2-1] Prepare a datalist for the current task")
 
         train_sampler.set_task(cur_iter)
-        train_dataloader= DataLoader(train_dataset, batch_size=args.batchsize, sampler=train_sampler, num_workers=4)
+        train_dataloader= DataLoader(train_dataset, batch_size=1, sampler=train_sampler, num_workers=4)
 
         # Reduce datalist in Debug mode
         if args.debug:
@@ -148,7 +148,7 @@ def main():
             method.online_step(data, samples_cnt, args.n_worker)
             if samples_cnt % args.eval_period == 0:
                 test_sampler = OnlineTestSampler(test_dataset, method.exposed_classes, rnd_seed=args.rnd_seed)
-                test_dataloader = DataLoader(test_dataset, batch_size=args.batchsize, sampler=test_sampler, num_workers=4)
+                test_dataloader = DataLoader(test_dataset, batch_size=512, sampler=test_sampler, num_workers=4)
                 eval_dict = method.online_evaluate(test_dataloader, samples_cnt)
                 eval_results["test_acc"].append(eval_dict['avg_acc'])
                 eval_results["avg_acc"].append(eval_dict['cls_acc'])
