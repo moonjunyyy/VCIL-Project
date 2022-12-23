@@ -145,7 +145,7 @@ class ER:
                 y.append(memory_data['label'])
             x = torch.cat(x)
             y = torch.cat(y)
-
+            print(y)
             x = x.to(self.device)
             y = y.to(self.device)
 
@@ -264,7 +264,6 @@ class ER:
                 loss = criterion(logit, y)
                 pred = torch.argmax(logit, dim=-1)
                 _, preds = logit.topk(self.topk, 1, True, True)
-
                 total_correct += torch.sum(preds == y.unsqueeze(1)).item()
                 total_num_data += y.size(0)
 

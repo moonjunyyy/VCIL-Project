@@ -27,9 +27,8 @@ class CLIB(ER):
         self.dropped_idx = []
         self.memory_dropped_idx = []
         self.imp_update_counter = 0
-        self.memory = MemoryDataset(self.dataset, self.train_transform, self.exposed_classes,
-                                    test_transform=self.test_transform, data_dir=self.data_dir, device=self.device,
-                                    transform_on_gpu=self.gpu_transform, save_test='cpu', keep_history=True)
+        self.memory = MemoryDataset(self.train_transform, cls_list=self.exposed_classes,
+                                    test_transform=self.test_transform, save_test=True, keep_history=True)
         self.imp_update_period = kwargs['imp_update_period']
         if kwargs["sched_name"] == 'default':
             self.sched_name = 'adaptive_lr'
@@ -47,8 +46,11 @@ class CLIB(ER):
         self.current_lr = self.lr
 
     def online_step(self, sample, sample_num, n_worker):
-        if sample['klass'] not in self.exposed_classes:
-            self.add_new_class(sample['klass'])
+        x, y = sample
+        for label in y:
+            if label not in self.exposed_classes:
+                self.add_new_class(label.item())
+
         self.update_memory(sample)
         self.num_updates += self.online_iter
         if self.num_updates >= 1:
@@ -64,9 +66,8 @@ class CLIB(ER):
     def online_train(self, sample, batch_size, n_worker, iterations=1, stream_batch_size=0):
         total_loss, correct, num_data = 0.0, 0.0, 0.0
         if stream_batch_size > 0:
-            sample_dataset = StreamDataset(sample, dataset=self.dataset, transform=self.train_transform,
-                                           cls_list=self.exposed_classes, data_dir=self.data_dir, device=self.device,
-                                           transform_on_gpu=True)
+            sample_dataset = StreamDataset(sample, transform=self.train_transform, cls_list=self.exposed_classes)
+
         if len(self.memory) > 0 and batch_size - stream_batch_size > 0:
             memory_batch_size = min(len(self.memory), batch_size - stream_batch_size)
 
@@ -183,9 +184,10 @@ class CLIB(ER):
                 self.loss = loss
 
     def samplewise_importance_memory(self, sample):
+        x, y = sample
         if len(self.memory.images) >= self.memory_size:
             label_frequency = copy.deepcopy(self.memory.cls_count)
-            label_frequency[self.exposed_classes.index(sample['klass'])] += 1
+            label_frequency[self.exposed_classes.index(y.item())] += 1
             cls_to_replace = np.argmax(np.array(label_frequency))
             cand_idx = self.memory.cls_idx[cls_to_replace]
             score = self.memory.others_loss_decrease[cand_idx]

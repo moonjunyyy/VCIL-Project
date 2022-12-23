@@ -14,13 +14,15 @@ class OnlineSampler(Sampler):
         self.disjoint_num   = int(self.disjoint_num // num_tasks) * num_tasks
         self.blurry_num     = len(self.classes) - self.disjoint_num
         self.blurry_num     = int(self.blurry_num // num_tasks) * num_tasks
-        class_order         = torch.randperm(len(self.classes), generator=self.generator)
 
+        # Divide classes into N% of disjoint and (100 - N)% of blurry
+        class_order         = torch.randperm(len(self.classes), generator=self.generator)
         self.disjoint_classes   = class_order[:self.disjoint_num]
         self.disjoint_classes   = self.disjoint_classes.reshape(num_tasks, -1).tolist()
         self.blurry_classes     = class_order[self.disjoint_num:self.disjoint_num + self.blurry_num]
         self.blurry_classes     = self.blurry_classes.reshape(num_tasks, -1).tolist()
-        
+
+        # Get indices of disjoint and blurry classes
         self.disjoint_indices   = [[] for _ in range(num_tasks)]
         self.blurry_indices     = [[] for _ in range(num_tasks)]
         for i in range(len(self.targets)):
@@ -30,6 +32,7 @@ class OnlineSampler(Sampler):
                 elif self.targets[i] in self.blurry_classes[j]:
                     self.blurry_indices[j].append(i)
 
+        # Randomly shuffle M% of blurry indices
         blurred = []
         for i in range(num_tasks):
             blurred += self.blurry_indices[i][:len(self.blurry_indices[i]) * m // 100]
@@ -69,7 +72,7 @@ class OnlineTestSampler(Sampler):
         self.generator  = torch.Generator().manual_seed(rnd_seed)
         self.exposed_class  = exposed_class
         self.indices    = [i for i in range(self.data_source.__len__()) if self.targets[i] in self.exposed_class]
-    
+        
     def __iter__(self):
         return iter(self.indices)
 

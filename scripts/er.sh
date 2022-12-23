@@ -13,7 +13,7 @@
 # CIL CONFIG
 NOTE="er" # Short description of the experiment. (WARNING: logs/results with the same note will be overwritten!)
 MODE="er"
-DATASET="cifar100" # cifar10, cifar100, tinyimagenet, imagenet
+DATASET="cifar10" # cifar10, cifar100, tinyimagenet, imagenet
 N_TASKS=5
 N=50
 M=10
@@ -56,5 +56,5 @@ do
     --model_name $MODEL_NAME --opt_name $OPT_NAME --sched_name $SCHED_NAME \
     --lr $LR --batchsize $BATCHSIZE \
     --memory_size $MEM_SIZE $GPU_TRANSFORM --online_iter $ONLINE_ITER --data_dir /local_datasets/puridiver/cifar100 --log_path /home/junyeong/log/ \
-    --note $NOTE --eval_period $EVAL_PERIOD $USE_AMP
+    --note $NOTE --eval_period $EVAL_PERIOD $USE_AMP --debug
 done

@@ -123,7 +123,7 @@ class StreamDataset(Dataset):
             for img in image:
                 self.images.append(img)
             for lbl in label:
-                self.labels.append((self.cls_list==lbl).nonzero()[0].squeeze())
+                self.labels.append((self.cls_list==lbl).nonzero().squeeze())
 
     def __len__(self):
         return len(self.images)
@@ -215,7 +215,8 @@ class MemoryDataset(Dataset):
                 self.datalist.append(sample)
                 self.images.append(x[i])
                 self.labels.append(self.cls_dict[_y])
-                # self.device_img.append(x[i].unsqueeze(0))
+                if self.save_test:
+                    self.device_img.append(x[i].unsqueeze(0))
                 if self.cls_count[self.cls_dict[_y]] == 1:
                     self.others_loss_decrease = np.append(self.others_loss_decrease, 0)
                 else:
@@ -226,8 +227,9 @@ class MemoryDataset(Dataset):
                 self.datalist[idx] = sample
                 self.cls_idx[self.cls_dict[_y]].append(idx)
                 self.images[idx] = x[i]
-                self.labels[idx] = self.cls_list.index(_y)
-                # self.device_img[idx] = x[i].unsqueeze(0)
+                self.labels[idx] = self.cls_dict[_y]
+                if self.save_test:
+                    self.device_img[idx] = x[i].unsqueeze(0)
                 if self.cls_count[self.cls_dict[_y]] == 1:
                     self.others_loss_decrease[idx] = np.mean(self.others_loss_decrease)
                 else:
@@ -251,9 +253,9 @@ class MemoryDataset(Dataset):
         labels = []
         for i in indices:
             if transform is None:
-                images.append(self.images[i])
+                images.append(self.transform(transforms.ToPILImage()(self.images[i])))
             else:
-                images.append(self.images[i])
+                images.append(transform(transforms.ToPILImage()(self.images[i])))
             labels.append(self.labels[i])
             self.cls_train_cnt[self.labels[i]] += 1
         data['image'] = torch.stack(images)

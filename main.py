@@ -138,12 +138,13 @@ def main():
         train_dataloader= DataLoader(train_dataset, batch_size=1, sampler=train_sampler, num_workers=4)
 
         # Reduce datalist in Debug mode
-        if args.debug:
-            train_dataloader = train_dataloader[:2000]
-            test_dataloader  = test_dataloader[:2000]
+        # if args.debug:
+        #     train_dataloader = train_dataloader[:2000]
+        #     test_dataloader  = test_dataloader[:2000]
 
         method.online_before_task(cur_iter)
         for i, data in enumerate(train_dataloader):
+            if i == 2000 and args.debug: break
             samples_cnt += 1
             method.online_step(data, samples_cnt, args.n_worker)
             if samples_cnt % args.eval_period == 0:
@@ -156,7 +157,7 @@ def main():
         method.online_after_task(cur_iter)
         
         test_sampler = OnlineTestSampler(test_dataset, method.exposed_classes, rnd_seed=args.rnd_seed)
-        test_dataloader = DataLoader(test_dataset, batch_size=args.batchsize, sampler=test_sampler, num_workers=4)
+        test_dataloader = DataLoader(test_dataset, batch_size=512, sampler=test_sampler, num_workers=4)
         eval_dict = method.online_evaluate(test_dataloader, samples_cnt)
         task_acc = eval_dict['avg_acc']
 
