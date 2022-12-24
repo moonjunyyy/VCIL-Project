@@ -1,27 +1,4 @@
-from typing import TypeVar
-
-import timm
-import torch
-import torch.nn as nn
-import torch.nn.functional as F
-import logging
-import copy
-
-import numpy as np
-import pandas as pd
-import torch
-import torch.nn as nn
-from torch import optim
-from torch.utils.data import DataLoader
-from torch.utils.tensorboard import SummaryWriter
-from utils.augment import Cutout, Invert, Solarize, select_autoaugment
-from torchvision import transforms
-from randaugment.randaugment import RandAugment
-
-from methods.er_baseline import ER
-from utils.data_loader import cutmix_data, ImageDataset
-from utils.augment import Cutout, Invert, Solarize, select_autoaugment
-
+# When we make a new one, we should inherit the Finetune class.
 import logging
 import copy
 import time
@@ -34,61 +11,82 @@ import torch.nn as nn
 from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
 from torch import optim
-
+from torchvision import transforms
 from utils.data_loader import ImageDataset, StreamDataset, MemoryDataset, cutmix_data, get_statistics
 from utils.train_utils import select_model, select_optimizer, select_scheduler
-
-import timm
-from timm.models.registry import register_model
-from timm.models.vision_transformer import _cfg, _create_vision_transformer, default_cfgs
 
 logger = logging.getLogger()
 writer = SummaryWriter("tensorboard")
 
-T = TypeVar('T', bound = 'nn.Module')
 
-default_cfgs['vit_base_patch16_224_l2p'] = _cfg(
-        url='https://storage.googleapis.com/vit_models/imagenet21k/ViT-B_16.npz',
-        num_classes=21843)
+def cycle(iterable):
+    # iterate with shuffling
+    while True:
+        for i in iterable:
+            yield i
 
-# Register the backbone model to timm
-@register_model
-def vit_base_patch16_224_l2p(pretrained=False, **kwargs):
-    """ ViT-Base model (ViT-B/32) from original paper (https://arxiv.org/abs/2010.11929).
-    ImageNet-21k weights @ 224x224, source https://github.com/google-research/vision_transformer.
-    NOTE: this model has valid 21k classifier head and no representation (pre-logits) layer
-    """
-    model_kwargs = dict(
-        patch_size=16, embed_dim=768, depth=12, num_heads=12, **kwargs)
-    model = _create_vision_transformer('vit_base_patch16_224_l2p', pretrained=pretrained, **model_kwargs)
-    return model
 
-class ViT(ER):
+class Finetuning:
     def __init__(
             self, criterion, device, train_transform, test_transform, n_classes, **kwargs
     ):
-        super().__init__(criterion, device, train_transform, test_transform, n_classes, **kwargs)
-        self.data_cnt       = 0
+        self.num_learned_class = 0
+        self.num_learning_class = 1
+        self.n_classes = n_classes
+        self.exposed_classes = []
+        self.seen = 0
+        self.topk = kwargs["topk"]
 
-        self.sched_name     = "const"
-        self.batch_size     = kwargs["batchsize"]
-        self.n_worker       = kwargs["n_worker"]
+        self.device = device
+        self.dataset = kwargs["dataset"]
+        self.model_name = kwargs["model_name"]
+        self.opt_name = kwargs["opt_name"]
+        self.sched_name = kwargs["sched_name"]
+        if self.sched_name == "default":
+            self.sched_name = 'exp_reset'
+        self.lr = kwargs["lr"]
 
-        self.model =  timm.create_model('vit_base_patch16_224_l2p', pretrained=True, num_classes=1).to(self.device)
-        for param in self.model.parameters():
-            param.requires_grad = False
-        self.model.head.weight.requires_grad = True
-        self.model.head.bias.requires_grad = True
+        self.train_transform = train_transform
+        self.cutmix = "cutmix" in kwargs["transforms"]
+        self.test_transform = test_transform
 
-        self.model.parameters()
-        
-        params = [param for name, param in self.model.named_parameters() if 'head' not in name]
-        self.optimizer = optim.Adam(params, lr=self.lr, weight_decay=0)
-        self.optimizer.add_param_group({'params': self.model.head.parameters()})
+        self.memory_size = kwargs["memory_size"]
+        self.data_dir = kwargs["data_dir"]
 
+        self.online_iter = kwargs["online_iter"]
+        self.batch_size = kwargs["batchsize"]
+        self.temp_batchsize = kwargs["temp_batchsize"]
+        if self.temp_batchsize is None:
+            self.temp_batchsize = self.batch_size//2
+        if self.temp_batchsize > self.batch_size:
+            self.temp_batchsize = self.batch_size
+        self.memory_size -= self.temp_batchsize
+
+        self.gpu_transform = kwargs["gpu_transform"]
+        self.use_amp = kwargs["use_amp"]
+        if self.use_amp:
+            self.scaler = torch.cuda.amp.GradScaler()
+
+        self.model = select_model(self.model_name, self.dataset, 1).to(self.device)
+        self.optimizer = select_optimizer(self.opt_name, self.lr, self.model,is_vit=True)
+        if 'imagenet' in self.dataset:
+            self.lr_gamma = 0.99995
+        else:
+            self.lr_gamma = 0.9999
         self.scheduler = select_scheduler(self.sched_name, self.optimizer, self.lr_gamma)
+
         self.criterion = criterion.to(self.device)
-        # self.criterion = self.model.loss_fn
+        self.memory = MemoryDataset(self.dataset, self.train_transform, self.exposed_classes,
+                                    test_transform=self.test_transform, data_dir=self.data_dir, device=self.device,
+                                    transform_on_gpu=self.gpu_transform)
+        self.temp_batch = []
+        self.num_updates = 0
+        self.train_count = 0
+        self.batch_size = kwargs["batchsize"]
+
+        self.start_time = time.time()
+        num_samples = {'cifar10': 50000, 'cifar100': 50000, 'tinyimagenet': 100000, 'imagenet': 1281167}
+        self.total_samples = num_samples[self.dataset]
 
     def online_step(self, sample, sample_num, n_worker):
         if sample['klass'] not in self.exposed_classes:
@@ -110,14 +108,11 @@ class ViT(ER):
         self.exposed_classes.append(class_name)
         self.num_learned_class = len(self.exposed_classes)
         prev_weight = copy.deepcopy(self.model.head.weight.data)
-        prev_bias   = copy.deepcopy(self.model.head.bias.data)
-        self.model.reset_classifier(self.num_learned_class)
+        self.model.head = nn.Linear(self.model.head.in_features, self.num_learned_class).to(self.device)
 
-        self.model.head.to(self.device)
         with torch.no_grad():
             if self.num_learned_class > 1:
                 self.model.head.weight[:self.num_learned_class - 1] = prev_weight
-                self.model.head.bias[:self.num_learned_class - 1]   = prev_bias
         for param in self.optimizer.param_groups[1]['params']:
             if param in self.optimizer.state.keys():
                 del self.optimizer.state[param]
@@ -151,8 +146,11 @@ class ViT(ER):
             x = torch.cat(x)
             y = torch.cat(y)
 
+            # x = transforms.Resize((224,224))
+            
             x = x.to(self.device)
             y = y.to(self.device)
+            # print("[Target shape]",y.shape)
 
             self.optimizer.zero_grad()
 
@@ -179,21 +177,25 @@ class ViT(ER):
     def model_forward(self, x, y):
         do_cutmix = self.cutmix and np.random.rand(1) < 0.5
         if do_cutmix:
+            # print("[do_Cutmix]")
             x, labels_a, labels_b, lam = cutmix_data(x=x, y=y, alpha=1.0)
+            
             if self.use_amp:
                 with torch.cuda.amp.autocast():
-                    logit = self.model(transforms.Resize((224, 224))(x))
+                    logit = self.model(transforms.Resize((224,224))(x))['logits']
                     loss = lam * self.criterion(logit, labels_a) + (1 - lam) * self.criterion(logit, labels_b)
             else:
-                logit = self.model(x)
+                logit = self.model(transforms.Resize((224,224))(x))['logits']
                 loss = lam * self.criterion(logit, labels_a) + (1 - lam) * self.criterion(logit, labels_b)
         else:
+            # print("[do_Not_Cutmix]")
             if self.use_amp:
+                # x =
                 with torch.cuda.amp.autocast():
-                    logit = self.model(transforms.Resize((224, 224))(x))
+                    logit = self.model(transforms.Resize((224,224))(x))['logits']
                     loss = self.criterion(logit, y)
             else:
-                logit = self.model(x)
+                logit = self.model(transforms.Resize((224,224))(x))['logits']
                 loss = self.criterion(logit, y)
         return logit, loss
 
@@ -279,7 +281,8 @@ class ViT(ER):
                 y = data["label"]
                 x = x.to(self.device)
                 y = y.to(self.device)
-                logit = self.model(transforms.Resize((224, 224))(x))
+                # logit = self.model(x)['logits']
+                logit = self.model(transforms.Resize((224,224))(x))['logits']
 
                 loss = criterion(logit, y)
                 pred = torch.argmax(logit, dim=-1)

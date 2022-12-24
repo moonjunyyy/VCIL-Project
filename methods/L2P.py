@@ -40,7 +40,8 @@ from utils.train_utils import select_model, select_optimizer, select_scheduler
 
 import timm
 from timm.models.registry import register_model
-from timm.models.vision_transformer import _cfg, _create_vision_transformer, default_cfgs
+from timm.models.vision_transformer import _cfg, default_cfgs
+from models.cifar_vit import _create_vision_transformer
 
 logger = logging.getLogger()
 writer = SummaryWriter("tensorboard")
@@ -71,7 +72,7 @@ class Prompt(nn.Module):
                  dimention            : int,
                  _diversed_selection  : bool = True,
                  _batchwise_selection : bool = True,
-                 **kwargs) -> None:
+                 **kwargs):
         super().__init__()
 
         self.pool_size      = pool_size
@@ -90,7 +91,7 @@ class Prompt(nn.Module):
         self.register_buffer('frequency', torch.ones (pool_size))
         self.register_buffer('counter',   torch.zeros(pool_size))
     
-    def forward(self, query : torch.Tensor, **kwargs) -> torch.Tensor:
+    def forward(self, query : torch.Tensor, **kwargs):
 
         B, D = query.shape
         assert D == self.dimention, f'Query dimention {D} does not match prompt dimention {self.dimention}'
@@ -149,11 +150,17 @@ class L2P_Model(nn.Module):
         self._batchwise_selection = _batchwise_selection
         self.class_num            = class_num
 
-        self.add_module('backbone', timm.create_model(backbone_name, pretrained=True, num_classes=class_num))
+        # model_kwargs = dict(
+        # patch_size=16, embed_dim=768, depth=12, num_heads=12, **kwargs)
+        
+        # self.add_module('backbone', timm.models.create_model(backbone_name, pretrained=True, num_classes=class_num))
+        self.add_module('backbone', timm.models.create_model(backbone_name, pretrained=True, num_classes=class_num,
+                                                             drop_rate=0.,drop_path_rate=0.,drop_block_rate=None))
         for name, param in self.backbone.named_parameters():
-            param.requires_grad = False
-        self.backbone.head.weight.requires_grad = True
-        self.backbone.head.bias.requires_grad   = True
+            if 'head' not in name:
+                param.requires_grad = False
+        # self.backbone.head.weight.requires_grad = True
+        # self.backbone.head.bias.requires_grad   = True
 
         self.prompt = Prompt(
             pool_size,
@@ -200,10 +207,11 @@ class L2P_Model(nn.Module):
     def get_count(self):
         return self.prompt.update()
 
-    def train(self: T, mode: bool = True, **kwargs) -> T:
+    def train(self: T, mode: bool = True, **kwargs):
         ten = super().train(mode)
         self.backbone.eval()
         return ten
+    
 
 
 class L2P(ER):
@@ -221,7 +229,7 @@ class L2P(ER):
 
         self.model = L2P_Model(backbone_name='vit_base_patch16_224_l2p', class_num=1).to(self.device)
         self.criterion = self.model.loss_fn
-        
+
         params = [param for name, param in self.model.named_parameters() if 'head' not in name]
         self.optimizer = optim.Adam(params, lr=self.lr, weight_decay=0)
         self.optimizer.add_param_group({'params': self.model.backbone.head.parameters()})
@@ -247,14 +255,14 @@ class L2P(ER):
         self.exposed_classes.append(class_name)
         self.num_learned_class = len(self.exposed_classes)
         prev_weight = copy.deepcopy(self.model.backbone.head.weight.data)
-        prev_bias   = copy.deepcopy(self.model.backbone.head.bias.data)
+        # prev_bias   = copy.deepcopy(self.model.backbone.head.bias.data)
         self.model.backbone.reset_classifier(self.num_learned_class)
 
         self.model.backbone.head.to(self.device)
         with torch.no_grad():
             if self.num_learned_class > 1:
                 self.model.backbone.head.weight[:self.num_learned_class - 1] = prev_weight
-                self.model.backbone.head.bias[:self.num_learned_class - 1]   = prev_bias
+                # self.model.backbone.head.bias[:self.num_learned_class - 1]   = prev_bias
         for param in self.optimizer.param_groups[1]['params']:
             if param in self.optimizer.state.keys():
                 del self.optimizer.state[param]
