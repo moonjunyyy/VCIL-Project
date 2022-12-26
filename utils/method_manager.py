@@ -7,7 +7,8 @@ from methods.ewc import EWCpp
 from methods.mir import MIR
 from methods.clib import CLIB
 from methods.L2P import L2P
-from methods.ViT import ViT
+from methods.Finetuning import Finetuning
+from methods.Freeze_extractor import Freeze_extractor
 
 logger = logging.getLogger()
 
@@ -87,8 +88,17 @@ def select_method(args, criterion, device, train_transform, test_transform, n_cl
             n_classes=n_classes,
             **kwargs,
         )
-    elif args.mode == "ViT":
-        method = ViT(
+    elif args.mode == "Finetuning":
+        method = Finetuning(
+            criterion=criterion,
+            device=device,
+            train_transform=train_transform,
+            test_transform=test_transform,
+            n_classes=n_classes,
+            **kwargs,
+        )
+    elif args.mode == "Freeze_extractor":
+        method = Freeze_extractor(
             criterion=criterion,
             device=device,
             train_transform=train_transform,
