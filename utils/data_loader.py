@@ -114,6 +114,7 @@ class ImageDataset(Dataset):
 
 class StreamDataset(Dataset):
     def __init__(self, sample, transform :Optional[Callable]=None, cls_list=None):
+        
         self.images     = []
         self.labels     = []
         self.cls_list   = cls_list

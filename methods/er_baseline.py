@@ -145,7 +145,7 @@ class ER:
                 y.append(memory_data['label'])
             x = torch.cat(x)
             y = torch.cat(y)
-            print(y)
+
             x = x.to(self.device)
             y = y.to(self.device)
 
@@ -256,7 +256,8 @@ class ER:
         with torch.no_grad():
             for i, data in enumerate(test_loader):
                 x, y = data
-                y = (torch.tensor(self.exposed_classes) == y.unsqueeze(1)).nonzero()[:, 1]
+                for j in range(len(y)):
+                    y[j] = self.exposed_classes.index(y[j].item())
                 x = x.to(self.device)
                 y = y.to(self.device)
                 logit = self.model(x)
