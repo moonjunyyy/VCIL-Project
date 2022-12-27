@@ -1,14 +1,14 @@
 #!/bin/bash
 
-#SBATCH -J CLIB_iblurry_cifar100
+#SBATCH -J CLIB_iblurry_Tinyimg_N50_M10
 #SBATCH -p batch
 #SBATCH --nodes=1
 #SBATCH --gres=gpu:1
 #SBATCH --cpus-per-gpu=4
 #SBATCH --mem-per-gpu=16G
 #SBATCH --time=14-0
-#SBATCH -o /home/junyeong/%x_%j.log
-#SBATCH -e /home/junyeong/%x_%j.err
+#SBATCH -o %x_%j.log
+#SBATCH -e %x_%j.err
 
 
 date
@@ -33,9 +33,9 @@ conda --version
 python --version
 
 # CIL CONFIG
-NOTE="clib" # Short description of the experiment. (WARNING: logs/results with the same note will be overwritten!)
+NOTE="CLIB_iblurry_Tinyimg_N50_M10" # Short description of the experiment. (WARNING: logs/results with the same note will be overwritten!)
 MODE="clib"
-DATASET="cifar100" # cifar10, cifar100, tinyimagenet, imagenet
+DATASET="tinyimagenet" # cifar10, cifar100, tinyimagenet, imagenet
 N_TASKS=5
 N=50
 M=10
@@ -76,6 +76,6 @@ do
     --rnd_seed $RND_SEED \
     --model_name $MODEL_NAME --opt_name $OPT_NAME --sched_name $SCHED_NAME \
     --lr $LR --batchsize $BATCHSIZE \
-    --memory_size $MEM_SIZE $GPU_TRANSFORM --online_iter $ONLINE_ITER --data_dir /local_datasets/ --log_path /home/junyeong/log/  \
+    --memory_size $MEM_SIZE $GPU_TRANSFORM --online_iter $ONLINE_ITER --data_dir /local_datasets/ \
     --note $NOTE --eval_period $EVAL_PERIOD --imp_update_period $IMP_UPDATE_PERIOD $USE_AMP
 done
