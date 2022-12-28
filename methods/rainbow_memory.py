@@ -41,18 +41,23 @@ class RM(ER):
         self.data_cnt = 0
 
     def online_step(self, sample, sample_num, n_worker):
-        if sample['klass'] not in self.exposed_classes:
-            self.add_new_class(sample['klass'])
+        
+        image, label = sample
+        for l in label:
+            if l not in self.exposed_classes:
+                self.add_new_class(l.item())
 
-        self.temp_batch.append(sample)
+        self.num_updates += self.online_iter
 
-        if len(self.temp_batch) == self.batch_size:
-            train_loss, train_acc = self.online_train(self.temp_batch, self.batch_size, n_worker,
-                                                      iterations=1, stream_batch_size=self.batch_size)
-            self.report_training(sample_num, train_loss, train_acc)
-            for stored_sample in self.temp_batch:
-                self.update_memory(stored_sample)
-            self.temp_batch = []
+        # if len(self.temp_batch) == self.temp_batchsize:
+        train_loss, train_acc = self.online_train([image, label], self.batch_size, n_worker,
+                                                    iterations=int(self.num_updates), stream_batch_size=self.batch_size)
+        self.report_training(sample_num, train_loss, train_acc)
+        for stored_sample, stored_label in zip(image, label):
+            self.update_memory((stored_sample, stored_label))
+        self.temp_batch = []
+        self.num_updates -= int(self.num_updates)
+
 
     def add_new_class(self, class_name):
         self.exposed_classes.append(class_name)
@@ -62,9 +67,10 @@ class RM(ER):
         self.reset_opt()
 
     def update_memory(self, sample):
+        x,y = sample
         if len(self.memory.images) >= self.memory_size:
             label_frequency = copy.deepcopy(self.memory.cls_count)
-            label_frequency[self.exposed_classes.index(sample['klass'])] += 1
+            label_frequency[self.exposed_classes.index(y.item())] += 1
             cls_to_replace = np.argmax(np.array(label_frequency))
             idx_to_replace = np.random.choice(self.memory.cls_idx[cls_to_replace])
             self.memory.replace_sample(sample, idx_to_replace)
@@ -93,7 +99,7 @@ class RM(ER):
                 self.optimizer, T_0=1, T_mult=2, eta_min=self.lr * 0.01
             )
         mem_dataset = ImageDataset(
-            pd.DataFrame(self.memory.datalist),
+            self.memory.datalist,
             dataset=self.dataset,
             transform=self.train_transform,
             cls_list=self.exposed_classes,

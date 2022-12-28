@@ -15,9 +15,9 @@ from time import perf_counter
 logger = logging.getLogger()
 
 class ImageDataset(Dataset):
-    def __init__(self, data_frame: pd.DataFrame, dataset: str, transform=None, cls_list=None, data_dir=None,
+    def __init__(self, data_list : List[torch.Tensor], dataset: str, transform=None, cls_list=None, data_dir=None,
                  preload=False, device=None, transform_on_gpu=False):
-        self.data_frame = data_frame
+        self.data_list = data_list
         self.dataset = dataset
         self.transform = transform
         self.cls_list = cls_list
@@ -25,76 +25,22 @@ class ImageDataset(Dataset):
         self.preload = preload
         self.device = device
         self.transform_on_gpu = transform_on_gpu
-        if self.preload:
-            mean, std, n_classes, inp_size, _ = get_statistics(dataset=self.dataset)
-            if self.transform_on_gpu:
-                self.transform_cpu = transforms.Compose(
-                    [
-                        transforms.Resize((inp_size, inp_size)),
-                        transforms.PILToTensor()
-                    ])
-                self.transform_gpu = self.transform
-            self.loaded_images = []
-            for idx in range(len(self.data_frame)):
-                sample = dict()
-                try:
-                    img_name = self.data_frame.iloc[idx]["file_name"]
-                except KeyError:
-                    img_name = self.data_frame.iloc[idx]["filepath"]
-                if self.cls_list is None:
-                    label = self.data_frame.iloc[idx].get("label", -1)
-                else:
-                    label = self.cls_list.index(self.data_frame.iloc[idx]["klass"])
-                if self.data_dir is None:
-                    img_path = os.path.join("dataset", self.dataset, img_name)
-                else:
-                    img_path = os.path.join(self.data_dir, img_name)
-                image = PIL.Image.open(img_path).convert("RGB")
-                if self.transform_on_gpu:
-                    image = self.transform_cpu(PIL.Image.open(img_path).convert('RGB'))
-                elif self.transform:
-                    image = self.transform(image)
-                sample["image"] = image
-                sample["label"] = label
-                sample["image_name"] = img_name
-                self.loaded_images.append(sample)
 
     def __len__(self):
-        return len(self.data_frame)
+        return len(self.data_list)
 
     def __getitem__(self, idx):
-        if self.preload:
-            return self.loaded_images[idx]
-        else:
-            sample = dict()
-            if torch.is_tensor(idx):
-                idx = idx.tolist()
-            try:
-                img_name = self.data_frame.iloc[idx]["file_name"]
-            except KeyError:
-                img_name = self.data_frame.iloc[idx]["filepath"]
-            if self.cls_list is None:
-                label = self.data_frame.iloc[idx].get("label", -1)
-            else:
-                label = self.cls_list.index(self.data_frame.iloc[idx]["klass"])
-
-            if self.data_dir is None:
-                img_path = os.path.join("dataset", self.dataset, img_name)
-            else:
-                img_path = os.path.join(self.data_dir, img_name)
-            image = PIL.Image.open(img_path).convert("RGB")
-            if self.transform:
-                image = self.transform(image)
-            sample["image"] = image
-            sample["label"] = label
-            sample["image_name"] = img_name
-            return sample
+        return self.data_list[idx]
 
     def get_image_class(self, y):
-        return self.data_frame[self.data_frame["label"] == y]
+        res_list = []
+        for i in range(len(self.data_list)):
+            if self.data_list[i]["label"] == y:
+                res_list.append(self.data_list[i])
+        return res_list
 
     def generate_idx(self, batch_size):
-        arr = np.arange(len(self.loaded_images))
+        arr = np.arange(len(self.data_list))
         np.random.shuffle(arr)
         if batch_size >= len(arr):
             return [arr]
@@ -106,8 +52,8 @@ class ImageDataset(Dataset):
         labels = []
         data = {}
         for i in indices:
-            images.append(self.transform_gpu(self.loaded_images[i]["image"].to(self.device)))
-            labels.append(self.loaded_images[i]["label"])
+            images.append(self.transform(transforms.ToPILImage()(self.data_list[i]['image'].to(self.device))))
+            labels.append(self.data_list[i]['label'])
         data['image'] = torch.stack(images)
         data['label'] = torch.LongTensor(labels)
         return data
@@ -154,13 +100,13 @@ class StreamDataset(Dataset):
         data['label'] = torch.LongTensor(labels)
         return data
 
-
 class MemoryDataset(Dataset):
     def __init__(self, transform=None, test_transform=None, cls_list=None, save_test=None, keep_history=False):
         
         self.datalist = []
         self.labels = []
         self.images = []
+        
         self.transform = transform
         self.cls_list = cls_list
         self.cls_dict = {cls_list[i]:i for i in range(len(cls_list))}
@@ -207,34 +153,33 @@ class MemoryDataset(Dataset):
 
     def replace_sample(self, sample, idx=None):
         x, y = sample
-        for i, _y in enumerate(y):
-            _y = _y.item()
-            self.cls_count[self.cls_dict[_y]] += 1
+        y = y.item()
+        self.cls_count[self.cls_dict[y]] += 1
 
-            if idx is None:
-                self.cls_idx[self.cls_dict[_y]].append(len(self.images))
-                self.datalist.append([x[i], _y])
-                self.images.append(x[i])
-                self.labels.append(self.cls_dict[_y])
-                if self.save_test:
-                    self.device_img.append(self.test_transform(transforms.ToPILImage()(x[i])).unsqueeze(0))
-                if self.cls_count[self.cls_dict[_y]] == 1:
-                    self.others_loss_decrease = np.append(self.others_loss_decrease, 0)
-                else:
-                    self.others_loss_decrease = np.append(self.others_loss_decrease, np.mean(self.others_loss_decrease[self.cls_idx[self.cls_dict[_y]][:-1]]))
+        if idx is None:
+            self.cls_idx[self.cls_dict[y]].append(len(self.images))
+            self.datalist.append({'image':x,'label':self.cls_dict[y]})
+            self.images.append(x)
+            self.labels.append(self.cls_dict[y])
+            if self.save_test:
+                self.device_img.append(self.test_transform(transforms.ToPILImage()(x)).unsqueeze(0))
+            if self.cls_count[self.cls_dict[y]] == 1:
+                self.others_loss_decrease = np.append(self.others_loss_decrease, 0)
             else:
-                self.cls_count[self.labels[idx]] -= 1
-                self.cls_idx[self.labels[idx]].remove(idx)
-                self.datalist[idx] = [x[i], _y]
-                self.cls_idx[self.cls_dict[_y]].append(idx)
-                self.images[idx] = x[i]
-                self.labels[idx] = self.cls_dict[_y]
-                if self.save_test:
-                    self.device_img[idx] = self.test_transform(transforms.ToPILImage()(x[i])).unsqueeze(0)
-                if self.cls_count[self.cls_dict[_y]] == 1:
-                    self.others_loss_decrease[idx] = np.mean(self.others_loss_decrease)
-                else:
-                    self.others_loss_decrease[idx] = np.mean(self.others_loss_decrease[self.cls_idx[self.cls_dict[_y]][:-1]])
+                self.others_loss_decrease = np.append(self.others_loss_decrease, np.mean(self.others_loss_decrease[self.cls_idx[self.cls_dict[y]][:-1]]))
+        else:
+            self.cls_count[self.labels[idx]] -= 1
+            self.cls_idx[self.labels[idx]].remove(idx)
+            self.datalist[idx] = {'image':x,'label':self.cls_dict[y]}
+            self.cls_idx[self.cls_dict[y]].append(idx)
+            self.images[idx] = x
+            self.labels[idx] = self.cls_dict[y]
+            if self.save_test:
+                self.device_img[idx] = self.test_transform(transforms.ToPILImage()(x)).unsqueeze(0)
+            if self.cls_count[self.cls_dict[y]] == 1:
+                self.others_loss_decrease[idx] = np.mean(self.others_loss_decrease)
+            else:
+                self.others_loss_decrease[idx] = np.mean(self.others_loss_decrease[self.cls_idx[self.cls_dict[y]][:-1]])
 
     def get_weight(self):
         weight = np.zeros(len(self.images))

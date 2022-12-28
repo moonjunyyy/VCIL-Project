@@ -8,6 +8,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 import pandas as pd
 from torch.utils.data import DataLoader
+import torchvision.transforms as transforms
 from torch.utils.tensorboard import SummaryWriter
 from scipy.stats import ttest_ind
 
@@ -46,45 +47,53 @@ class CLIB(ER):
         self.current_lr = self.lr
 
     def online_step(self, sample, sample_num, n_worker):
-        x, y = sample
-        for label in y:
-            if label not in self.exposed_classes:
-                self.add_new_class(label.item())
+        
+        image, label = sample
+        for l in label:
+            if l not in self.exposed_classes:
+                self.add_new_class(l.item())
 
-        self.update_memory(sample)
         self.num_updates += self.online_iter
-        if self.num_updates >= 1:
-            train_loss, train_acc = self.online_train([], self.batch_size, n_worker,
-                                                      iterations=int(self.num_updates), stream_batch_size=0)
-            self.report_training(sample_num, train_loss, train_acc)
-            self.num_updates -= int(self.num_updates)
-            self.update_schedule()
+
+        # if len(self.temp_batch) == self.temp_batchsize:
+        train_loss, train_acc = self.online_train([image, label], self.batch_size, n_worker,
+                                                    iterations=int(self.num_updates), stream_batch_size=self.temp_batchsize)
+        self.report_training(sample_num, train_loss, train_acc)
+        for stored_sample, stored_label in zip(image, label):
+            self.update_memory((stored_sample, stored_label))
+        self.temp_batch = []
+        self.num_updates -= int(self.num_updates)
 
     def update_memory(self, sample):
         self.samplewise_importance_memory(sample)
 
     def online_train(self, sample, batch_size, n_worker, iterations=1, stream_batch_size=0):
         total_loss, correct, num_data = 0.0, 0.0, 0.0
-        if stream_batch_size > 0:
-            sample_dataset = StreamDataset(sample, transform=self.train_transform, cls_list=self.exposed_classes)
+        # if stream_batch_size > 0:
+        #     sample_dataset = StreamDataset(sample, transform=self.train_transform, cls_list=self.exposed_classes)
 
-        if len(self.memory) > 0 and batch_size - stream_batch_size > 0:
-            memory_batch_size = min(len(self.memory), batch_size - stream_batch_size)
+        # if len(self.memory) > 0 and batch_size - stream_batch_size > 0:
+        #     memory_batch_size = min(len(self.memory), batch_size - stream_batch_size)
 
         for i in range(iterations):
             self.model.train()
-            x = []
-            y = []
-            if stream_batch_size > 0:
-                stream_data = sample_dataset.get_data()
-                x.append(stream_data['image'])
-                y.append(stream_data['label'])
-            if len(self.memory) > 0 and batch_size - stream_batch_size > 0:
-                memory_data = self.memory.get_batch(memory_batch_size)
-                x.append(memory_data['image'])
-                y.append(memory_data['label'])
-            x = torch.cat(x)
-            y = torch.cat(y)
+            # x = []
+            # y = []
+            x, y = sample
+            x = torch.cat([self.train_transform(transforms.ToPILImage()(img)).unsqueeze(0) for img in x])
+            y = torch.cat([torch.tensor([self.exposed_classes.index(label)]) for label in y])
+            # if stream_batch_size > 0:
+            #     # sample = sample_dataset.get_data()
+            #     x.append(sample['image'])
+            #     y.append(sample['label'])
+            if len(self.memory) > 0:
+                memory_data = self.memory.get_batch(y.size(0))
+                x = torch.cat([x, memory_data['image']])
+                y = torch.cat([y, memory_data['label']])
+                # x.append(memory_data['image'])
+                # y.append(memory_data['label'])
+            # x = torch.cat([x])
+            # y = torch.cat([y])
 
             x = x.to(self.device)
             y = y.to(self.device)

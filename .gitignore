@@ -4,5 +4,6 @@ results/
 *.pyc
 *.log
 *.err
+*.out
 data/
 test.py

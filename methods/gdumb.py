@@ -14,15 +14,14 @@ from utils.train_utils import select_model, select_optimizer, select_scheduler
 from utils.data_loader import ImageDataset, cutmix_data
 from torch.utils.data import DataLoader
 
-import ray
+# import ray
 from configuration import config
 
 logger = logging.getLogger()
 writer = SummaryWriter("tensorboard")
 args = config.base_parser()
-if args.mode == 'gdumb':
-    ray.init(num_gpus=args.num_gpus)
-
+# if args.mode == 'gdumb':
+#     ray.init(num_gpus=args.num_gpus)
 
 class GDumb(ER):
     def __init__(
@@ -42,23 +41,28 @@ class GDumb(ER):
         self.task_time = []
 
     def online_step(self, sample, sample_num, n_worker):
-        if sample['klass'] not in self.exposed_classes:
-            self.exposed_classes.append(sample['klass'])
-            self.num_learned_class = len(self.exposed_classes)
-            self.memory.add_new_class(cls_list=self.exposed_classes)
-        self.update_memory(sample)
+        
+        image, label = sample
+        for l in label:
+            if l not in self.exposed_classes:
+                self.exposed_classes.append(l.item())
+                self.num_learned_class = len(self.exposed_classes)
+                self.memory.add_new_class(cls_list=self.exposed_classes)
+        for stored_sample, stored_label in zip(image, label):
+            self.update_memory((stored_sample, stored_label))
 
     def update_memory(self, sample):
+        image, label = sample
         if len(self.memory.images) >= self.memory_size:
             label_frequency = copy.deepcopy(self.memory.cls_count)
-            label_frequency[self.exposed_classes.index(sample['klass'])] += 1
+            label_frequency[self.exposed_classes.index(label)] += 1
             cls_to_replace = np.argmax(np.array(label_frequency))
             idx_to_replace = np.random.choice(self.memory.cls_idx[cls_to_replace])
             self.memory.replace_sample(sample, idx_to_replace)
         else:
             self.memory.replace_sample(sample)
 
-    def online_evaluate(self, test_list, sample_num, batch_size, n_worker):
+    def online_evaluate(self, test_list, sample_num):
         if sample_num not in self.eval_time and sample_num % self.eval_period == 0:
             self.eval_samples.append(copy.deepcopy(self.memory.datalist))
             self.eval_time.append(sample_num)
@@ -95,7 +99,7 @@ class GDumb(ER):
         pass
 
 
-@ray.remote(num_gpus=1 / args.workers_per_gpu)
+# @ray.remote(num_gpus=1 / args.workers_per_gpu)
 class RemoteTrainer:
     def __init__(self, model_name, dataset, n_classes, opt_name, lr, sched_name, train_list, test_list,
                  criterion, train_transform, test_transform, cutmix, device=0, use_amp=False, data_dir=None):

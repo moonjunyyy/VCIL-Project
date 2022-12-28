@@ -88,6 +88,9 @@ def main():
             train_transform.append(transforms.AutoAugment(transforms.AutoAugmentPolicy('cifar10')))
         elif 'imagenet' in args.dataset:
             train_transform.append(transforms.AutoAugment(transforms.AutoAugmentPolicy('imagenet')))
+        elif 'svhn' in args.dataset:
+            train_transform.append(transforms.AutoAugment(transforms.AutoAugmentPolicy('svhn')))
+            
     train_transform = transforms.Compose(
         [
             transforms.Resize((inp_size, inp_size)),
@@ -125,8 +128,8 @@ def main():
     test_dataset    = datasets[args.dataset](root=args.data_dir, train=False, download=True, transform=test_transform)
     train_sampler   = OnlineSampler(train_dataset, args.n_tasks, args.m, args.n, args.rnd_seed, 0)
 
+    num_eval = args.eval_period
     for cur_iter in range(args.n_tasks):
-        
         if args.mode == "joint" and cur_iter > 0:
             return
         print("\n" + "#" * 50)
@@ -135,20 +138,21 @@ def main():
         logger.info("[2-1] Prepare a datalist for the current task")
 
         train_sampler.set_task(cur_iter)
-        train_dataloader= DataLoader(train_dataset, batch_size=1, sampler=train_sampler, num_workers=4)
+        train_dataloader= DataLoader(train_dataset, batch_size=args.batchsize, sampler=train_sampler, num_workers=4)
 
         # Reduce datalist in Debug mode
         # if args.debug:
         #     train_dataloader = train_dataloader[:2000]
         #     test_dataloader  = test_dataloader[:2000]
-
         method.online_before_task(cur_iter)
         for i, data in enumerate(train_dataloader):
-            if i == 2000 and args.debug: break
-            samples_cnt += 1
+            if args.debug and i == 2000 : break
+            samples_cnt += args.batchsize
             method.online_step(data, samples_cnt, args.n_worker)
-            if samples_cnt % args.eval_period == 0:
-                test_sampler = OnlineTestSampler(test_dataset, method.exposed_classes, rnd_seed=args.rnd_seed)
+            if samples_cnt > num_eval:
+            # if samples_cnt % args.eval_period == 0:
+                num_eval += args.eval_period
+                test_sampler = OnlineTestSampler(test_dataset, method.exposed_classes)
                 test_dataloader = DataLoader(test_dataset, batch_size=512, sampler=test_sampler, num_workers=4)
                 eval_dict = method.online_evaluate(test_dataloader, samples_cnt)
                 eval_results["test_acc"].append(eval_dict['avg_acc'])
@@ -156,7 +160,7 @@ def main():
                 eval_results["data_cnt"].append(samples_cnt)
         method.online_after_task(cur_iter)
         
-        test_sampler = OnlineTestSampler(test_dataset, method.exposed_classes, rnd_seed=args.rnd_seed)
+        test_sampler = OnlineTestSampler(test_dataset, method.exposed_classes)
         test_dataloader = DataLoader(test_dataset, batch_size=512, sampler=test_sampler, num_workers=4)
         eval_dict = method.online_evaluate(test_dataloader, samples_cnt)
         task_acc = eval_dict['avg_acc']

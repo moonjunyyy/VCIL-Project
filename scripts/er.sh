@@ -1,17 +1,16 @@
 #!/bin/bash
 
-#SBATCH -J ER_iblurry_cifar100
+#SBATCH -J ER_iblurry_cifar10
 #SBATCH -p batch
 #SBATCH --nodes=1
 #SBATCH --gres=gpu:1
 #SBATCH --cpus-per-gpu=4
 #SBATCH --mem-per-gpu=16G
 #SBATCH --time=14-0
-#SBATCH -o /home/junyeong/%x_%j.log
-#SBATCH -e /home/junyeong/%x_%j.err
+#SBATCH -o %x_%j.log
+#SBATCH -e %x_%j.err
 
 date
-seeds=(1 21 42 3473 10741 32450 93462 85015 64648 71950 87557 99668 55552 4811 10741)
 ulimit -n 65536
 ### change 5-digit MASTER_PORT as you wish, slurm will raise Error if duplicated with others
 ### change WORLD_SIZE as gpus/node * num_nodes
@@ -32,12 +31,12 @@ conda --version
 python --version
 
 # CIL CONFIG
-NOTE="er" # Short description of the experiment. (WARNING: logs/results with the same note will be overwritten!)
+NOTE="ER_iblurry_cifar10" # Short description of the experiment. (WARNING: logs/results with the same note will be overwritten!)
 MODE="er"
-DATASET="cifar100" # cifar10, cifar100, tinyimagenet, imagenet
+DATASET="cifar10" # cifar10, cifar100, tinyimagenet, imagenet
 N_TASKS=5
-N=10
-M=10
+N=50
+M=8
 GPU_TRANSFORM="--gpu_transform"
 USE_AMP="--use_amp"
 SEEDS="1 2 3"
@@ -76,6 +75,6 @@ do
     --rnd_seed $RND_SEED \
     --model_name $MODEL_NAME --opt_name $OPT_NAME --sched_name $SCHED_NAME \
     --lr $LR --batchsize $BATCHSIZE \
-    --memory_size $MEM_SIZE $GPU_TRANSFORM --online_iter $ONLINE_ITER --data_dir /local_datasets/ --log_path /home/junyeong/log/ \
+    --memory_size $MEM_SIZE $GPU_TRANSFORM --online_iter $ONLINE_ITER --data_dir /local_datasets \
     --note $NOTE --eval_period $EVAL_PERIOD $USE_AMP
 done

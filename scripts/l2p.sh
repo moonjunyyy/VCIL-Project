@@ -1,18 +1,16 @@
 #!/bin/bash
 
-
-#SBATCH -J L2P_re_vit_iblurry_cifar100
+#SBATCH -J L2P_iblurry_cifar10
 #SBATCH -p batch
 #SBATCH --nodes=1
 #SBATCH --gres=gpu:1
 #SBATCH --cpus-per-gpu=4
 #SBATCH --mem-per-gpu=16G
-#SBATCH --time=4-0
-#SBATCH -o %x_%j.out
-
+#SBATCH --time=14-0
+#SBATCH -o %x_%j.log
+#SBATCH -e %x_%j.err
 
 date
-# seeds=(1 21 42 3473 10741 32450 93462 85015 64648 71950 87557 99668 55552 4811 10741)
 ulimit -n 65536
 ### change 5-digit MASTER_PORT as you wish, slurm will raise Error if duplicated with others
 ### change WORLD_SIZE as gpus/node * num_nodes
@@ -33,7 +31,7 @@ conda --version
 python --version
 
 # CIL CONFIG
-NOTE="[L2P_2]_iblurry_cifar100_3epoch" # Short description of the experiment. (WARNING: logs/results with the same note will be overwritten!)
+NOTE="L2P_iblurry_cifar100_3epoch" # Short description of the experiment. (WARNING: logs/results with the same note will be overwritten!)
 MODE="L2P"
 DATASET="cifar100" # cifar10, cifar100, tinyimagenet, imagenet
 N_TASKS=10
@@ -50,7 +48,7 @@ if [ "$DATASET" == "cifar10" ]; then
     BATCHSIZE=16; LR=0.05 OPT_NAME="sgd" SCHED_NAME="cos" MEMORY_EPOCH=256
 
 elif [ "$DATASET" == "cifar100" ]; then
-    MEM_SIZE=2000 ONLINE_ITER=3
+    MEM_SIZE=2000 ONLINE_ITER=5
     MODEL_NAME="resnet34" EVAL_PERIOD=100
     BATCHSIZE=16; LR=0.03 OPT_NAME="sgd" SCHED_NAME="cos" MEMORY_EPOCH=256
 
@@ -77,6 +75,6 @@ do
     --rnd_seed $RND_SEED \
     --model_name $MODEL_NAME --opt_name $OPT_NAME --sched_name $SCHED_NAME \
     --lr $LR --batchsize $BATCHSIZE \
-    --memory_size $MEM_SIZE $GPU_TRANSFORM --online_iter $ONLINE_ITER --data_dir /local_datasets/puridiver/cifar100 --log_path /home/junyeong/log/ \
+    --memory_size $MEM_SIZE $GPU_TRANSFORM --online_iter $ONLINE_ITER --data_dir /local_datasets\
     --note $NOTE --eval_period $EVAL_PERIOD --memory_epoch $MEMORY_EPOCH $USE_AMP
 done

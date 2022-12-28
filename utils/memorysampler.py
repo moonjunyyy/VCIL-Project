@@ -2,17 +2,15 @@ import torch
 from torch.utils.data.sampler import Sampler
 from typing import Optional, Sized
 
-class OnlineSampler(Sampler):
+class MemorySampler(Sampler):
     def __init__(self, data_source: Optional[Sized], num_tasks, m, n, rnd_seed, cur_iter) -> None:
-
         self.data_source    = data_source
         self.classes    = self.data_source.classes
         self.targets    = self.data_source.targets
         self.generator  = torch.Generator().manual_seed(rnd_seed)
-        
         self.n  = n
         self.m  = m
-        self.disjoint_num   = len(self.classes) * n // 100
+        self.disjoint_num   = len(self.classes) * n / 100
         self.disjoint_num   = int(self.disjoint_num // num_tasks) * num_tasks
         self.blurry_num     = len(self.classes) - self.disjoint_num
         self.blurry_num     = int(self.blurry_num // num_tasks) * num_tasks
@@ -24,8 +22,6 @@ class OnlineSampler(Sampler):
         self.blurry_classes     = class_order[self.disjoint_num:self.disjoint_num + self.blurry_num]
         self.blurry_classes     = self.blurry_classes.reshape(num_tasks, -1).tolist()
 
-        print("disjoint classes: ", self.disjoint_classes)
-        print("blurry classes: ", self.blurry_classes)
         # Get indices of disjoint and blurry classes
         self.disjoint_indices   = [[] for _ in range(num_tasks)]
         self.blurry_indices     = [[] for _ in range(num_tasks)]
@@ -33,10 +29,8 @@ class OnlineSampler(Sampler):
             for j in range(num_tasks):
                 if self.targets[i] in self.disjoint_classes[j]:
                     self.disjoint_indices[j].append(i)
-                    break
                 elif self.targets[i] in self.blurry_classes[j]:
                     self.blurry_indices[j].append(i)
-                    break
 
         # Randomly shuffle M% of blurry indices
         blurred = []
@@ -45,7 +39,7 @@ class OnlineSampler(Sampler):
             self.blurry_indices[i] = self.blurry_indices[i][len(self.blurry_indices[i]) * m // 100:]
         blurred = torch.tensor(blurred)
         blurred = blurred[torch.randperm(len(blurred), generator=self.generator)].tolist()
-        print("blurry indices: ", len(blurred))
+
         num_blurred = len(blurred) // num_tasks
         for i in range(num_tasks):
             self.blurry_indices[i] += blurred[:num_blurred]
@@ -71,13 +65,14 @@ class OnlineSampler(Sampler):
 
 
 class OnlineTestSampler(Sampler):
-    def __init__(self, data_source: Optional[Sized], exposed_class) -> None:
+    def __init__(self, data_source: Optional[Sized], exposed_class, rnd_seed) -> None:
         self.data_source    = data_source
         self.classes    = self.data_source.classes
         self.targets    = self.data_source.targets
+        self.generator  = torch.Generator().manual_seed(rnd_seed)
         self.exposed_class  = exposed_class
         self.indices    = [i for i in range(self.data_source.__len__()) if self.targets[i] in self.exposed_class]
-
+        
     def __iter__(self):
         return iter(self.indices)
 
