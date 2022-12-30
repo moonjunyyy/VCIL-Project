@@ -9,18 +9,34 @@ import torch
 from randaugment import RandAugment
 from torch import nn
 from torch.utils.tensorboard import SummaryWriter
+from torch.utils.data import DataLoader, SequentialSampler
 from torchvision import transforms
 
 from configuration import config
+from utils.onlinesampler import OnlineSampler, OnlineTestSampler
 from utils.augment import Cutout, select_autoaugment
 from utils.data_loader import get_test_datalist, get_statistics
 from utils.data_loader import get_train_datalist
 from utils.method_manager import select_method
+from datasets import *
 
+datasets = {
+        "cifar10": CIFAR10,
+        "cifar100": CIFAR100,
+        "svhn": SVHN,
+        "fashionmnist": FashionMNIST,
+        "mnist": MNIST,
+        "tinyimagenet": TinyImageNet,
+        "notmnist": NotMNIST,
+        "cub200": CUB200,
+        "imagenet": ImageNet
+    }
 
 def main():
+    # Get Configurations
     args = config.base_parser()
-
+    
+    # Set the logger
     logging.config.fileConfig("./configuration/logging.conf")
     logger = logging.getLogger()
 
@@ -34,7 +50,7 @@ def main():
     fileHandler.setFormatter(formatter)
     logger.addHandler(fileHandler)
 
-    writer = SummaryWriter(f'tensorboard/{args.dataset}/{args.note}/seed_{args.rnd_seed}')
+    writer = SummaryWriter(f'{args.log_path}/tensorboard/{args.dataset}/{args.note}/seed_{args.rnd_seed}')
 
     logger.info(args)
 
@@ -56,6 +72,8 @@ def main():
 
     # Transform Definition
     mean, std, n_classes, inp_size, _ = get_statistics(dataset=args.dataset)
+    if args.model_name == 'vit':
+        inp_size = 224
     train_transform = []
     if "cutout" in args.transforms:
         train_transform.append(Cutout(size=16))
@@ -72,25 +90,19 @@ def main():
             train_transform.append(transforms.AutoAugment(transforms.AutoAugmentPolicy('cifar10')))
         elif 'imagenet' in args.dataset:
             train_transform.append(transforms.AutoAugment(transforms.AutoAugmentPolicy('imagenet')))
-    if args.gpu_transform:
-        train_transform = transforms.Compose([
+        elif 'svhn' in args.dataset:
+            train_transform.append(transforms.AutoAugment(transforms.AutoAugmentPolicy('svhn')))
+            
+    train_transform = transforms.Compose(
+        [
+            transforms.Resize((inp_size, inp_size)),
             transforms.RandomCrop(inp_size, padding=4),
             transforms.RandomHorizontalFlip(),
             *train_transform,
-            transforms.ConvertImageDtype(torch.float32),
+            transforms.ToTensor(),
             transforms.Normalize(mean, std),
-        ])
-    else:
-        train_transform = transforms.Compose(
-            [
-                transforms.Resize((inp_size, inp_size)),
-                transforms.RandomCrop(inp_size, padding=4),
-                transforms.RandomHorizontalFlip(),
-                *train_transform,
-                transforms.ToTensor(),
-                transforms.Normalize(mean, std),
-            ]
-        )
+        ]
+    )
     logger.info(f"Using train-transforms {train_transform}")
 
     test_transform = transforms.Compose(
@@ -111,37 +123,48 @@ def main():
     task_records = defaultdict(list)
     eval_results = defaultdict(list)
     samples_cnt = 0
-    test_datalist = get_test_datalist(args.dataset)
 
+    test_dataset = get_test_datalist(args.dataset)
+    train_dataset   = datasets[args.dataset](root=args.data_dir, train=True,  download=True, 
+                                             transform=transforms.ToTensor())
+    test_dataset    = datasets[args.dataset](root=args.data_dir, train=False, download=True, transform=test_transform)
+    train_sampler   = OnlineSampler(train_dataset, args.n_tasks, args.m, args.n, args.rnd_seed, 0)
+
+    num_eval = args.eval_period
     for cur_iter in range(args.n_tasks):
         if args.mode == "joint" and cur_iter > 0:
             return
-
         print("\n" + "#" * 50)
         print(f"# Task {cur_iter} iteration")
         print("#" * 50 + "\n")
         logger.info("[2-1] Prepare a datalist for the current task")
 
-        # get datalist
-        cur_train_datalist = get_train_datalist(args.dataset, args.n_tasks, args.m, args.n, args.rnd_seed, cur_iter)
+        train_sampler.set_task(cur_iter)
+        train_dataloader= DataLoader(train_dataset, batch_size=args.batchsize, sampler=train_sampler, num_workers=4)
 
         # Reduce datalist in Debug mode
-        if args.debug:
-            cur_train_datalist = cur_train_datalist[:2000]
-            random.shuffle(test_datalist)
-            test_datalist = test_datalist[:2000]
-
+        # if args.debug:
+        #     train_dataloader = train_dataloader[:2000]
+        #     test_dataloader  = test_dataloader[:2000]
         method.online_before_task(cur_iter)
-        for i, data in enumerate(cur_train_datalist):
-            samples_cnt += 1
+        for i, data in enumerate(train_dataloader):
+            if args.debug and i == 2000 : break
+            samples_cnt += args.batchsize
             method.online_step(data, samples_cnt, args.n_worker)
-            if samples_cnt % args.eval_period == 0:
-                eval_dict = method.online_evaluate(test_datalist, samples_cnt, 512, args.n_worker)
+            if samples_cnt > num_eval:
+            # if samples_cnt % args.eval_period == 0:
+                num_eval += args.eval_period
+                test_sampler = OnlineTestSampler(test_dataset, method.exposed_classes)
+                test_dataloader = DataLoader(test_dataset, batch_size=512, sampler=test_sampler, num_workers=4)
+                eval_dict = method.online_evaluate(test_dataloader, samples_cnt)
                 eval_results["test_acc"].append(eval_dict['avg_acc'])
                 eval_results["avg_acc"].append(eval_dict['cls_acc'])
                 eval_results["data_cnt"].append(samples_cnt)
         method.online_after_task(cur_iter)
-        eval_dict = method.online_evaluate(test_datalist, samples_cnt, 512, args.n_worker)
+        
+        test_sampler = OnlineTestSampler(test_dataset, method.exposed_classes)
+        test_dataloader = DataLoader(test_dataset, batch_size=512, sampler=test_sampler, num_workers=4)
+        eval_dict = method.online_evaluate(test_dataloader, samples_cnt)
         task_acc = eval_dict['avg_acc']
 
         logger.info("[2-4] Update the information for the current task")
@@ -154,7 +177,7 @@ def main():
     np.save(f"{args.log_path}/logs/{args.dataset}/{args.note}/seed_{args.rnd_seed}.npy", task_records["task_acc"])
 
     if args.mode == 'gdumb':
-        eval_results, task_records = method.evaluate_all(test_datalist, args.memory_epoch, args.batchsize, args.n_worker)
+        eval_results, task_records = method.evaluate_all(test_dataset, args.memory_epoch, args.batchsize, args.n_worker)
     if args.eval_period is not None:
         np.save(f'{args.log_path}/logs/{args.dataset}/{args.note}/seed_{args.rnd_seed}_eval.npy', eval_results['test_acc'])
         np.save(f'{args.log_path}/logs/{args.dataset}/{args.note}/seed_{args.rnd_seed}_eval_time.npy', eval_results['data_cnt'])

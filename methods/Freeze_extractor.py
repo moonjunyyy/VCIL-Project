@@ -93,20 +93,20 @@ class Freeze_extractor:
         self.total_samples = num_samples[self.dataset]
 
     def online_step(self, sample, sample_num, n_worker):
-        if sample['klass'] not in self.exposed_classes:
-            self.add_new_class(sample['klass'])
+        image, label = sample
+        for l in label:
+            if l.item() not in self.exposed_classes:
+                self.add_new_class(l.item())
 
-        self.temp_batch.append(sample)
-        self.num_updates += self.online_iter
-
-        if len(self.temp_batch) == self.temp_batchsize:
-            train_loss, train_acc = self.online_train(self.temp_batch, self.batch_size, n_worker,
-                                                      iterations=int(self.num_updates), stream_batch_size=self.temp_batchsize)
-            self.report_training(sample_num, train_loss, train_acc)
-            for stored_sample in self.temp_batch:
-                self.update_memory(stored_sample)
-            self.temp_batch = []
-            self.num_updates -= int(self.num_updates)
+        self.num_updates += self.online_iter * self.batch_size
+        # if len(self.temp_batch) == self.temp_batchsize:
+        train_loss, train_acc = self.online_train([image, label], self.batch_size * 2, n_worker,
+                                                    iterations=int(self.num_updates), stream_batch_size=self.batch_size)
+        self.report_training(sample_num, train_loss, train_acc)
+        for stored_sample, stored_label in zip(image, label):
+            self.update_memory((stored_sample, stored_label))
+        self.temp_batch = []
+        self.num_updates -= int(self.num_updates)
 
     def add_new_class(self, class_name):
         self.exposed_classes.append(class_name)
@@ -128,30 +128,32 @@ class Freeze_extractor:
 
     def online_train(self, sample, batch_size, n_worker, iterations=1, stream_batch_size=1):
         total_loss, correct, num_data = 0.0, 0.0, 0.0
-        if stream_batch_size > 0:
-            sample_dataset = StreamDataset(sample, dataset=self.dataset, transform=self.train_transform,
-                                           cls_list=self.exposed_classes, data_dir=self.data_dir, device=self.device,
-                                           transform_on_gpu=self.gpu_transform)
-        if len(self.memory) > 0 and batch_size - stream_batch_size > 0:
-            memory_batch_size = min(len(self.memory), batch_size - stream_batch_size)
+        # if stream_batch_size > 0:
+        #     sample_dataset = StreamDataset(sample, transform=self.train_transform, cls_list=self.exposed_classes)
+
+        # if len(self.memory) > 0 and batch_size - stream_batch_size > 0:
+        #     memory_batch_size = min(len(self.memory), batch_size - stream_batch_size)
 
         for i in range(iterations):
             self.model.train()
-            x = []
-            y = []
-            if stream_batch_size > 0:
-                stream_data = sample_dataset.get_data()
-                x.append(stream_data['image'])
-                y.append(stream_data['label'])
-            if len(self.memory) > 0 and batch_size - stream_batch_size > 0:
-                memory_data = self.memory.get_batch(memory_batch_size)
-                x.append(memory_data['image'])
-                y.append(memory_data['label'])
-            x = torch.cat(x)
-            y = torch.cat(y)
+            # x = []
+            # y = []
+            x, y = sample
+            x = torch.cat([self.train_transform(transforms.ToPILImage()(img)).unsqueeze(0) for img in x])
+            y = torch.cat([torch.tensor([self.exposed_classes.index(label)]) for label in y])
+            # if stream_batch_size > 0:
+            #     # sample = sample_dataset.get_data()
+            #     x.append(sample['image'])
+            #     y.append(sample['label'])
+            if len(self.memory) > 0:
+                memory_data = self.memory.get_batch(y.size(0))
+                x = torch.cat([x, memory_data['image']])
+                y = torch.cat([y, memory_data['label']])
+                # x.append(memory_data['image'])
+                # y.append(memory_data['label'])
+            # x = torch.cat([x])
+            # y = torch.cat([y])
 
-            # x = transforms.Resize((224,224))
-            
             x = x.to(self.device)
             y = y.to(self.device)
             # print("[Target shape]",y.shape)
@@ -281,8 +283,9 @@ class Freeze_extractor:
         self.model.eval()
         with torch.no_grad():
             for i, data in enumerate(test_loader):
-                x = data["image"]
-                y = data["label"]
+                x, y = data
+                for j in range(len(y)):
+                    y[j] = self.exposed_classes.index(y[j].item())
                 x = x.to(self.device)
                 y = y.to(self.device)
                 # logit = self.model(x)['logits']

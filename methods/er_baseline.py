@@ -9,6 +9,7 @@ import pandas as pd
 import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader
+import torchvision.transforms as transforms
 from torch.utils.tensorboard import SummaryWriter
 from torch import optim
 
@@ -24,7 +25,6 @@ def cycle(iterable):
     while True:
         for i in iterable:
             yield i
-
 
 class ER:
     def __init__(
@@ -55,11 +55,13 @@ class ER:
 
         self.online_iter = kwargs["online_iter"]
         self.batch_size = kwargs["batchsize"]
+        
         self.temp_batchsize = kwargs["temp_batchsize"]
         if self.temp_batchsize is None:
             self.temp_batchsize = self.batch_size//2
         if self.temp_batchsize > self.batch_size:
             self.temp_batchsize = self.batch_size
+        
         self.memory_size -= self.temp_batchsize
 
         self.gpu_transform = kwargs["gpu_transform"]
@@ -73,13 +75,14 @@ class ER:
             self.lr_gamma = 0.99995
         else:
             self.lr_gamma = 0.9999
+
         self.scheduler = select_scheduler(self.sched_name, self.optimizer, self.lr_gamma)
 
         self.criterion = criterion.to(self.device)
-        self.memory = MemoryDataset(self.dataset, self.train_transform, self.exposed_classes,
-                                    test_transform=self.test_transform, data_dir=self.data_dir, device=self.device,
-                                    transform_on_gpu=self.gpu_transform)
+        self.memory = MemoryDataset(self.train_transform, cls_list=self.exposed_classes,
+                                    test_transform=self.test_transform)
         self.temp_batch = []
+        self.temp_label = []
         self.num_updates = 0
         self.train_count = 0
         self.batch_size = kwargs["batchsize"]
@@ -89,20 +92,20 @@ class ER:
         self.total_samples = num_samples[self.dataset]
 
     def online_step(self, sample, sample_num, n_worker):
-        if sample['klass'] not in self.exposed_classes:
-            self.add_new_class(sample['klass'])
+        image, label = sample
+        for l in label:
+            if l.item() not in self.exposed_classes:
+                self.add_new_class(l.item())
 
-        self.temp_batch.append(sample)
-        self.num_updates += self.online_iter
-
-        if len(self.temp_batch) == self.temp_batchsize:
-            train_loss, train_acc = self.online_train(self.temp_batch, self.batch_size, n_worker,
-                                                      iterations=int(self.num_updates), stream_batch_size=self.temp_batchsize)
-            self.report_training(sample_num, train_loss, train_acc)
-            for stored_sample in self.temp_batch:
-                self.update_memory(stored_sample)
-            self.temp_batch = []
-            self.num_updates -= int(self.num_updates)
+        self.num_updates += self.online_iter * self.batch_size
+        # if len(self.temp_batch) == self.temp_batchsize:
+        train_loss, train_acc = self.online_train([image, label], self.batch_size * 2, n_worker,
+                                                    iterations=int(self.num_updates), stream_batch_size=self.batch_size)
+        self.report_training(sample_num, train_loss, train_acc)
+        for stored_sample, stored_label in zip(image, label):
+            self.update_memory((stored_sample, stored_label))
+        self.temp_batch = []
+        self.num_updates -= int(self.num_updates)
 
     def add_new_class(self, class_name):
         self.exposed_classes.append(class_name)
@@ -124,30 +127,34 @@ class ER:
 
     def online_train(self, sample, batch_size, n_worker, iterations=1, stream_batch_size=1):
         total_loss, correct, num_data = 0.0, 0.0, 0.0
-        if stream_batch_size > 0:
-            sample_dataset = StreamDataset(sample, dataset=self.dataset, transform=self.train_transform,
-                                           cls_list=self.exposed_classes, data_dir=self.data_dir, device=self.device,
-                                           transform_on_gpu=self.gpu_transform)
+        # sample = self.train_transform(sample)
+
+        # if stream_batch_size > 0:
+        #     sample_dataset = StreamDataset(sample, transform=self.train_transform, cls_list=self.exposed_classes)
+
         if len(self.memory) > 0 and batch_size - stream_batch_size > 0:
             memory_batch_size = min(len(self.memory), batch_size - stream_batch_size)
         
         for i in range(iterations):
             self.model.train()
-            x = []
-            y = []
-            if stream_batch_size > 0:
-                # print("stream_data")
-                stream_data = sample_dataset.get_data()
-                x.append(stream_data['image'])
-                y.append(stream_data['label'])
+            # x = []
+            # y = []
+            x, y = sample
+            x = torch.cat([self.train_transform(transforms.ToPILImage()(img)).unsqueeze(0) for img in x])
+            y = torch.cat([torch.tensor([self.exposed_classes.index(label.item())]) for label in y])
+            # if stream_batch_size > 0:
+            #     # sample = sample_dataset.get_data()
+            #     x.append(sample['image'])
+            #     y.append(sample['label'])
             if len(self.memory) > 0 and batch_size - stream_batch_size > 0:
                 # print("memory_data")
                 memory_data = self.memory.get_batch(memory_batch_size)
-                x.append(memory_data['image'])
-                y.append(memory_data['label'])
-            x = torch.cat(x)
-            y = torch.cat(y)
-
+                x = torch.cat([x, memory_data['image']])
+                y = torch.cat([y, memory_data['label']])
+                # x.append(memory_data['image'])
+                # y.append(memory_data['label'])
+            # x = torch.cat([x])
+            # y = torch.cat([y])
             x = x.to(self.device)
             y = y.to(self.device)
 
@@ -222,22 +229,7 @@ class ER:
         else:
             self.scheduler.step()
 
-    def online_evaluate(self, test_list, sample_num, batch_size, n_worker):
-        test_df = pd.DataFrame(test_list)
-        exp_test_df = test_df[test_df['klass'].isin(self.exposed_classes)]
-        test_dataset = ImageDataset(
-            exp_test_df,
-            dataset=self.dataset,
-            transform=self.test_transform,
-            cls_list=self.exposed_classes,
-            data_dir=self.data_dir
-        )
-        test_loader = DataLoader(
-            test_dataset,
-            shuffle=True,
-            batch_size=batch_size,
-            num_workers=n_worker,
-        )
+    def online_evaluate(self, test_loader, sample_num):
         eval_dict = self.evaluation(test_loader, self.criterion)
         self.report_test(sample_num, eval_dict["avg_loss"], eval_dict["avg_acc"])
         return eval_dict
@@ -273,16 +265,17 @@ class ER:
         self.model.eval()
         with torch.no_grad():
             for i, data in enumerate(test_loader):
-                x = data["image"]
-                y = data["label"]
+                x, y = data
+                for j in range(len(y)):
+                    y[j] = self.exposed_classes.index(y[j].item())
+
                 x = x.to(self.device)
                 y = y.to(self.device)
-                logit = self.model(x)
 
+                logit = self.model(x)
                 loss = criterion(logit, y)
                 pred = torch.argmax(logit, dim=-1)
                 _, preds = logit.topk(self.topk, 1, True, True)
-
                 total_correct += torch.sum(preds == y.unsqueeze(1)).item()
                 total_num_data += y.size(0)
 
@@ -296,8 +289,8 @@ class ER:
         avg_acc = total_correct / total_num_data
         avg_loss = total_loss / len(test_loader)
         cls_acc = (correct_l / (num_data_l + 1e-5)).numpy().tolist()
+        
         ret = {"avg_loss": avg_loss, "avg_acc": avg_acc, "cls_acc": cls_acc}
-
         return ret
 
     def _interpret_pred(self, y, pred):

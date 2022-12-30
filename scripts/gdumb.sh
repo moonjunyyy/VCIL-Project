@@ -1,4 +1,14 @@
-#/bin/bash
+#!/bin/bash
+
+#SBATCH -J gdumb_iblurry_cifar10
+#SBATCH -p batch
+#SBATCH --nodes=1
+#SBATCH --gres=gpu:1
+#SBATCH --cpus-per-gpu=4
+#SBATCH --mem-per-gpu=16G
+#SBATCH --time=14-0
+#SBATCH -o %x_%j.log
+#SBATCH -e %x_%j.err
 
 # CIL CONFIG
 NOTE="gdumb" # Short description of the experiment. (WARNING: logs/results with the same note will be overwritten!)
@@ -47,6 +57,6 @@ do
     --rnd_seed $RND_SEED \
     --model_name $MODEL_NAME --opt_name $OPT_NAME --sched_name $SCHED_NAME \
     --lr $LR --batchsize $BATCHSIZE \
-    --memory_size $MEM_SIZE $GPU_TRANSFORM --online_iter $ONLINE_ITER \
+    --memory_size $MEM_SIZE $GPU_TRANSFORM --online_iter $ONLINE_ITER  --data_dir /local_datasets \
     --note $NOTE --eval_period $EVAL_PERIOD --num_gpus $NUM_GPUS --workers_per_gpu $WORKERS_PER_GPU --memory_epoch $MEMORY_EPOCH $UES_AMP
 done

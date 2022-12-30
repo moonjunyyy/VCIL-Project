@@ -1,20 +1,35 @@
 #!/bin/bash
-#SBATCH -J CLIB_SGD_test_iblurry_cifar100
+
+#SBATCH -J CLIB_iblurry_Tinyimg_N50_M10
 #SBATCH -p batch
 #SBATCH --nodes=1
-#SBATCH -w agi1
 #SBATCH --gres=gpu:1
 #SBATCH --cpus-per-gpu=4
 #SBATCH --mem-per-gpu=16G
-#SBATCH --time=4-0
-#SBATCH -o %x_%j.out
+#SBATCH --time=14-0
+#SBATCH -o %x_%j.log
+#SBATCH -e %x_%j.err
+
+
 date
-# seeds=(1 21 42 3473 10741 32450 93462 85015 64648 71950 87557 99668 55552 4811 10741)
 ulimit -n 65536
 ### change 5-digit MASTER_PORT as you wish, slurm will raise Error if duplicated with others
 ### change WORLD_SIZE as gpus/node * num_nodes
 export MASTER_PORT=$(($RANDOM+32769))
 export WORLD_SIZE=$SLURM_NNODES
+
+### get the first node name as master address - customized for vgg slurm
+### e.g. master(gnodee[2-5],gnoded1) == gnodee2
+echo "NODELIST="${SLURM_NODELIST}
+master_addr=$(scontrol show hostnames "$SLURM_JOB_NODELIST" | head -n 1)
+export MASTER_ADDR=$master_addr
+echo "MASTER_ADDR="$MASTER_ADDR
+
+source /data/junyeong/init.sh
+conda activate iblurry
+
+conda --version
+python --version
 
 ### get the first node name as master address - customized for vgg slurm
 ### e.g. master(gnodee[2-5],gnoded1) == gnodee2
@@ -29,10 +44,10 @@ conda activate torch38gpu
 conda --version
 python --version
 # CIL CONFIG
-NOTE="[clib-test]_iblurry_cifar100_3epoch" # Short description of the experiment. (WARNING: logs/results with the same note will be overwritten!)
+NOTE="CLIB_iblurry_Tinyimg_N50_M10" # Short description of the experiment. (WARNING: logs/results with the same note will be overwritten!)
 MODE="clib"
-DATASET="cifar100" # cifar10, cifar100, tinyimagenet, imagenet
-N_TASKS=10  # default: 5
+DATASET="cifar10" # cifar10, cifar100, tinyimagenet, imagenet
+N_TASKS=5
 N=50
 M=10
 GPU_TRANSFORM="--gpu_transform"
@@ -72,6 +87,6 @@ do
     --rnd_seed $RND_SEED \
     --model_name $MODEL_NAME --opt_name $OPT_NAME --sched_name $SCHED_NAME \
     --lr $LR --batchsize $BATCHSIZE \
-    --memory_size $MEM_SIZE $GPU_TRANSFORM --online_iter $ONLINE_ITER --data_dir /local_datasets/VCIL/$DATASET \
-    --note $NOTE --eval_period $EVAL_PERIOD --imp_update_period $IMP_UPDATE_PERIOD $USE_AMP --debug
+    --memory_size $MEM_SIZE $GPU_TRANSFORM --online_iter $ONLINE_ITER --data_dir /local_datasets \
+    --note $NOTE --eval_period $EVAL_PERIOD --imp_update_period $IMP_UPDATE_PERIOD $USE_AMP
 done
