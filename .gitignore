@@ -9,3 +9,4 @@ cifar100_png/
 *.out
 *.png
 *.tar
+test.py
