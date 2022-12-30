@@ -40,24 +40,23 @@ class RM(ER):
         self.n_worker = kwargs["n_worker"]
         self.data_cnt = 0
 
+    
     def online_step(self, sample, sample_num, n_worker):
-        
         image, label = sample
         for l in label:
-            if l not in self.exposed_classes:
+            if l.item() not in self.exposed_classes:
                 self.add_new_class(l.item())
+                print(self.exposed_classes)
 
-        self.num_updates += self.online_iter
-
+        self.num_updates += self.online_iter * self.batch_size
         # if len(self.temp_batch) == self.temp_batchsize:
-        train_loss, train_acc = self.online_train([image, label], self.batch_size, n_worker,
+        train_loss, train_acc = self.online_train([image, label], self.batch_size * 2, n_worker,
                                                     iterations=int(self.num_updates), stream_batch_size=self.batch_size)
         self.report_training(sample_num, train_loss, train_acc)
         for stored_sample, stored_label in zip(image, label):
             self.update_memory((stored_sample, stored_label))
         self.temp_batch = []
         self.num_updates -= int(self.num_updates)
-
 
     def add_new_class(self, class_name):
         self.exposed_classes.append(class_name)

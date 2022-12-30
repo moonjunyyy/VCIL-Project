@@ -9,6 +9,9 @@ from methods.clib import CLIB
 from methods.L2P import L2P
 from methods.Finetuning import Finetuning
 from methods.Freeze_extractor import Freeze_extractor
+from methods.clib_ViT import CLIB_ViT
+# from methods.er_baseline_ViT import ER_ViT
+# from methods.rainbow_memory_ViT import RM_ViT
 
 logger = logging.getLogger()
 
@@ -106,6 +109,16 @@ def select_method(args, criterion, device, train_transform, test_transform, n_cl
             n_classes=n_classes,
             **kwargs,
         )
+    elif args.mode == "clib_vit":
+        method = CLIB_ViT(
+            criterion=criterion,
+            device=device,
+            train_transform=train_transform,
+            test_transform=test_transform,
+            n_classes=n_classes,
+            **kwargs,
+        )
+
     else:
         raise NotImplementedError("Choose the args.mode in [er, gdumb, rm, bic, ewc++, mir, clib]")
 

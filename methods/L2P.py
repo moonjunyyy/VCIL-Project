@@ -159,9 +159,11 @@ class L2P_Model(nn.Module):
         for name, param in self.backbone.named_parameters():
             if 'head' not in name:
                 param.requires_grad = False
-        # self.backbone.head.weight.requires_grad = True
-        # self.backbone.head.bias.requires_grad   = True
+        self.backbone.head.weight.requires_grad = True
+        self.backbone.head.bias.requires_grad   = True
 
+        self.head = self.backbone.head
+        
         self.prompt = Prompt(
             pool_size,
             selection_size,
@@ -218,35 +220,78 @@ class L2P(ER):
     def __init__(
             self, criterion, device, train_transform, test_transform, n_classes, **kwargs
     ):
-        super().__init__(
-            criterion, device, train_transform, test_transform, n_classes, **kwargs)
+        self.num_learned_class = 0
+        self.num_learning_class = 1
+        self.n_classes = n_classes
+        self.exposed_classes = []
+        self.seen = 0
+        self.topk = kwargs["topk"]
 
-        self.data_cnt       = 0
+        self.device = device
+        self.dataset = kwargs["dataset"]
+        self.model_name = kwargs["model_name"]
+        self.opt_name = kwargs["opt_name"]
+        self.sched_name = kwargs["sched_name"]
+        if self.sched_name == "default":
+            self.sched_name = 'exp_reset'
+        self.lr = kwargs["lr"]
 
-        self.sched_name     = "const"
-        self.batch_size     = kwargs["batchsize"]
-        self.n_worker       = kwargs["n_worker"]
+        self.train_transform = train_transform
+        self.cutmix = "cutmix" in kwargs["transforms"]
+        self.test_transform = test_transform
+
+        self.memory_size = kwargs["memory_size"]
+        self.data_dir = kwargs["data_dir"]
+
+        self.online_iter = kwargs["online_iter"]
+        self.batch_size = kwargs["batchsize"]
+        
+        self.temp_batchsize = kwargs["temp_batchsize"]
+        if self.temp_batchsize is None:
+            self.temp_batchsize = self.batch_size//2
+        if self.temp_batchsize > self.batch_size:
+            self.temp_batchsize = self.batch_size
+        
+        self.memory_size -= self.temp_batchsize
+
+        self.gpu_transform = kwargs["gpu_transform"]
+        self.use_amp = kwargs["use_amp"]
+        if self.use_amp:
+            self.scaler = torch.cuda.amp.GradScaler()
+
 
         self.model = L2P_Model(backbone_name='vit_base_patch16_224_l2p', class_num=1).to(self.device)
         self.criterion = self.model.loss_fn
 
         params = [param for name, param in self.model.named_parameters() if 'head' not in name]
-        self.optimizer = optim.Adam(params, lr=self.lr, weight_decay=0)
-        self.optimizer.add_param_group({'params': self.model.backbone.head.parameters()})
+        self.optimizer = select_optimizer(self.opt_name, self.lr, self.model, True)
+        if 'imagenet' in self.dataset:
+            self.lr_gamma = 0.99995
+        else:
+            self.lr_gamma = 0.9999
+        # self.optimizer.add_param_group({'params': self.model.backbone.head.parameters()})
         self.scheduler = select_scheduler(self.sched_name, self.optimizer, self.lr_gamma)
+        self.memory = MemoryDataset(self.train_transform, cls_list=self.exposed_classes,
+                                    test_transform=self.test_transform)
+        self.temp_batch = []
+        self.temp_label = []
+        self.num_updates = 0
+        self.train_count = 0
+        self.batch_size = kwargs["batchsize"]
+
+        self.start_time = time.time()
+        num_samples = {'cifar10': 50000, 'cifar100': 50000, 'tinyimagenet': 100000, 'imagenet': 1281167}
+        self.total_samples = num_samples[self.dataset]
 
     def online_step(self, sample, sample_num, n_worker):
-        
         image, label = sample
         for l in label:
-            if l not in self.exposed_classes:
+            if l.item() not in self.exposed_classes:
                 self.add_new_class(l.item())
 
-        self.num_updates += self.online_iter
-
-        # if len(self.temp_batch) == self.temp_batchsize:
-        train_loss, train_acc = self.online_train([image, label], self.batch_size, n_worker,
-                                                    iterations=int(self.num_updates), stream_batch_size=self.temp_batchsize)
+        self.num_updates += self.online_iter * self.batch_size
+        train_loss, train_acc = self.online_train([image, label], self.batch_size * 2, n_worker,
+                                                    iterations=int(self.num_updates), stream_batch_size=self.batch_size)
         self.report_training(sample_num, train_loss, train_acc)
         for stored_sample, stored_label in zip(image, label):
             self.update_memory((stored_sample, stored_label))
@@ -257,14 +302,14 @@ class L2P(ER):
         self.exposed_classes.append(class_name)
         self.num_learned_class = len(self.exposed_classes)
         prev_weight = copy.deepcopy(self.model.backbone.head.weight.data)
-        # prev_bias   = copy.deepcopy(self.model.backbone.head.bias.data)
+        prev_bias   = copy.deepcopy(self.model.backbone.head.bias.data)
         self.model.backbone.reset_classifier(self.num_learned_class)
 
         self.model.backbone.head.to(self.device)
         with torch.no_grad():
             if self.num_learned_class > 1:
                 self.model.backbone.head.weight[:self.num_learned_class - 1] = prev_weight
-                # self.model.backbone.head.bias[:self.num_learned_class - 1]   = prev_bias
+                self.model.backbone.head.bias[:self.num_learned_class - 1]   = prev_bias
         for param in self.optimizer.param_groups[1]['params']:
             if param in self.optimizer.state.keys():
                 del self.optimizer.state[param]
@@ -278,32 +323,18 @@ class L2P(ER):
     def online_train(self, sample, batch_size, n_worker, iterations=1, stream_batch_size=1):
         
         total_loss, correct, num_data = 0.0, 0.0, 0.0
-        # sample = self.train_transform(sample)
-
-        # if stream_batch_size > 0:
-        #     sample_dataset = StreamDataset(sample, transform=self.train_transform, cls_list=self.exposed_classes)
 
         if len(self.memory) > 0 and batch_size - stream_batch_size > 0:
             memory_batch_size = min(len(self.memory), batch_size - stream_batch_size)
         for i in range(iterations):
             self.model.train()
-            # x = []
-            # y = []
             x, y = sample
             x = torch.cat([self.train_transform(transforms.ToPILImage()(img)).unsqueeze(0) for img in x])
             y = torch.cat([torch.tensor([self.exposed_classes.index(label)]) for label in y])
-            # if stream_batch_size > 0:
-            #     # sample = sample_dataset.get_data()
-            #     x.append(sample['image'])
-            #     y.append(sample['label'])
             if len(self.memory) > 0:
-                memory_data = self.memory.get_batch(y.size(0))
+                memory_data = self.memory.get_batch(memory_batch_size)
                 x = torch.cat([x, memory_data['image']])
                 y = torch.cat([y, memory_data['label']])
-                # x.append(memory_data['image'])
-                # y.append(memory_data['label'])
-            # x = torch.cat([x])
-            # y = torch.cat([y])
             x = x.to(self.device)
             y = y.to(self.device)
 
@@ -335,7 +366,7 @@ class L2P(ER):
             x, labels_a, labels_b, lam = cutmix_data(x=x, y=y, alpha=1.0)
             if self.use_amp:
                 with torch.cuda.amp.autocast():
-                    logit = self.model(transforms.Resize((224, 224))(x))
+                    logit = self.model(x)
                     loss = lam * self.criterion(logit, labels_a) + (1 - lam) * self.criterion(logit, labels_b)
             else:
                 logit = self.model(x)
@@ -343,7 +374,7 @@ class L2P(ER):
         else:
             if self.use_amp:
                 with torch.cuda.amp.autocast():
-                    logit = self.model(transforms.Resize((224, 224))(x))
+                    logit = self.model(x)
                     loss = self.criterion(logit, y)
             else:
                 logit = self.model(x)
@@ -401,7 +432,7 @@ class L2P(ER):
             self.memory.replace_sample(sample)
 
     def reset_opt(self):
-        self.optimizer = select_optimizer(self.opt_name, self.lr, self.model)
+        self.optimizer = select_optimizer(self.opt_name, self.lr, self.model, True)
         self.scheduler = select_scheduler(self.sched_name, self.optimizer, self.lr_gamma)
 
     def evaluation(self, test_loader, criterion):
@@ -418,7 +449,7 @@ class L2P(ER):
                     y[j] = self.exposed_classes.index(y[j].item())
                 x = x.to(self.device)
                 y = y.to(self.device)
-                logit = self.model(transforms.Resize((224, 224))(x))
+                logit = self.model(x)
 
                 loss = criterion(logit, y)
                 pred = torch.argmax(logit, dim=-1)

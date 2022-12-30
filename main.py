@@ -72,6 +72,8 @@ def main():
 
     # Transform Definition
     mean, std, n_classes, inp_size, _ = get_statistics(dataset=args.dataset)
+    if args.model_name == 'vit':
+        inp_size = 224
     train_transform = []
     if "cutout" in args.transforms:
         train_transform.append(Cutout(size=16))
