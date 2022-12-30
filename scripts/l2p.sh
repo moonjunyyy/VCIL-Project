@@ -24,8 +24,8 @@ master_addr=$(scontrol show hostnames "$SLURM_JOB_NODELIST" | head -n 1)
 export MASTER_ADDR=$master_addr
 echo "MASTER_ADDR="$MASTER_ADDR
 
-source /data/junyeong/init.sh
-conda activate iblurry
+source /data/keonhee/init.sh
+conda activate torch38gpu
 
 conda --version
 python --version
@@ -41,6 +41,7 @@ GPU_TRANSFORM="--gpu_transform"
 USE_AMP="--use_amp"
 SEEDS="1 2 3"
 VIT="True"
+OPT="adam"
 
 if [ "$DATASET" == "cifar10" ]; then
     MEM_SIZE=500 ONLINE_ITER=1
@@ -61,6 +62,7 @@ elif [ "$DATASET" == "imagenet" ]; then
     N_TASKS=10 MEM_SIZE=20000 ONLINE_ITER=0.25
     MODEL_NAME="resnet34" EVAL_PERIOD=1000
     BATCHSIZE=256; LR=0.03 OPT_NAME="adam" SCHED_NAME="const" MEMORY_EPOCH=100
+    BATCHSIZE=256; LR=0.05 OPT_NAME=$OPT SCHED_NAME="multistep" MEMORY_EPOCH=100
 
 else
     echo "Undefined setting"

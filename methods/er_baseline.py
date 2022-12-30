@@ -134,7 +134,7 @@ class ER:
 
         if len(self.memory) > 0 and batch_size - stream_batch_size > 0:
             memory_batch_size = min(len(self.memory), batch_size - stream_batch_size)
-
+        
         for i in range(iterations):
             self.model.train()
             # x = []
@@ -147,6 +147,7 @@ class ER:
             #     x.append(sample['image'])
             #     y.append(sample['label'])
             if len(self.memory) > 0 and batch_size - stream_batch_size > 0:
+                # print("memory_data")
                 memory_data = self.memory.get_batch(memory_batch_size)
                 x = torch.cat([x, memory_data['image']])
                 y = torch.cat([y, memory_data['label']])
@@ -252,6 +253,7 @@ class ER:
 
     def reset_opt(self):
         self.optimizer = select_optimizer(self.opt_name, self.lr, self.model)
+        # self.optimizer = select_optimizer(self.opt_name, self.lr, self.model)
         self.scheduler = select_scheduler(self.sched_name, self.optimizer, self.lr_gamma)
 
     def evaluation(self, test_loader, criterion):

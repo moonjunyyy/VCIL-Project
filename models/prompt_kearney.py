@@ -26,7 +26,6 @@ class Prompt(nn.Module):
         
         torch.nn.init.uniform_(self.key,     -1, 1)
         torch.nn.init.uniform_(self.prompts, -1, 1)
-    
     def forward(self, query : torch.Tensor,  **kwargs):
 
         B, D = query.shape

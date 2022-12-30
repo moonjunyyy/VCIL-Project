@@ -31,6 +31,18 @@ conda activate iblurry
 conda --version
 python --version
 
+### get the first node name as master address - customized for vgg slurm
+### e.g. master(gnodee[2-5],gnoded1) == gnodee2
+echo "NODELIST="${SLURM_NODELIST}
+master_addr=$(scontrol show hostnames "$SLURM_JOB_NODELIST" | head -n 1)
+export MASTER_ADDR=$master_addr
+echo "MASTER_ADDR="$MASTER_ADDR
+
+source /data/keonhee/init.sh
+conda activate torch38gpu
+
+conda --version
+python --version
 # CIL CONFIG
 NOTE="CLIB_iblurry_Tinyimg_N50_M10" # Short description of the experiment. (WARNING: logs/results with the same note will be overwritten!)
 MODE="clib"

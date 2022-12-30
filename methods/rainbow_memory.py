@@ -15,7 +15,7 @@ from randaugment.randaugment import RandAugment
 from methods.er_baseline import ER
 from utils.data_loader import cutmix_data, ImageDataset
 from utils.augment import Cutout, Invert, Solarize, select_autoaugment
-
+from utils.train_utils import select_model, select_optimizer, select_scheduler
 logger = logging.getLogger()
 writer = SummaryWriter("tensorboard")
 
@@ -62,6 +62,11 @@ class RM(ER):
         self.exposed_classes.append(class_name)
         self.num_learned_class = len(self.exposed_classes)
         self.model.fc = nn.Linear(self.model.fc.in_features, self.num_learned_class).to(self.device)
+        # for param in self.optimizer.param_groups[1]['params']:
+        #     if param in self.optimizer.state.keys():
+        #         del self.optimizer.state[param]
+        # del self.optimizer.param_groups[1]
+        # self.optimizer.add_param_group({'params':self.model.fc.parameters()})
         self.memory.add_new_class(cls_list=self.exposed_classes)
         self.reset_opt()
 
@@ -81,7 +86,12 @@ class RM(ER):
         self.scheduler = optim.lr_scheduler.LambdaLR(self.optimizer, lambda iter: 1)
 
     def online_after_task(self, cur_iter):
+        self.model.train()
         self.reset_opt()
+        # self.optimizer = select_optimizer(self.opt_name,self.lr,self.model)
+        # self.scheduler = optim.lr_scheduler.CosineAnnealingWarmRestarts(
+        #         self.optimizer, T_0=1, T_mult=2, eta_min=self.lr * 0.01
+        #     )
         self.online_memory_train(
             cur_iter=cur_iter,
             n_epoch=self.memory_epoch,
@@ -108,6 +118,8 @@ class RM(ER):
             transform_on_gpu=True
         )
         for epoch in range(n_epoch):
+            self.model.train()
+            
             if epoch <= 0:  # Warm start of 1 epoch
                 for param_group in self.optimizer.param_groups:
                     param_group["lr"] = self.lr * 0.1
@@ -145,6 +157,7 @@ class RM(ER):
                 total_loss += loss.item()
                 correct += torch.sum(preds == y.unsqueeze(1)).item()
                 num_data += y.size(0)
+                
             n_batches = len(idxlist)
             train_loss, train_acc = total_loss / n_batches, correct / num_data
             logger.info(

@@ -66,6 +66,7 @@ class CLIB(ER):
         self.samplewise_importance_memory(sample)
 
     def online_train(self, sample, batch_size, n_worker, iterations=1, stream_batch_size=0):
+        # print("This is an online_train process in clib.py")
         total_loss, correct, num_data = 0.0, 0.0, 0.0
         # if stream_batch_size > 0:
         #     sample_dataset = StreamDataset(sample, transform=self.train_transform, cls_list=self.exposed_classes)

@@ -32,6 +32,7 @@ python --version
 
 # CIL CONFIG
 NOTE="ER_iblurry_cifar10" # Short description of the experiment. (WARNING: logs/results with the same note will be overwritten!)
+
 MODE="er"
 DATASET="cifar10" # cifar10, cifar100, tinyimagenet, imagenet
 N_TASKS=5

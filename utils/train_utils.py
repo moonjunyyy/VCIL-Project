@@ -47,6 +47,7 @@ def select_optimizer(opt_name, lr, model,is_vit=False):
             raise NotImplementedError("Please select the opt_name [adam, sgd] -- is_vit True!")
     else:    
         if opt_name == "adam":
+            # print("opt_name: adam")
             params = [param for name, param in model.named_parameters() if 'fc' not in name]
             opt = optim.Adam(params, lr=lr, weight_decay=0)
             opt.add_param_group({'params': model.fc.parameters()})
@@ -64,19 +65,53 @@ def select_optimizer(opt_name, lr, model,is_vit=False):
             raise NotImplementedError("Please select the opt_name [adam, sgd]")
     return opt
 
+def select_optimizer_with_extern_params(opt_name, lr, model,is_vit=False,extern_param=None):
+    #todo model--> pretrained and freeze, train external parameters and head layer
+    if is_vit:
+        if opt_name == "adam":
+            params = [param for name, param in extern_param.named_parameters() if 'head' not in name]
+            opt = optim.Adam(params, lr=lr, weight_decay=0)
+            opt.add_param_group({'params': model.head.parameters()})
+        elif opt_name == "radam":
+            params = [param for name, param in extern_param.named_parameters() if 'head' not in name]
+            opt = torch_optimizer.RAdam(params, lr=lr, weight_decay=0.00001)
+            opt.add_param_group({'params': model.head.parameters()})
+        elif opt_name == "sgd":
+            params = [param for name, param in extern_param.named_parameters() if 'head' not in name]
+            opt = optim.SGD(
+                params, lr=lr, momentum=0.9, nesterov=True, weight_decay=1e-4
+            )
+            opt.add_param_group({'params': model.head.parameters()})
+        else:
+            raise NotImplementedError("Please select the opt_name [adam, sgd] -- is_vit True!")
+    else:    
+        if opt_name == "adam":
+            params = [param for name, param in extern_param.named_parameters() if 'fc' not in name]
+            opt = optim.Adam(params, lr=lr, weight_decay=0)
+            opt.add_param_group({'params': model.fc.parameters()})
+        elif opt_name == "radam":
+            params = [param for name, param in extern_param.named_parameters() if 'fc' not in name]
+            opt = torch_optimizer.RAdam(params, lr=lr, weight_decay=0.00001)
+            opt.add_param_group({'params': model.fc.parameters()})
+        elif opt_name == "sgd":
+            params = [param for name, param in extern_param.named_parameters() if 'fc' not in name]
+            opt = optim.SGD(
+                params, lr=lr, momentum=0.9, nesterov=True, weight_decay=1e-4
+            )
+            opt.add_param_group({'params': model.fc.parameters()})
+        else:
+            raise NotImplementedError("Please select the opt_name [adam, sgd]")
+    return opt
+
 def select_scheduler(sched_name, opt, hparam=None):
     if "exp" in sched_name:
         scheduler = optim.lr_scheduler.ExponentialLR(opt, gamma=hparam)
     elif sched_name == "cos":
-        scheduler = optim.lr_scheduler.CosineAnnealingWarmRestarts(
-            opt, T_0=1, T_mult=2
-        )
+        scheduler = optim.lr_scheduler.CosineAnnealingWarmRestarts(opt, T_0=1, T_mult=2)
     elif sched_name == "anneal":
         scheduler = optim.lr_scheduler.ExponentialLR(opt, 1 / 1.1, last_epoch=-1)
     elif sched_name == "multistep":
-        scheduler = optim.lr_scheduler.MultiStepLR(
-            opt, milestones=[30, 60, 80, 90], gamma=0.1
-        )
+        scheduler = optim.lr_scheduler.MultiStepLR(opt, milestones=[30, 60, 80, 90], gamma=0.1)
     elif sched_name == "const":
         scheduler = optim.lr_scheduler.LambdaLR(opt, lambda iter: 1)
     else:
@@ -183,4 +218,5 @@ def select_model(model_name, dataset, num_classes=None):
     else:
         model = model_class(opt)
 
+    print("[Selected Model]:", model_name )
     return model
