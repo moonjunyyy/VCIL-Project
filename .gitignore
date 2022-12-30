@@ -1,6 +1,11 @@
 dataset/
 tensorboard/
 results/
+cifar10_png/
+cifar100_png/
 *.pyc
 *.log
 *.err
+*.out
+*.png
+*.tar
