@@ -130,16 +130,18 @@ class ER:
                                            transform_on_gpu=self.gpu_transform)
         if len(self.memory) > 0 and batch_size - stream_batch_size > 0:
             memory_batch_size = min(len(self.memory), batch_size - stream_batch_size)
-
+        
         for i in range(iterations):
             self.model.train()
             x = []
             y = []
             if stream_batch_size > 0:
+                # print("stream_data")
                 stream_data = sample_dataset.get_data()
                 x.append(stream_data['image'])
                 y.append(stream_data['label'])
             if len(self.memory) > 0 and batch_size - stream_batch_size > 0:
+                # print("memory_data")
                 memory_data = self.memory.get_batch(memory_batch_size)
                 x.append(memory_data['image'])
                 y.append(memory_data['label'])
@@ -259,6 +261,7 @@ class ER:
 
     def reset_opt(self):
         self.optimizer = select_optimizer(self.opt_name, self.lr, self.model)
+        # self.optimizer = select_optimizer(self.opt_name, self.lr, self.model)
         self.scheduler = select_scheduler(self.sched_name, self.optimizer, self.lr_gamma)
 
     def evaluation(self, test_loader, criterion):

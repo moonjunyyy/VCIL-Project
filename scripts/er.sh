@@ -1,7 +1,16 @@
-#/bin/bash
+#!/bin/bash
+#SBATCH -J ER_T5_vit_iblurry_cifar10
+#SBATCH -p batch
+#SBATCH --nodes=1
+#SBATCH -w vll1
+#SBATCH --gres=gpu:1
+#SBATCH --cpus-per-gpu=4
+#SBATCH --mem-per-gpu=16G
+#SBATCH --time=4-0
+#SBATCH -o %x_%j.out
 
 # CIL CONFIG
-NOTE="er" # Short description of the experiment. (WARNING: logs/results with the same note will be overwritten!)
+NOTE="[ER-Adam]T5_iblurry_cifar10_3epoch" # Short description of the experiment. (WARNING: logs/results with the same note will be overwritten!)
 MODE="er"
 DATASET="cifar10" # cifar10, cifar100, tinyimagenet, imagenet
 N_TASKS=5
@@ -45,6 +54,6 @@ do
     --rnd_seed $RND_SEED \
     --model_name $MODEL_NAME --opt_name $OPT_NAME --sched_name $SCHED_NAME \
     --lr $LR --batchsize $BATCHSIZE \
-    --memory_size $MEM_SIZE $GPU_TRANSFORM --online_iter $ONLINE_ITER \
+    --memory_size $MEM_SIZE $GPU_TRANSFORM --online_iter $ONLINE_ITER --data_dir /local_datasets/VCIL/$DATASET \
     --note $NOTE --eval_period $EVAL_PERIOD $USE_AMP
 done

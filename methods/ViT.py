@@ -67,9 +67,7 @@ class ViT(ER):
     def __init__(
             self, criterion, device, train_transform, test_transform, n_classes, **kwargs
     ):
-        super().__init__(
-            criterion, device, train_transform, test_transform, n_classes, **kwargs)
-
+        super().__init__(criterion, device, train_transform, test_transform, n_classes, **kwargs)
         self.data_cnt       = 0
 
         self.sched_name     = "const"
