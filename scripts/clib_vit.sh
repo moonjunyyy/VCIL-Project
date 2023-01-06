@@ -1,6 +1,6 @@
 #!/bin/bash
 
-#SBATCH -J CLIB_ViT_iblurry_CIFAR100_N50_M10
+#SBATCH -J CLIB_ViT_iblurry_CIFAR100_N100_M10
 #SBATCH -p batch
 #SBATCH --nodes=1
 #SBATCH --gres=gpu:1
@@ -31,11 +31,11 @@ conda --version
 python --version
 
 # CIL CONFIG
-NOTE="CLIB_ViT_iblurry_CIFAR100_N50_M10" # Short description of the experiment. (WARNING: logs/results with the same note will be overwritten!)
+NOTE="CLIB_ViT_iblurry_CIFAR100_N100_M10" # Short description of the experiment. (WARNING: logs/results with the same note will be overwritten!)
 MODE="clib_vit"
 DATASET="cifar100" # cifar10, cifar100, tinyimagenet, imagenet
-N_TASKS=5
-N=50
+N_TASKS=10
+N=100
 M=10
 GPU_TRANSFORM="--gpu_transform"
 USE_AMP="--use_amp"
