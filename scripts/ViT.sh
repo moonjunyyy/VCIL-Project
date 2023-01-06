@@ -1,15 +1,15 @@
 #!/bin/bash
 
 
-#SBATCH -J ViT_iblurry_cifar100
+#SBATCH -J ViT_iblurry_cifar10_3epoch_N50_M10_TSNE
 #SBATCH -p batch
 #SBATCH --nodes=1
 #SBATCH --gres=gpu:1
 #SBATCH --cpus-per-gpu=4
-#SBATCH --mem-per-gpu=16G
+#SBATCH --mem-per-gpu=20G
 #SBATCH --time=14-0
-#SBATCH -o /home/junyeong/%x_%j.log
-#SBATCH -e /home/junyeong/%x_%j.err
+#SBATCH -o %x_%j.log
+#SBATCH -e %x_%j.err
 
 date
 ulimit -n 65536
@@ -32,21 +32,22 @@ conda --version
 python --version
 
 # CIL CONFIG
-NOTE="ViT_iblurry_cifar100_3epoch" # Short description of the experiment. (WARNING: logs/results with the same note will be overwritten!)
+NOTE="ViT_iblurry_cifar10_3epoch_N50_M10_TSNE" # Short description of the experiment. (WARNING: logs/results with the same note will be overwritten!)
 MODE="ViT"
-DATASET="cifar100" # cifar10, cifar100, tinyimagenet, imagenet
-N_TASKS=10
+DATASET="cifar10" # cifar10, cifar100, tinyimagenet, imagenet
+N_TASKS=5
 N=50
 M=10
 GPU_TRANSFORM="--gpu_transform"
 USE_AMP="--use_amp"
 SEEDS="1 2 3"
+VIT="True"
 
 
 if [ "$DATASET" == "cifar10" ]; then
     MEM_SIZE=500 ONLINE_ITER=1
     MODEL_NAME="resnet18" EVAL_PERIOD=100
-    BATCHSIZE=16; LR=0.05 OPT_NAME="sgd" SCHED_NAME="cos" MEMORY_EPOCH=256
+    BATCHSIZE=16; LR=0.001 OPT_NAME="sgd" SCHED_NAME="cos" MEMORY_EPOCH=256
 
 elif [ "$DATASET" == "cifar100" ]; then
     MEM_SIZE=2000 ONLINE_ITER=3
@@ -68,6 +69,11 @@ else
     exit 1
 fi
 
+if [ "$VIT" == "True" ]; then
+    echo "Vit is used"
+    MODEL_NAME="vit"
+fi
+
 for RND_SEED in $SEEDS
 do
     python main.py --mode $MODE \
@@ -76,6 +82,6 @@ do
     --rnd_seed $RND_SEED \
     --model_name $MODEL_NAME --opt_name $OPT_NAME --sched_name $SCHED_NAME \
     --lr $LR --batchsize $BATCHSIZE \
-    --memory_size $MEM_SIZE $GPU_TRANSFORM --online_iter $ONLINE_ITER --data_dir /local_datasets/puridiver/cifar100 --log_path /home/junyeong/log/ \
+    --memory_size $MEM_SIZE $GPU_TRANSFORM --online_iter $ONLINE_ITER --data_dir /local_datasets \
     --note $NOTE --eval_period $EVAL_PERIOD --memory_epoch $MEMORY_EPOCH $USE_AMP
 done

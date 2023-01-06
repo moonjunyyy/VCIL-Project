@@ -271,8 +271,8 @@ class L2P(ER):
             self.lr_gamma = 0.9999
         # self.optimizer.add_param_group({'params': self.model.backbone.head.parameters()})
         self.scheduler = select_scheduler(self.sched_name, self.optimizer, self.lr_gamma)
-        self.memory = MemoryDataset(self.train_transform, cls_list=self.exposed_classes,
-                                    test_transform=self.test_transform)
+        # self.memory = MemoryDataset(self.train_transform, cls_list=self.exposed_classes,
+        #                             test_transform=self.test_transform)
         self.temp_batch = []
         self.temp_label = []
         self.num_updates = 0
@@ -293,8 +293,8 @@ class L2P(ER):
         train_loss, train_acc = self.online_train([image, label], self.batch_size * 2, n_worker,
                                                     iterations=int(self.num_updates), stream_batch_size=self.batch_size)
         self.report_training(sample_num, train_loss, train_acc)
-        for stored_sample, stored_label in zip(image, label):
-            self.update_memory((stored_sample, stored_label))
+        # for stored_sample, stored_label in zip(image, label):
+        #     self.update_memory((stored_sample, stored_label))
         self.temp_batch = []
         self.num_updates -= int(self.num_updates)
 
@@ -316,7 +316,7 @@ class L2P(ER):
         del self.optimizer.param_groups[1]
         self.optimizer.add_param_group({'params': self.model.backbone.head.parameters()})
         self.scheduler = select_scheduler(self.sched_name, self.optimizer, self.lr_gamma)
-        self.memory.add_new_class(cls_list=self.exposed_classes)
+        # self.memory.add_new_class(cls_list=self.exposed_classes)
         if 'reset' in self.sched_name:
             self.update_schedule(reset=True)
 
@@ -324,17 +324,17 @@ class L2P(ER):
         
         total_loss, correct, num_data = 0.0, 0.0, 0.0
 
-        if len(self.memory) > 0 and batch_size - stream_batch_size > 0:
-            memory_batch_size = min(len(self.memory), batch_size - stream_batch_size)
+        # if len(self.memory) > 0 and batch_size - stream_batch_size > 0:
+        #     memory_batch_size = min(len(self.memory), batch_size - stream_batch_size)
         for i in range(iterations):
             self.model.train()
             x, y = sample
             x = torch.cat([self.train_transform(transforms.ToPILImage()(img)).unsqueeze(0) for img in x])
             y = torch.cat([torch.tensor([self.exposed_classes.index(label)]) for label in y])
-            if len(self.memory) > 0:
-                memory_data = self.memory.get_batch(memory_batch_size)
-                x = torch.cat([x, memory_data['image']])
-                y = torch.cat([y, memory_data['label']])
+            # if len(self.memory) > 0:
+            #     memory_data = self.memory.get_batch(memory_batch_size)
+            #     x = torch.cat([x, memory_data['image']])
+            #     y = torch.cat([y, memory_data['label']])
             x = x.to(self.device)
             y = y.to(self.device)
 

@@ -13,14 +13,76 @@ from torch.utils.tensorboard import SummaryWriter
 from scipy.stats import ttest_ind
 
 from methods.er_baseline import ER
-from utils.data_loader import cutmix_data, ImageDataset, StreamDataset, MemoryDataset
+from utils.data_loader import ImageDataset, StreamDataset, MemoryDataset, cutmix_data, get_statistics
+from utils.train_utils import select_model, select_optimizer, select_scheduler
+
+import time
 
 logger = logging.getLogger()
 writer = SummaryWriter("tensorboard")
 
-class CLIB(ER):
+class CLIB_ViT(ER):
     def __init__(self, criterion, device, train_transform, test_transform, n_classes, **kwargs):
-        super().__init__(criterion, device, train_transform, test_transform, n_classes, **kwargs)
+        
+        self.num_learned_class = 0
+        self.num_learning_class = 1
+        self.n_classes = n_classes
+        self.exposed_classes = []
+        self.seen = 0
+        self.topk = kwargs["topk"]
+
+        self.device = device
+        self.dataset = kwargs["dataset"]
+        self.model_name = kwargs["model_name"]
+        self.opt_name = kwargs["opt_name"]
+        self.sched_name = kwargs["sched_name"]
+        if self.sched_name == "default":
+            self.sched_name = 'exp_reset'
+        self.lr = kwargs["lr"]
+
+        self.train_transform = train_transform
+        self.cutmix = "cutmix" in kwargs["transforms"]
+        self.test_transform = test_transform
+
+        self.memory_size = kwargs["memory_size"]
+        self.data_dir = kwargs["data_dir"]
+
+        self.online_iter = kwargs["online_iter"]
+        self.batch_size = kwargs["batchsize"]
+        
+        self.temp_batchsize = kwargs["temp_batchsize"]
+        if self.temp_batchsize is None:
+            self.temp_batchsize = self.batch_size//2
+        if self.temp_batchsize > self.batch_size:
+            self.temp_batchsize = self.batch_size
+        
+        self.memory_size -= self.temp_batchsize
+
+        self.gpu_transform = kwargs["gpu_transform"]
+        self.use_amp = kwargs["use_amp"]
+        if self.use_amp:
+            self.scaler = torch.cuda.amp.GradScaler()
+
+        self.model = select_model(self.model_name, self.dataset, 1).to(self.device)
+        self.optimizer = select_optimizer(self.opt_name, self.lr, self.model, True)
+        if 'imagenet' in self.dataset:
+            self.lr_gamma = 0.99995
+        else:
+            self.lr_gamma = 0.9999
+
+        self.scheduler = select_scheduler(self.sched_name, self.optimizer, self.lr_gamma)
+
+        self.criterion = criterion.to(self.device)
+        self.temp_batch = []
+        self.temp_label = []
+        self.num_updates = 0
+        self.train_count = 0
+        self.batch_size = kwargs["batchsize"]
+
+        self.start_time = time.time()
+        num_samples = {'cifar10': 50000, 'cifar100': 50000, 'tinyimagenet': 100000, 'imagenet': 1281167}
+        self.total_samples = num_samples[self.dataset]
+
         self.memory_size = kwargs["memory_size"]
 
         # Samplewise importance variables
@@ -53,7 +115,6 @@ class CLIB(ER):
                 self.add_new_class(l.item())
 
         self.num_updates += self.online_iter * self.batch_size
-        # if len(self.temp_batch) == self.temp_batchsize:
         train_loss, train_acc = self.online_train([image, label], self.batch_size * 2, n_worker,
                                                     iterations=int(self.num_updates), stream_batch_size=self.batch_size)
         self.report_training(sample_num, train_loss, train_acc)
@@ -65,34 +126,18 @@ class CLIB(ER):
         self.samplewise_importance_memory(sample)
 
     def online_train(self, sample, batch_size, n_worker, iterations=1, stream_batch_size=0):
-        # print("This is an online_train process in clib.py")
+
         total_loss, correct, num_data = 0.0, 0.0, 0.0
-        # if stream_batch_size > 0:
-        #     sample_dataset = StreamDataset(sample, transform=self.train_transform, cls_list=self.exposed_classes)
-
-        # if len(self.memory) > 0 and batch_size - stream_batch_size > 0:
-        #     memory_batch_size = min(len(self.memory), batch_size - stream_batch_size)
-
         for i in range(iterations):
             self.model.train()
-            # x = []
-            # y = []
             x, y = sample
             x = torch.cat([self.train_transform(transforms.ToPILImage()(img)).unsqueeze(0) for img in x])
             y = torch.cat([torch.tensor([self.exposed_classes.index(label)]) for label in y])
-            # if stream_batch_size > 0:
-            #     # sample = sample_dataset.get_data()
-            #     x.append(sample['image'])
-            #     y.append(sample['label'])
+
             if len(self.memory) > 0:
                 memory_data = self.memory.get_batch(y.size(0))
                 x = torch.cat([x, memory_data['image']])
                 y = torch.cat([y, memory_data['label']])
-                # x.append(memory_data['image'])
-                # y.append(memory_data['label'])
-            # x = torch.cat([x])
-            # y = torch.cat([y])
-
             x = x.to(self.device)
             y = y.to(self.device)
 
@@ -116,15 +161,39 @@ class CLIB(ER):
 
         return total_loss / iterations, correct / num_data
 
+    def model_forward(self, x, y):
+        do_cutmix = self.cutmix and np.random.rand(1) < 0.5
+        if do_cutmix:
+            x, labels_a, labels_b, lam = cutmix_data(x=x, y=y, alpha=1.0)
+            if self.use_amp:
+                with torch.cuda.amp.autocast():
+                    logit = self.model(x)['logits']
+                    loss = lam * self.criterion(logit, labels_a) + (1 - lam) * self.criterion(logit, labels_b)
+            else:
+                logit = self.model(x)['logits']
+                loss = lam * self.criterion(logit, labels_a) + (1 - lam) * self.criterion(logit, labels_b)
+        else:
+            if self.use_amp:
+                with torch.cuda.amp.autocast():
+                    logit = self.model(x)['logits']
+                    loss = self.criterion(logit, y)
+            else:
+                logit = self.model(x)['logits']
+                loss = self.criterion(logit, y)
+        return logit, loss
+
     def add_new_class(self, class_name):
         self.exposed_classes.append(class_name)
         self.num_learned_class = len(self.exposed_classes)
-        prev_weight = copy.deepcopy(self.model.fc.weight.data)
-        self.model.fc = nn.Linear(self.model.fc.in_features, self.num_learned_class).to(self.device)
+        prev_weight = copy.deepcopy(self.model.head.weight.data)
+        prev_bias = copy.deepcopy(self.model.head.bias.data)
+        self.model.reset_classifier(self.num_learned_class)
 
         with torch.no_grad():
             if self.num_learned_class > 1:
-                self.model.fc.weight[:self.num_learned_class - 1] = prev_weight
+                self.model.head.weight.data[:self.num_learned_class - 1] = prev_weight
+                self.model.head.bias.data[:self.num_learned_class - 1] = prev_bias
+        self.model.to(self.device)
         sdict = copy.deepcopy(self.optimizer.state_dict())
         fc_params = sdict['param_groups'][1]['params']
         if len(sdict['state']) > 0:
@@ -134,7 +203,7 @@ class CLIB(ER):
             if param in self.optimizer.state.keys():
                 del self.optimizer.state[param]
         del self.optimizer.param_groups[1]
-        self.optimizer.add_param_group({'params': self.model.fc.parameters()})
+        self.optimizer.add_param_group({'params': self.model.head.parameters()})
         if len(sdict['state']) > 0:
             if 'adam' in self.opt_name:
                 fc_weight = self.optimizer.param_groups[1]['params'][0]
@@ -177,12 +246,12 @@ class CLIB(ER):
                     if self.use_amp:
                         with torch.cuda.amp.autocast():
                             logit = torch.cat(
-                                [self.model(torch.cat(x[i * batchsize:min((i + 1) * batchsize, len(x))]).to(self.device))
+                                [self.model(torch.cat(x[i * batchsize:min((i + 1) * batchsize, len(x))]).to(self.device))['logits']
                                 for i in range(-(-len(x) // batchsize))], dim=0)
 
                     else:
                         logit = torch.cat(
-                            [self.model(torch.cat(x[i * batchsize:min((i + 1) * batchsize, len(x))]).to(self.device))
+                            [self.model(torch.cat(x[i * batchsize:min((i + 1) * batchsize, len(x))]).to(self.device))['logits']
                              for i in range(-(-len(x) // batchsize))], dim=0)
 
                     loss = F.cross_entropy(logit, y, reduction='none').cpu().numpy()
@@ -267,3 +336,40 @@ class CLIB(ER):
                             for param_group in self.optimizer.param_groups:
                                 param_group["lr"] = self.high_lr
                                 param_group["initial_lr"] = self.high_lr
+
+    def evaluation(self, test_loader, criterion):
+        total_correct, total_num_data, total_loss = 0.0, 0.0, 0.0
+        correct_l = torch.zeros(self.n_classes)
+        num_data_l = torch.zeros(self.n_classes)
+        label = []
+
+        self.model.eval()
+        with torch.no_grad():
+            for i, data in enumerate(test_loader):
+                x, y = data
+                for j in range(len(y)):
+                    y[j] = self.exposed_classes.index(y[j].item())
+
+                x = x.to(self.device)
+                y = y.to(self.device)
+
+                logit = self.model(x)['logits']
+                loss = criterion(logit, y)
+                pred = torch.argmax(logit, dim=-1)
+                _, preds = logit.topk(self.topk, 1, True, True)
+                total_correct += torch.sum(preds == y.unsqueeze(1)).item()
+                total_num_data += y.size(0)
+
+                xlabel_cnt, correct_xlabel_cnt = self._interpret_pred(y, pred)
+                correct_l += correct_xlabel_cnt.detach().cpu()
+                num_data_l += xlabel_cnt.detach().cpu()
+
+                total_loss += loss.item()
+                label += y.tolist()
+
+        avg_acc = total_correct / total_num_data
+        avg_loss = total_loss / len(test_loader)
+        cls_acc = (correct_l / (num_data_l + 1e-5)).numpy().tolist()
+        
+        ret = {"avg_loss": avg_loss, "avg_acc": avg_acc, "cls_acc": cls_acc}
+        return ret

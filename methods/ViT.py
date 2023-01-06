@@ -22,6 +22,7 @@ from methods.er_baseline import ER
 from utils.data_loader import cutmix_data, ImageDataset
 from utils.augment import Cutout, Invert, Solarize, select_autoaugment
 
+
 import logging
 import copy
 import time
@@ -67,7 +68,45 @@ class ViT(ER):
     def __init__(
             self, criterion, device, train_transform, test_transform, n_classes, **kwargs
     ):
-        super().__init__(criterion, device, train_transform, test_transform, n_classes, **kwargs)
+        self.num_learned_class = 0
+        self.num_learning_class = 1
+        self.n_classes = n_classes
+        self.exposed_classes = []
+        self.seen = 0
+        self.topk = kwargs["topk"]
+
+        self.device = device
+        self.dataset = kwargs["dataset"]
+        self.model_name = kwargs["model_name"]
+        self.opt_name = kwargs["opt_name"]
+        self.sched_name = kwargs["sched_name"]
+        if self.sched_name == "default":
+            self.sched_name = 'exp_reset'
+        self.lr = kwargs["lr"]
+
+        self.train_transform = train_transform
+        self.cutmix = "cutmix" in kwargs["transforms"]
+        self.test_transform = test_transform
+
+        self.memory_size = kwargs["memory_size"]
+        self.data_dir = kwargs["data_dir"]
+
+        self.online_iter = kwargs["online_iter"]
+        self.batch_size = kwargs["batchsize"]
+        
+        self.temp_batchsize = kwargs["temp_batchsize"]
+        if self.temp_batchsize is None:
+            self.temp_batchsize = self.batch_size//2
+        if self.temp_batchsize > self.batch_size:
+            self.temp_batchsize = self.batch_size
+        
+        self.memory_size -= self.temp_batchsize
+
+        self.gpu_transform = kwargs["gpu_transform"]
+        self.use_amp = kwargs["use_amp"]
+        if self.use_amp:
+            self.scaler = torch.cuda.amp.GradScaler()
+
         self.data_cnt       = 0
 
         self.sched_name     = "const"
@@ -76,35 +115,46 @@ class ViT(ER):
 
         self.model =  timm.create_model('vit_base_patch16_224_l2p', pretrained=True, num_classes=1).to(self.device)
         for param in self.model.parameters():
-            param.requires_grad = False
+            param.requires_grad = True
         self.model.head.weight.requires_grad = True
         self.model.head.bias.requires_grad = True
 
         self.model.parameters()
         
         params = [param for name, param in self.model.named_parameters() if 'head' not in name]
-        self.optimizer = optim.Adam(params, lr=self.lr, weight_decay=0)
-        self.optimizer.add_param_group({'params': self.model.head.parameters()})
+        self.optimizer = select_optimizer(self.opt_name, self.lr, self.model, True)
+        if 'imagenet' in self.dataset:
+            self.lr_gamma = 0.99995
+        else:
+            self.lr_gamma = 0.9999
 
         self.scheduler = select_scheduler(self.sched_name, self.optimizer, self.lr_gamma)
         self.criterion = criterion.to(self.device)
         # self.criterion = self.model.loss_fn
+        self.temp_batch = []
+        self.temp_label = []
+        self.num_updates = 0
+        self.train_count = 0
+        self.batch_size = kwargs["batchsize"]
+
+        self.start_time = time.time()
+        num_samples = {'cifar10': 50000, 'cifar100': 50000, 'tinyimagenet': 100000, 'imagenet': 1281167}
+        self.total_samples = num_samples[self.dataset]
 
     def online_step(self, sample, sample_num, n_worker):
-        if sample['klass'] not in self.exposed_classes:
-            self.add_new_class(sample['klass'])
+        image, label = sample
+        for l in label:
+            if l.item() not in self.exposed_classes:
+                self.add_new_class(l.item())
 
-        self.temp_batch.append(sample)
-        self.num_updates += self.online_iter
-
-        if len(self.temp_batch) == self.temp_batchsize:
-            train_loss, train_acc = self.online_train(self.temp_batch, self.batch_size, n_worker,
-                                                      iterations=int(self.num_updates), stream_batch_size=self.temp_batchsize)
-            self.report_training(sample_num, train_loss, train_acc)
-            for stored_sample in self.temp_batch:
-                self.update_memory(stored_sample)
-            self.temp_batch = []
-            self.num_updates -= int(self.num_updates)
+        self.num_updates += self.online_iter * self.batch_size
+        train_loss, train_acc = self.online_train([image, label], self.batch_size * 2, n_worker,
+                                                    iterations=int(self.num_updates), stream_batch_size=self.batch_size)
+        self.report_training(sample_num, train_loss, train_acc)
+        # for stored_sample, stored_label in zip(image, label):
+        #     self.update_memory((stored_sample, stored_label))
+        self.temp_batch = []
+        self.num_updates -= int(self.num_updates)
 
     def add_new_class(self, class_name):
         self.exposed_classes.append(class_name)
@@ -123,34 +173,25 @@ class ViT(ER):
                 del self.optimizer.state[param]
         del self.optimizer.param_groups[1]
         self.optimizer.add_param_group({'params': self.model.head.parameters()})
-        self.memory.add_new_class(cls_list=self.exposed_classes)
+        # self.memory.add_new_class(cls_list=self.exposed_classes)
         if 'reset' in self.sched_name:
             self.update_schedule(reset=True)
 
     def online_train(self, sample, batch_size, n_worker, iterations=1, stream_batch_size=1):
+        
         total_loss, correct, num_data = 0.0, 0.0, 0.0
-        if stream_batch_size > 0:
-            sample_dataset = StreamDataset(sample, dataset=self.dataset, transform=self.train_transform,
-                                           cls_list=self.exposed_classes, data_dir=self.data_dir, device=self.device,
-                                           transform_on_gpu=self.gpu_transform)
-        if len(self.memory) > 0 and batch_size - stream_batch_size > 0:
-            memory_batch_size = min(len(self.memory), batch_size - stream_batch_size)
 
+        # if len(self.memory) > 0 and batch_size - stream_batch_size > 0:
+        #     memory_batch_size = min(len(self.memory), batch_size - stream_batch_size)
         for i in range(iterations):
             self.model.train()
-            x = []
-            y = []
-            if stream_batch_size > 0:
-                stream_data = sample_dataset.get_data()
-                x.append(stream_data['image'])
-                y.append(stream_data['label'])
-            if len(self.memory) > 0 and batch_size - stream_batch_size > 0:
-                memory_data = self.memory.get_batch(memory_batch_size)
-                x.append(memory_data['image'])
-                y.append(memory_data['label'])
-            x = torch.cat(x)
-            y = torch.cat(y)
-
+            x, y = sample
+            x = torch.cat([self.train_transform(transforms.ToPILImage()(img)).unsqueeze(0) for img in x])
+            y = torch.cat([torch.tensor([self.exposed_classes.index(label)]) for label in y])
+            # if len(self.memory) > 0:
+            #     memory_data = self.memory.get_batch(memory_batch_size)
+            #     x = torch.cat([x, memory_data['image']])
+            #     y = torch.cat([y, memory_data['label']])
             x = x.to(self.device)
             y = y.to(self.device)
 
@@ -182,7 +223,7 @@ class ViT(ER):
             x, labels_a, labels_b, lam = cutmix_data(x=x, y=y, alpha=1.0)
             if self.use_amp:
                 with torch.cuda.amp.autocast():
-                    logit = self.model(transforms.Resize((224, 224))(x))
+                    logit = self.model(x)
                     loss = lam * self.criterion(logit, labels_a) + (1 - lam) * self.criterion(logit, labels_b)
             else:
                 logit = self.model(x)
@@ -190,7 +231,7 @@ class ViT(ER):
         else:
             if self.use_amp:
                 with torch.cuda.amp.autocast():
-                    logit = self.model(transforms.Resize((224, 224))(x))
+                    logit = self.model(x)
                     loss = self.criterion(logit, y)
             else:
                 logit = self.model(x)
@@ -225,22 +266,7 @@ class ViT(ER):
         else:
             self.scheduler.step()
 
-    def online_evaluate(self, test_list, sample_num, batch_size, n_worker):
-        test_df = pd.DataFrame(test_list)
-        exp_test_df = test_df[test_df['klass'].isin(self.exposed_classes)]
-        test_dataset = ImageDataset(
-            exp_test_df,
-            dataset=self.dataset,
-            transform=self.test_transform,
-            cls_list=self.exposed_classes,
-            data_dir=self.data_dir
-        )
-        test_loader = DataLoader(
-            test_dataset,
-            shuffle=True,
-            batch_size=batch_size,
-            num_workers=n_worker,
-        )
+    def online_evaluate(self, test_loader, sample_num):
         eval_dict = self.evaluation(test_loader, self.criterion)
         self.report_test(sample_num, eval_dict["avg_loss"], eval_dict["avg_acc"])
         return eval_dict
@@ -275,11 +301,12 @@ class ViT(ER):
         self.model.eval()
         with torch.no_grad():
             for i, data in enumerate(test_loader):
-                x = data["image"]
-                y = data["label"]
+                x, y = data
+                for j in range(len(y)):
+                    y[j] = self.exposed_classes.index(y[j].item())
                 x = x.to(self.device)
                 y = y.to(self.device)
-                logit = self.model(transforms.Resize((224, 224))(x))
+                logit = self.model(x)
 
                 loss = criterion(logit, y)
                 pred = torch.argmax(logit, dim=-1)
@@ -300,6 +327,49 @@ class ViT(ER):
         cls_acc = (correct_l / (num_data_l + 1e-5)).numpy().tolist()
         ret = {"avg_loss": avg_loss, "avg_acc": avg_acc, "cls_acc": cls_acc}
 
+        return ret
+
+    
+    def evaluation_with_feature(self, test_loader, criterion):
+        total_correct, total_num_data, total_loss = 0.0, 0.0, 0.0
+        correct_l = torch.zeros(self.n_classes) 
+        num_data_l = torch.zeros(self.n_classes)
+        label = []
+
+        self.model.eval()
+        embedding = [np.empty((0, 768)) for _ in range(self.n_classes)]
+        with torch.no_grad():
+            for i, data in enumerate(test_loader):
+                x, y = data
+                for j in range(len(y)):
+                    y[j] = self.exposed_classes.index(y[j].item())
+                x = x.to(self.device)
+                y = y.to(self.device)
+                logit = self.model(x)
+                        
+                x = self.model.forward_features(x)
+                for cls in y:
+                    embedding[cls] = np.concatenate([embedding[cls], x[cls].cpu().numpy()])
+                logit = self.model.forward_head(x)
+
+                loss = self.criterion(logit, y)
+                pred = torch.argmax(logit, dim=-1)
+                _, preds = logit.topk(self.topk, 1, True, True)
+
+                total_correct += torch.sum(preds == y.unsqueeze(1)).item()
+                total_num_data += y.size(0)
+
+                xlabel_cnt, correct_xlabel_cnt = self._interpret_pred(y, pred)
+                correct_l += correct_xlabel_cnt.detach().cpu()
+                num_data_l += xlabel_cnt.detach().cpu()
+
+                total_loss += loss.item()
+                label += y.tolist()
+
+        avg_acc = total_correct / total_num_data
+        avg_loss = total_loss / len(test_loader)
+        cls_acc = (correct_l / (num_data_l + 1e-5)).numpy().tolist()
+        ret = {"avg_loss": avg_loss, "avg_acc": avg_acc, "cls_acc": cls_acc, "embedding": embedding}
         return ret
 
     def _interpret_pred(self, y, pred):

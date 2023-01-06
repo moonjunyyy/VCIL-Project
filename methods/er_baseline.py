@@ -98,7 +98,6 @@ class ER:
                 self.add_new_class(l.item())
 
         self.num_updates += self.online_iter * self.batch_size
-        # if len(self.temp_batch) == self.temp_batchsize:
         train_loss, train_acc = self.online_train([image, label], self.batch_size * 2, n_worker,
                                                     iterations=int(self.num_updates), stream_batch_size=self.batch_size)
         self.report_training(sample_num, train_loss, train_acc)

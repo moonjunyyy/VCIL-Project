@@ -20,6 +20,9 @@ from utils.data_loader import get_train_datalist
 from utils.method_manager import select_method
 from datasets import *
 
+from sklearn.manifold import TSNE
+import matplotlib.pyplot as plt
+
 datasets = {
         "cifar10": CIFAR10,
         "cifar100": CIFAR100,
@@ -131,6 +134,7 @@ def main():
     train_sampler   = OnlineSampler(train_dataset, args.n_tasks, args.m, args.n, args.rnd_seed, 0)
 
     num_eval = args.eval_period
+    features = []
     for cur_iter in range(args.n_tasks):
         if args.mode == "joint" and cur_iter > 0:
             return
@@ -164,8 +168,9 @@ def main():
         
         test_sampler = OnlineTestSampler(test_dataset, method.exposed_classes)
         test_dataloader = DataLoader(test_dataset, batch_size=512, sampler=test_sampler, num_workers=4)
-        eval_dict = method.online_evaluate(test_dataloader, samples_cnt)
+        eval_dict = method.evaluation_with_feature(test_dataloader, samples_cnt)
         task_acc = eval_dict['avg_acc']
+        features.append(eval_dict['embedding'])
 
         logger.info("[2-4] Update the information for the current task")
         task_records["task_acc"].append(task_acc)
@@ -173,6 +178,18 @@ def main():
 
         logger.info("[2-5] Report task result")
         writer.add_scalar("Metrics/TaskAcc", task_acc, cur_iter)
+    
+    # Tsne visualization feature
+    for class_idx in range(n_classes):
+        class_feature = []
+        for i in range(args.n_tasks):
+            class_feature.append(features[i][class_idx])
+        class_feature = np.concatenate(class_feature, axis=0)
+        X_2d = TSNE(n_components=2).fit_transform(class_feature)
+        plt.figure(figsize=(10, 10))
+        for i in range(args.n_tasks):
+            plt.scatter(X_2d[i*1000:(i+1)*1000, 0], X_2d[i*1000:(i+1)*1000, 1])
+        plt.savefig(f'{args.log_path}/logs/{args.dataset}/{args.note}/seed_{args.rnd_seed}_tsne_{class_idx}.png')
 
     np.save(f"{args.log_path}/logs/{args.dataset}/{args.note}/seed_{args.rnd_seed}.npy", task_records["task_acc"])
 
