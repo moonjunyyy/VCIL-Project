@@ -114,12 +114,13 @@ class CLIB_ViT(ER):
             if l.item() not in self.exposed_classes:
                 self.add_new_class(l.item())
 
-        self.num_updates += self.online_iter * self.batch_size
-        train_loss, train_acc = self.online_train([image, label], self.batch_size * 2, n_worker,
-                                                    iterations=int(self.num_updates), stream_batch_size=self.batch_size)
-        self.report_training(sample_num, train_loss, train_acc)
         for stored_sample, stored_label in zip(image, label):
             self.update_memory((stored_sample, stored_label))
+
+        self.num_updates += self.online_iter * self.batch_size
+        train_loss, train_acc = self.online_train([], self.batch_size, n_worker,
+                                                    iterations=int(self.num_updates), stream_batch_size=0)
+        self.report_training(sample_num, train_loss, train_acc)
         self.temp_batch = []
         self.num_updates -= int(self.num_updates)
     def update_memory(self, sample):
@@ -128,16 +129,25 @@ class CLIB_ViT(ER):
     def online_train(self, sample, batch_size, n_worker, iterations=1, stream_batch_size=0):
 
         total_loss, correct, num_data = 0.0, 0.0, 0.0
+        
+        if len(self.memory) > 0 and batch_size - stream_batch_size > 0:
+            memory_batch_size = min(len(self.memory), batch_size - stream_batch_size)
+
         for i in range(iterations):
             self.model.train()
-            x, y = sample
-            x = torch.cat([self.train_transform(transforms.ToPILImage()(img)).unsqueeze(0) for img in x])
-            y = torch.cat([torch.tensor([self.exposed_classes.index(label)]) for label in y])
-
+            if len(sample) > 0:
+                x, y = sample
+                x = torch.cat([self.train_transform(transforms.ToPILImage()(img)).unsqueeze(0) for img in x])
+                y = torch.cat([torch.tensor([self.exposed_classes.index(label)]) for label in y])
             if len(self.memory) > 0:
-                memory_data = self.memory.get_batch(y.size(0))
-                x = torch.cat([x, memory_data['image']])
-                y = torch.cat([y, memory_data['label']])
+                if len(sample) > 0:
+                    memory_data = self.memory.get_batch(memory_batch_size)
+                    x = torch.cat([x, memory_data['image']])
+                    y = torch.cat([y, memory_data['label']])
+                else:
+                    memory_data = self.memory.get_batch(batch_size)
+                    x = memory_data['image']
+                    y = memory_data['label']
             x = x.to(self.device)
             y = y.to(self.device)
 
@@ -354,7 +364,7 @@ class CLIB_ViT(ER):
                 y = y.to(self.device)
 
                 logit = self.model(x)['logits']
-                loss = criterion(logit, y)
+                loss = self.criterion(logit, y)
                 pred = torch.argmax(logit, dim=-1)
                 _, preds = logit.topk(self.topk, 1, True, True)
                 total_correct += torch.sum(preds == y.unsqueeze(1)).item()
