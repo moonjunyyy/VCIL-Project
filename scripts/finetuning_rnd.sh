@@ -1,6 +1,6 @@
 #!/bin/bash
 
-#SBATCH --job-name Finetuning_iblurry_cifar100_N50_M10
+#SBATCH --job-name Finetuning_iblurry_cifar100_N50_M10_RANDOM
 #SBATCH -p batch
 #SBATCH --nodes=1
 #SBATCH --gres=gpu:1
@@ -33,7 +33,7 @@ python --version
 
 # CIL CONFIG
 MODE="Finetuning"
-NOTE="Finetuning_iblurry_cifar100_N50_M10" # Short description of the experiment. (WARNING: logs/results with the same note will be overwritten!)
+NOTE="Finetuning_iblurry_cifar100_N50_M10_RANDOM" # Short description of the experiment. (WARNING: logs/results with the same note will be overwritten!)
 
 DATASET="cifar100" # cifar10, cifar100, tinyimagenet, imagenet
 N_TASKS=5
@@ -84,5 +84,5 @@ do
     --model_name $MODEL_NAME --opt_name $OPT_NAME --sched_name $SCHED_NAME \
     --lr $LR --batchsize $BATCHSIZE \
     --memory_size $MEM_SIZE $GPU_TRANSFORM --online_iter $ONLINE_ITER --data_dir /local_datasets/ \
-    --note $NOTE --eval_period $EVAL_PERIOD --memory_epoch $MEMORY_EPOCH $USE_AMP
+    --note $NOTE --eval_period $EVAL_PERIOD --memory_epoch $MEMORY_EPOCH $USE_AMP  --rnd_NM
 done

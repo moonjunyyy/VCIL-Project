@@ -451,7 +451,7 @@ class L2P(ER):
                 y = y.to(self.device)
                 logit = self.model(x)
 
-                loss = criterion(logit, y)
+                loss = self.criterion(logit, y)
                 pred = torch.argmax(logit, dim=-1)
                 _, preds = logit.topk(self.topk, 1, True, True)
 

@@ -131,7 +131,7 @@ def main():
     train_dataset   = datasets[args.dataset](root=args.data_dir, train=True,  download=True, 
                                              transform=transforms.ToTensor())
     test_dataset    = datasets[args.dataset](root=args.data_dir, train=False, download=True, transform=test_transform)
-    train_sampler   = OnlineSampler(train_dataset, args.n_tasks, args.m, args.n, args.rnd_seed, 0)
+    train_sampler   = OnlineSampler(train_dataset, args.n_tasks, args.m, args.n, args.rnd_seed, 0, args.rnd_NM)
 
     num_eval = args.eval_period
     features = []

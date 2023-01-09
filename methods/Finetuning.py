@@ -271,7 +271,7 @@ class Finetuning:
                 # logit = self.model(x)['logits']
                 logit = self.model(transforms.Resize((224,224))(x))['logits']
 
-                loss = criterion(logit, y)
+                loss = self.criterion(logit, y)
                 pred = torch.argmax(logit, dim=-1)
                 _, preds = logit.topk(self.topk, 1, True, True)
 
