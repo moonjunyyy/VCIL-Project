@@ -90,11 +90,11 @@ class OnlineSampler(Sampler):
                         num_blurred += 1
                         break
 
-            self.indices = [[] for _ in range(num_tasks)]
-            for i in range(num_tasks):
-                print("task %d: disjoint %d, blurry %d" % (i, len(self.disjoint_indices[i]), len(self.blurry_indices[i])))
-                self.indices[i] = self.disjoint_indices[i] + self.blurry_indices[i]
-                self.indices[i] = torch.tensor(self.indices[i])[torch.randperm(len(self.indices[i]), generator=self.generator)].tolist()
+            # self.indices = [[] for _ in range(num_tasks)]
+            # for i in range(num_tasks):
+            #     print("task %d: disjoint %d, blurry %d" % (i, len(self.disjoint_indices[i]), len(self.blurry_indices[i])))
+            #     self.indices[i] = self.disjoint_indices[i] + self.blurry_indices[i]
+            #     self.indices[i] = torch.tensor(self.indices[i])[torch.randperm(len(self.indices[i]), generator=self.generator)].tolist()
 
             # Randomly shuffle M% of blurry indices
             blurred = []
@@ -111,6 +111,12 @@ class OnlineSampler(Sampler):
             for i in range(num_tasks):
                 self.blurry_indices[i] += blurred[:num_blurred[i + 1] - num_blurred[i]]
                 blurred = blurred[num_blurred[i + 1] - num_blurred[i]:]
+                
+            self.indices = [[] for _ in range(num_tasks)]
+            for i in range(num_tasks):
+                print("task %d: disjoint %d, blurry %d" % (i, len(self.disjoint_indices[i]), len(self.blurry_indices[i])))
+                self.indices[i] = self.disjoint_indices[i] + self.blurry_indices[i]
+                self.indices[i] = torch.tensor(self.indices[i])[torch.randperm(len(self.indices[i]), generator=self.generator)].tolist()
 
     def __iter__(self):
         return iter(self.indices[self.task])

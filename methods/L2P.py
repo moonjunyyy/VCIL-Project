@@ -282,6 +282,7 @@ class L2P(ER):
         self.start_time = time.time()
         num_samples = {'cifar10': 50000, 'cifar100': 50000, 'tinyimagenet': 100000, 'imagenet': 1281167}
         self.total_samples = num_samples[self.dataset]
+        self.convert_li = ['airplane','automobile','bird','cat','deer','dog','frog','horse','ship','truck']
 
     def online_step(self, sample, sample_num, n_worker):
         image, label = sample
@@ -414,9 +415,28 @@ class L2P(ER):
         self.report_test(sample_num, eval_dict["avg_loss"], eval_dict["avg_acc"])
         return eval_dict
 
-    def online_before_task(self, cur_iter):
-        # Task-Free
-        pass
+    def online_before_task(self,train_loader,debug):
+        #todo 현재 Task Class 및 Sample 확인
+        data_info = {}
+        for i, data in enumerate(train_loader):
+            # if debug and (i+1)*self.batch_size == 200:
+            #     break
+            _,label = data
+            # image = image.to(self.device)
+            label = label.to(self.device)
+            
+            for b in range(label.shape[0]):
+                if 'Class_'+str(label[b].item()) in data_info.keys():
+                    data_info['Class_'+str(label[b].item())] +=1
+                else:
+                    data_info['Class_'+str(label[b].item())] =1
+        
+        print("Current Task Data Info")
+        print(data_info)
+        print("<<Convert to str>>")
+        convert_data_info = self.convert_class_from_int_to_str(data_info)
+        print(convert_data_info)
+        print()
 
     def online_after_task(self, cur_iter):
         # Task-Free
@@ -487,3 +507,57 @@ class L2P(ER):
             ret_corrects[cls_idx] = cnt
 
         return ret_num_data, ret_corrects
+    
+
+    def train_data_config(self,n_task, train_dataset,train_sampler):
+        from torch.utils.data import DataLoader
+        for t_i in range(n_task):
+            train_sampler.set_task(t_i)
+            train_dataloader= DataLoader(train_dataset, batch_size=self.batch_size, sampler=train_sampler, num_workers=4)
+            data_info = {}
+            for i, data in enumerate(train_dataloader):
+                _,label = data
+                label = label.to(self.device)
+                
+                for b in range(len(label)):
+                    if 'Class_'+str(label[b].item()) in data_info.keys():
+                        data_info['Class_'+str(label[b].item())] +=1
+                    else:
+                        data_info['Class_'+str(label[b].item())] =1
+            print(f"[Train] Task {t_i} Data Info")
+            convert_data_info = self.convert_class_from_int_to_str(data_info)
+            print(convert_data_info)
+            print()
+    
+    def test_data_config(self, test_dataloader,task_id):
+        from torch.utils.data import DataLoader
+        data_info = {}
+        for i, data in enumerate(test_dataloader):
+            _,label = data
+            label = label.to(self.device)
+            
+            for b in range(len(label)):
+                if 'Class_'+str(label[b].item()) in data_info.keys():
+                    data_info['Class_'+str(label[b].item())] +=1
+                else:
+                    data_info['Class_'+str(label[b].item())] =1
+                    
+        print('<<Exposed Class>>')
+        print(self.exposed_classes)
+        
+        print(f"[Test] Task {task_id} Data Info")
+        print(data_info)
+        print("<<Convert>>")
+        convert_data_info = self.convert_class_from_int_to_str(data_info)
+        print(convert_data_info)
+        print()
+        
+        
+    def convert_class_from_int_to_str(self,data_info):
+        
+        self.convert_li
+        for key in list(data_info.keys()):
+            old_key = int(key[6:])
+            data_info[self.convert_li[old_key]] = data_info.pop(key)
+        
+        return data_info
