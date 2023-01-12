@@ -1,6 +1,6 @@
 #!/bin/bash
 
-#SBATCH -J L2P_iblurry_cifar10_N50_M10
+#SBATCH -J L2P_iblurry_cifar10_N50_M10_RND
 #SBATCH -p batch
 #SBATCH -w vll1
 #SBATCH --nodes=1
@@ -31,7 +31,7 @@ conda --version
 python --version
 
 # CIL CONFIG
-NOTE="L2P_iblurry_cifar10_N50_M10" # Short description of the experiment. (WARNING: logs/results with the same note will be overwritten!)
+NOTE="L2P_iblurry_cifar10_N50_M10_RND" # Short description of the experiment. (WARNING: logs/results with the same note will be overwritten!)
 MODE="L2P"
 DATASET="cifar10" # cifar10, cifar100, tinyimagenet, imagenet
 N_TASKS=5
@@ -83,5 +83,5 @@ do
     --model_name $MODEL_NAME --opt_name $OPT_NAME --sched_name $SCHED_NAME \
     --lr $LR --batchsize $BATCHSIZE \
     --memory_size $MEM_SIZE $GPU_TRANSFORM --online_iter $ONLINE_ITER --data_dir /local_datasets \
-    --note $NOTE --eval_period $EVAL_PERIOD --memory_epoch $MEMORY_EPOCH $USE_AMP
+    --note $NOTE --eval_period $EVAL_PERIOD --memory_epoch $MEMORY_EPOCH $USE_AMP --rnd_NM
 done

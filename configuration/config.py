@@ -20,6 +20,7 @@ def base_parser():
     parser.add_argument("--n_tasks", type=int, default=5, help="The number of tasks")
     parser.add_argument("--n", type=int, default=50, help="The percentage of disjoint split. Disjoint=100, Blurry=0")
     parser.add_argument("--m", type=int, default=10, help="The percentage of blurry samples in blurry split. Uniform split=100, Disjoint=0")
+    parser.add_argument("--rnd_NM", action='store_true', default=False, help="if True, N and M are randomly mixed over tasks.")
     parser.add_argument("--rnd_seed", type=int, help="Random seed number.")
     parser.add_argument(
         "--memory_size", type=int, default=500, help="Episodic memory size"

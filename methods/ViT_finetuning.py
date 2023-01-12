@@ -1,4 +1,28 @@
-# When we make a new one, we should inherit the Finetune class.
+from typing import TypeVar
+
+import timm
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+import logging
+import copy
+
+import numpy as np
+import pandas as pd
+import torch
+import torch.nn as nn
+from torch import optim
+from torch.utils.data import DataLoader
+from torch.utils.tensorboard import SummaryWriter
+from utils.augment import Cutout, Invert, Solarize, select_autoaugment
+from torchvision import transforms
+from randaugment.randaugment import RandAugment
+
+from methods.er_baseline import ER
+from utils.data_loader import cutmix_data, ImageDataset
+from utils.augment import Cutout, Invert, Solarize, select_autoaugment
+
+
 import logging
 import copy
 import time
@@ -11,22 +35,36 @@ import torch.nn as nn
 from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
 from torch import optim
-from torchvision import transforms
+
 from utils.data_loader import ImageDataset, StreamDataset, MemoryDataset, cutmix_data, get_statistics
 from utils.train_utils import select_model, select_optimizer, select_scheduler
+
+import timm
+from timm.models.registry import register_model
+from timm.models.vision_transformer import _cfg, _create_vision_transformer, default_cfgs
 
 logger = logging.getLogger()
 writer = SummaryWriter("tensorboard")
 
+T = TypeVar('T', bound = 'nn.Module')
 
-def cycle(iterable):
-    # iterate with shuffling
-    while True:
-        for i in iterable:
-            yield i
+default_cfgs['vit_base_patch16_224_l2p'] = _cfg(
+        url='https://storage.googleapis.com/vit_models/imagenet21k/ViT-B_16.npz',
+        num_classes=21843)
 
+# Register the backbone model to timm
+@register_model
+def vit_base_patch16_224_l2p(pretrained=False, **kwargs):
+    """ ViT-Base model (ViT-B/32) from original paper (https://arxiv.org/abs/2010.11929).
+    ImageNet-21k weights @ 224x224, source https://github.com/google-research/vision_transformer.
+    NOTE: this model has valid 21k classifier head and no representation (pre-logits) layer
+    """
+    model_kwargs = dict(
+        patch_size=16, embed_dim=768, depth=12, num_heads=12, **kwargs)
+    model = _create_vision_transformer('vit_base_patch16_224_l2p', pretrained=pretrained, **model_kwargs)
+    return model
 
-class Finetuning:
+class ViT_FT(ER):
     def __init__(
             self, criterion, device, train_transform, test_transform, n_classes, **kwargs
     ):
@@ -55,11 +93,13 @@ class Finetuning:
 
         self.online_iter = kwargs["online_iter"]
         self.batch_size = kwargs["batchsize"]
+        
         self.temp_batchsize = kwargs["temp_batchsize"]
         if self.temp_batchsize is None:
             self.temp_batchsize = self.batch_size//2
         if self.temp_batchsize > self.batch_size:
             self.temp_batchsize = self.batch_size
+        
         self.memory_size -= self.temp_batchsize
 
         self.gpu_transform = kwargs["gpu_transform"]
@@ -67,18 +107,32 @@ class Finetuning:
         if self.use_amp:
             self.scaler = torch.cuda.amp.GradScaler()
 
-        self.model = select_model(self.model_name, self.dataset, 1).to(self.device)
-        self.optimizer = select_optimizer(self.opt_name, self.lr, self.model,is_vit=True)
+        self.data_cnt       = 0
+
+        self.sched_name     = "const"
+        self.batch_size     = kwargs["batchsize"]
+        self.n_worker       = kwargs["n_worker"]
+
+        self.model =  timm.create_model('vit_base_patch16_224_l2p', pretrained=True, num_classes=1).to(self.device)
+        for param in self.model.parameters():
+            param.requires_grad = True
+        self.model.head.weight.requires_grad = True
+        self.model.head.bias.requires_grad = True
+
+        self.model.parameters()
+        
+        params = [param for name, param in self.model.named_parameters() if 'head' not in name]
+        self.optimizer = select_optimizer(self.opt_name, self.lr, self.model, True)
         if 'imagenet' in self.dataset:
             self.lr_gamma = 0.99995
         else:
             self.lr_gamma = 0.9999
-        self.scheduler = select_scheduler(self.sched_name, self.optimizer, self.lr_gamma)
 
+        self.scheduler = select_scheduler(self.sched_name, self.optimizer, self.lr_gamma)
         self.criterion = criterion.to(self.device)
-        self.memory = MemoryDataset(self.train_transform, cls_list=self.exposed_classes,
-                                    test_transform=self.test_transform)
+        # self.criterion = self.model.loss_fn
         self.temp_batch = []
+        self.temp_label = []
         self.num_updates = 0
         self.train_count = 0
         self.batch_size = kwargs["batchsize"]
@@ -86,6 +140,10 @@ class Finetuning:
         self.start_time = time.time()
         num_samples = {'cifar10': 50000, 'cifar100': 50000, 'tinyimagenet': 100000, 'imagenet': 1281167}
         self.total_samples = num_samples[self.dataset]
+        if self.dataset=='cifar10':
+            self.convert_li = ['airplane','automobile','bird','cat','deer','dog','frog','horse','ship','truck']
+        else:
+            raise RuntimeError('No conver_li')
 
     def online_step(self, sample, sample_num, n_worker):
         image, label = sample
@@ -94,12 +152,11 @@ class Finetuning:
                 self.add_new_class(l.item())
 
         self.num_updates += self.online_iter * self.batch_size
-        # if len(self.temp_batch) == self.temp_batchsize:
         train_loss, train_acc = self.online_train([image, label], self.batch_size * 2, n_worker,
                                                     iterations=int(self.num_updates), stream_batch_size=self.batch_size)
         self.report_training(sample_num, train_loss, train_acc)
-        for stored_sample, stored_label in zip(image, label):
-            self.update_memory((stored_sample, stored_label))
+        # for stored_sample, stored_label in zip(image, label):
+        #     self.update_memory((stored_sample, stored_label))
         self.temp_batch = []
         self.num_updates -= int(self.num_updates)
 
@@ -107,51 +164,40 @@ class Finetuning:
         self.exposed_classes.append(class_name)
         self.num_learned_class = len(self.exposed_classes)
         prev_weight = copy.deepcopy(self.model.head.weight.data)
-        self.model.head = nn.Linear(self.model.head.in_features, self.num_learned_class).to(self.device)
+        prev_bias   = copy.deepcopy(self.model.head.bias.data)
+        self.model.reset_classifier(self.num_learned_class)
 
+        self.model.head.to(self.device)
         with torch.no_grad():
             if self.num_learned_class > 1:
                 self.model.head.weight[:self.num_learned_class - 1] = prev_weight
+                self.model.head.bias[:self.num_learned_class - 1]   = prev_bias
         for param in self.optimizer.param_groups[1]['params']:
             if param in self.optimizer.state.keys():
                 del self.optimizer.state[param]
         del self.optimizer.param_groups[1]
         self.optimizer.add_param_group({'params': self.model.head.parameters()})
-        self.memory.add_new_class(cls_list=self.exposed_classes)
+        # self.memory.add_new_class(cls_list=self.exposed_classes)
         if 'reset' in self.sched_name:
             self.update_schedule(reset=True)
 
     def online_train(self, sample, batch_size, n_worker, iterations=1, stream_batch_size=1):
+        
         total_loss, correct, num_data = 0.0, 0.0, 0.0
-        # if stream_batch_size > 0:
-        #     sample_dataset = StreamDataset(sample, transform=self.train_transform, cls_list=self.exposed_classes)
 
         # if len(self.memory) > 0 and batch_size - stream_batch_size > 0:
         #     memory_batch_size = min(len(self.memory), batch_size - stream_batch_size)
-
         for i in range(iterations):
             self.model.train()
-            # x = []
-            # y = []
             x, y = sample
             x = torch.cat([self.train_transform(transforms.ToPILImage()(img)).unsqueeze(0) for img in x])
             y = torch.cat([torch.tensor([self.exposed_classes.index(label)]) for label in y])
-            # if stream_batch_size > 0:
-            #     # sample = sample_dataset.get_data()
-            #     x.append(sample['image'])
-            #     y.append(sample['label'])
-            if len(self.memory) > 0:
-                memory_data = self.memory.get_batch(y.size(0))
-                x = torch.cat([x, memory_data['image']])
-                y = torch.cat([y, memory_data['label']])
-                # x.append(memory_data['image'])
-                # y.append(memory_data['label'])
-            # x = torch.cat([x])
-            # y = torch.cat([y])
-
+            # if len(self.memory) > 0:
+            #     memory_data = self.memory.get_batch(memory_batch_size)
+            #     x = torch.cat([x, memory_data['image']])
+            #     y = torch.cat([y, memory_data['label']])
             x = x.to(self.device)
             y = y.to(self.device)
-            # print("[Target shape]",y.shape)
 
             self.optimizer.zero_grad()
 
@@ -178,25 +224,21 @@ class Finetuning:
     def model_forward(self, x, y):
         do_cutmix = self.cutmix and np.random.rand(1) < 0.5
         if do_cutmix:
-            # print("[do_Cutmix]")
             x, labels_a, labels_b, lam = cutmix_data(x=x, y=y, alpha=1.0)
-            
             if self.use_amp:
                 with torch.cuda.amp.autocast():
-                    logit = self.model(transforms.Resize((224,224))(x))['logits']
+                    logit = self.model(x)
                     loss = lam * self.criterion(logit, labels_a) + (1 - lam) * self.criterion(logit, labels_b)
             else:
-                logit = self.model(transforms.Resize((224,224))(x))['logits']
+                logit = self.model(x)
                 loss = lam * self.criterion(logit, labels_a) + (1 - lam) * self.criterion(logit, labels_b)
         else:
-            # print("[do_Not_Cutmix]")
             if self.use_amp:
-                # x =
                 with torch.cuda.amp.autocast():
-                    logit = self.model(transforms.Resize((224,224))(x))['logits']
+                    logit = self.model(x)
                     loss = self.criterion(logit, y)
             else:
-                logit = self.model(transforms.Resize((224,224))(x))['logits']
+                logit = self.model(x)
                 loss = self.criterion(logit, y)
         return logit, loss
 
@@ -227,7 +269,7 @@ class Finetuning:
                 param_group["lr"] = self.lr
         else:
             self.scheduler.step()
-            
+
     def online_evaluate(self, test_loader, sample_num):
         eval_dict = self.evaluation(test_loader, self.criterion)
         self.report_test(sample_num, eval_dict["avg_loss"], eval_dict["avg_acc"])
@@ -268,10 +310,9 @@ class Finetuning:
                     y[j] = self.exposed_classes.index(y[j].item())
                 x = x.to(self.device)
                 y = y.to(self.device)
-                # logit = self.model(x)['logits']
-                logit = self.model(transforms.Resize((224,224))(x))['logits']
+                logit = self.model(x)
 
-                loss = self.criterion(logit, y)
+                loss = criterion(logit, y)
                 pred = torch.argmax(logit, dim=-1)
                 _, preds = logit.topk(self.topk, 1, True, True)
 
@@ -292,6 +333,49 @@ class Finetuning:
 
         return ret
 
+    
+    def evaluation_with_feature(self, test_loader, criterion):
+        total_correct, total_num_data, total_loss = 0.0, 0.0, 0.0
+        correct_l = torch.zeros(self.n_classes) 
+        num_data_l = torch.zeros(self.n_classes)
+        label = []
+
+        self.model.eval()
+        embedding = [np.empty((0, 768)) for _ in range(self.n_classes)]
+        with torch.no_grad():
+            for i, data in enumerate(test_loader):
+                x, y = data
+                for j in range(len(y)):
+                    y[j] = self.exposed_classes.index(y[j].item())
+                x = x.to(self.device)
+                y = y.to(self.device)
+                logit = self.model(x)
+                        
+                x = self.model.forward_features(x)
+                for cls in y:
+                    embedding[cls] = np.concatenate([embedding[cls], x[cls].cpu().numpy()])
+                logit = self.model.forward_head(x)
+
+                loss = self.criterion(logit, y)
+                pred = torch.argmax(logit, dim=-1)
+                _, preds = logit.topk(self.topk, 1, True, True)
+
+                total_correct += torch.sum(preds == y.unsqueeze(1)).item()
+                total_num_data += y.size(0)
+
+                xlabel_cnt, correct_xlabel_cnt = self._interpret_pred(y, pred)
+                correct_l += correct_xlabel_cnt.detach().cpu()
+                num_data_l += xlabel_cnt.detach().cpu()
+
+                total_loss += loss.item()
+                label += y.tolist()
+
+        avg_acc = total_correct / total_num_data
+        avg_loss = total_loss / len(test_loader)
+        cls_acc = (correct_l / (num_data_l + 1e-5)).numpy().tolist()
+        ret = {"avg_loss": avg_loss, "avg_acc": avg_acc, "cls_acc": cls_acc, "embedding": embedding}
+        return ret
+
     def _interpret_pred(self, y, pred):
         # xlable is batch
         ret_num_data = torch.zeros(self.n_classes)
@@ -307,3 +391,56 @@ class Finetuning:
             ret_corrects[cls_idx] = cnt
 
         return ret_num_data, ret_corrects
+    
+    def train_data_config(self,n_task, train_dataset,train_sampler):
+        from torch.utils.data import DataLoader
+        for t_i in range(n_task):
+            train_sampler.set_task(t_i)
+            train_dataloader= DataLoader(train_dataset, batch_size=self.batch_size, sampler=train_sampler, num_workers=4)
+            data_info = {}
+            for i, data in enumerate(train_dataloader):
+                _,label = data
+                label = label.to(self.device)
+                
+                for b in range(len(label)):
+                    if 'Class_'+str(label[b].item()) in data_info.keys():
+                        data_info['Class_'+str(label[b].item())] +=1
+                    else:
+                        data_info['Class_'+str(label[b].item())] =1
+            print(f"[Train] Task {t_i} Data Info")
+            convert_data_info = self.convert_class_from_int_to_str(data_info)
+            print(convert_data_info)
+            print()
+    
+    def test_data_config(self, test_dataloader,task_id):
+        from torch.utils.data import DataLoader
+        data_info = {}
+        for i, data in enumerate(test_dataloader):
+            _,label = data
+            label = label.to(self.device)
+            
+            for b in range(len(label)):
+                if 'Class_'+str(label[b].item()) in data_info.keys():
+                    data_info['Class_'+str(label[b].item())] +=1
+                else:
+                    data_info['Class_'+str(label[b].item())] =1
+                    
+        print('<<Exposed Class>>')
+        print(self.exposed_classes)
+        
+        print(f"[Test] Task {task_id} Data Info")
+        print(data_info)
+        print("<<Convert>>")
+        convert_data_info = self.convert_class_from_int_to_str(data_info)
+        print(convert_data_info)
+        print()
+        
+        
+    def convert_class_from_int_to_str(self,data_info):
+        
+        self.convert_li
+        for key in list(data_info.keys()):
+            old_key = int(key[6:])
+            data_info[self.convert_li[old_key]] = data_info.pop(key)
+        
+        return data_info

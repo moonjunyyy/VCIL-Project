@@ -13,14 +13,76 @@ from torch.utils.tensorboard import SummaryWriter
 from scipy.stats import ttest_ind
 
 from methods.er_baseline import ER
-from utils.data_loader import cutmix_data, ImageDataset, StreamDataset, MemoryDataset
+from utils.data_loader import ImageDataset, StreamDataset, MemoryDataset, cutmix_data, get_statistics
+from utils.train_utils import select_model, select_optimizer, select_scheduler
+
+import time
 
 logger = logging.getLogger()
 writer = SummaryWriter("tensorboard")
 
-class CLIB(ER):
+class CLIB_ViT(ER):
     def __init__(self, criterion, device, train_transform, test_transform, n_classes, **kwargs):
-        super().__init__(criterion, device, train_transform, test_transform, n_classes, **kwargs)
+        
+        self.num_learned_class = 0
+        self.num_learning_class = 1
+        self.n_classes = n_classes
+        self.exposed_classes = []
+        self.seen = 0
+        self.topk = kwargs["topk"]
+
+        self.device = device
+        self.dataset = kwargs["dataset"]
+        self.model_name = kwargs["model_name"]
+        self.opt_name = kwargs["opt_name"]
+        self.sched_name = kwargs["sched_name"]
+        if self.sched_name == "default":
+            self.sched_name = 'exp_reset'
+        self.lr = kwargs["lr"]
+
+        self.train_transform = train_transform
+        self.cutmix = "cutmix" in kwargs["transforms"]
+        self.test_transform = test_transform
+
+        self.memory_size = kwargs["memory_size"]
+        self.data_dir = kwargs["data_dir"]
+
+        self.online_iter = kwargs["online_iter"]
+        self.batch_size = kwargs["batchsize"]
+        
+        self.temp_batchsize = kwargs["temp_batchsize"]
+        if self.temp_batchsize is None:
+            self.temp_batchsize = self.batch_size//2
+        if self.temp_batchsize > self.batch_size:
+            self.temp_batchsize = self.batch_size
+        
+        self.memory_size -= self.temp_batchsize
+
+        self.gpu_transform = kwargs["gpu_transform"]
+        self.use_amp = kwargs["use_amp"]
+        if self.use_amp:
+            self.scaler = torch.cuda.amp.GradScaler()
+
+        self.model = select_model(self.model_name, self.dataset, 1).to(self.device)
+        self.optimizer = select_optimizer(self.opt_name, self.lr, self.model, True)
+        if 'imagenet' in self.dataset:
+            self.lr_gamma = 0.99995
+        else:
+            self.lr_gamma = 0.9999
+
+        self.scheduler = select_scheduler(self.sched_name, self.optimizer, self.lr_gamma)
+
+        self.criterion = criterion.to(self.device)
+        self.temp_batch = []
+        self.temp_label = []
+        self.num_updates = 0
+        self.train_count = 0
+        self.batch_size = kwargs["batchsize"]
+
+        self.start_time = time.time()
+        num_samples = {'cifar10': 50000, 'cifar100': 50000, 'tinyimagenet': 100000, 'imagenet': 1281167}
+        self.total_samples = num_samples[self.dataset]
+
         self.memory_size = kwargs["memory_size"]
 
         # Samplewise importance variables
@@ -45,16 +107,19 @@ class CLIB(ER):
         self.high_lr_loss = []
         self.low_lr_loss = []
         self.current_lr = self.lr
+        
+        self.convert_li = ['airplane','automobile','bird','cat','deer','dog','frog','horse','ship','truck']
 
     def online_step(self, sample, sample_num, n_worker):
         image, label = sample
         for l in label:
             if l.item() not in self.exposed_classes:
                 self.add_new_class(l.item())
+
         for stored_sample, stored_label in zip(image, label):
             self.update_memory((stored_sample, stored_label))
+
         self.num_updates += self.online_iter * self.batch_size
-        # if len(self.temp_batch) == self.temp_batchsize:
         train_loss, train_acc = self.online_train([], self.batch_size, n_worker,
                                                     iterations=int(self.num_updates), stream_batch_size=0)
         self.report_training(sample_num, train_loss, train_acc)
@@ -64,8 +129,9 @@ class CLIB(ER):
         self.samplewise_importance_memory(sample)
 
     def online_train(self, sample, batch_size, n_worker, iterations=1, stream_batch_size=0):
-        # print("This is an online_train process in clib.py")
+
         total_loss, correct, num_data = 0.0, 0.0, 0.0
+        
         if len(self.memory) > 0 and batch_size - stream_batch_size > 0:
             memory_batch_size = min(len(self.memory), batch_size - stream_batch_size)
 
@@ -107,15 +173,39 @@ class CLIB(ER):
 
         return total_loss / iterations, correct / num_data
 
+    def model_forward(self, x, y):
+        do_cutmix = self.cutmix and np.random.rand(1) < 0.5
+        if do_cutmix:
+            x, labels_a, labels_b, lam = cutmix_data(x=x, y=y, alpha=1.0)
+            if self.use_amp:
+                with torch.cuda.amp.autocast():
+                    logit = self.model(x)['logits']
+                    loss = lam * self.criterion(logit, labels_a) + (1 - lam) * self.criterion(logit, labels_b)
+            else:
+                logit = self.model(x)['logits']
+                loss = lam * self.criterion(logit, labels_a) + (1 - lam) * self.criterion(logit, labels_b)
+        else:
+            if self.use_amp:
+                with torch.cuda.amp.autocast():
+                    logit = self.model(x)['logits']
+                    loss = self.criterion(logit, y)
+            else:
+                logit = self.model(x)['logits']
+                loss = self.criterion(logit, y)
+        return logit, loss
+
     def add_new_class(self, class_name):
         self.exposed_classes.append(class_name)
         self.num_learned_class = len(self.exposed_classes)
-        prev_weight = copy.deepcopy(self.model.fc.weight.data)
-        self.model.fc = nn.Linear(self.model.fc.in_features, self.num_learned_class).to(self.device)
+        prev_weight = copy.deepcopy(self.model.head.weight.data)
+        prev_bias = copy.deepcopy(self.model.head.bias.data)
+        self.model.reset_classifier(self.num_learned_class)
 
         with torch.no_grad():
             if self.num_learned_class > 1:
-                self.model.fc.weight[:self.num_learned_class - 1] = prev_weight
+                self.model.head.weight.data[:self.num_learned_class - 1] = prev_weight
+                self.model.head.bias.data[:self.num_learned_class - 1] = prev_bias
+        self.model.to(self.device)
         sdict = copy.deepcopy(self.optimizer.state_dict())
         fc_params = sdict['param_groups'][1]['params']
         if len(sdict['state']) > 0:
@@ -125,7 +215,7 @@ class CLIB(ER):
             if param in self.optimizer.state.keys():
                 del self.optimizer.state[param]
         del self.optimizer.param_groups[1]
-        self.optimizer.add_param_group({'params': self.model.fc.parameters()})
+        self.optimizer.add_param_group({'params': self.model.head.parameters()})
         if len(sdict['state']) > 0:
             if 'adam' in self.opt_name:
                 fc_weight = self.optimizer.param_groups[1]['params'][0]
@@ -168,12 +258,12 @@ class CLIB(ER):
                     if self.use_amp:
                         with torch.cuda.amp.autocast():
                             logit = torch.cat(
-                                [self.model(torch.cat(x[i * batchsize:min((i + 1) * batchsize, len(x))]).to(self.device))
+                                [self.model(torch.cat(x[i * batchsize:min((i + 1) * batchsize, len(x))]).to(self.device))['logits']
                                 for i in range(-(-len(x) // batchsize))], dim=0)
 
                     else:
                         logit = torch.cat(
-                            [self.model(torch.cat(x[i * batchsize:min((i + 1) * batchsize, len(x))]).to(self.device))
+                            [self.model(torch.cat(x[i * batchsize:min((i + 1) * batchsize, len(x))]).to(self.device))['logits']
                              for i in range(-(-len(x) // batchsize))], dim=0)
 
                     loss = F.cross_entropy(logit, y, reduction='none').cpu().numpy()
@@ -259,59 +349,7 @@ class CLIB(ER):
                                 param_group["lr"] = self.high_lr
                                 param_group["initial_lr"] = self.high_lr
 
-class CLIB(ER):
-    def __init__(self, *args, **kwargs) -> None:
-        super(CLIB, self).__init__(*args, **kwargs)
-
-    def online_step(self, sample, samples_cnt):
-        image, label = sample
-        for l in label:
-            if l.item() not in self.exposed_classes:
-                self.add_new_class(l.item())
-        for img,lbl in zip(image, label):
-            self.update_memory([img, lbl])
-        self.num_updates += self.online_iter * self.batchsize
-        train_loss, train_acc = self.online_train([torch.empty((0,)), torch.empty((0,))], iterations=int(self.num_updates))
-        self.num_updates -= int(self.num_updates)
-        return train_loss, train_acc
-    
-    def update_memory(self, sample):
-        x, y = sample
-        if len(self.memory) >= self.memory_size:
-            label_frequency = copy.deepcopy(self.memory.cls_count)
-            label_frequency[self.exposed_classes.index(y.item())] += 1
-            cls_to_replace = np.argmax(np.array(label_frequency))
-            cand_idx = self.memory.cls_idx[cls_to_replace]
-            score = self.memory.others_loss_decrease[cand_idx]
-            idx_to_replace = cand_idx[np.argmin(score)]
-            self.memory.replace_sample(sample, idx_to_replace)
-            self.dropped_idx.append(idx_to_replace)
-            self.memory_dropped_idx.append(idx_to_replace)
-        else:
-            self.memory.replace_sample(sample)
-            self.dropped_idx.append(len(self.memory) - 1)
-            self.memory_dropped_idx.append(len(self.memory) - 1)
-
-    def online_before_task(self, task_id):
-        pass
-
-    def online_after_task(self, task_id):
-        pass
-
-    def model_forward(self, x, y):
-        do_cutmix = self.cutmix and np.random.rand(1) < 0.5
-        if do_cutmix:
-            x, labels_a, labels_b, lam = cutmix_data(x=x, y=y, alpha=1.0)
-            with torch.cuda.amp.autocast(enabled=self.use_amp):
-                logit = self.model(x)
-                loss = lam * self.criterion(logit, labels_a) + (1 - lam) * self.criterion(logit, labels_b)
-        else:
-            with torch.cuda.amp.autocast(enabled=self.use_amp):
-                logit = self.model(x)
-                loss = self.criterion(logit, y)
-        return logit, loss
-
-    def online_evaluate(self, test_loader):
+    def evaluation(self, test_loader, criterion):
         total_correct, total_num_data, total_loss = 0.0, 0.0, 0.0
         correct_l = torch.zeros(self.n_classes)
         num_data_l = torch.zeros(self.n_classes)
@@ -327,7 +365,7 @@ class CLIB(ER):
                 x = x.to(self.device)
                 y = y.to(self.device)
 
-                logit = self.model(x)
+                logit = self.model(x)['logits']
                 loss = self.criterion(logit, y)
                 pred = torch.argmax(logit, dim=-1)
                 _, preds = logit.topk(self.topk, 1, True, True)
@@ -345,13 +383,99 @@ class CLIB(ER):
         avg_loss = total_loss / len(test_loader)
         cls_acc = (correct_l / (num_data_l + 1e-5)).numpy().tolist()
         
-        eval_dict = {"avg_loss": avg_loss, "avg_acc": avg_acc, "cls_acc": cls_acc}
-        return eval_dict
+        ret = {"avg_loss": avg_loss, "avg_acc": avg_acc, "cls_acc": cls_acc}
+        return ret
+    
+    def online_before_task(self,train_loader,debug):
+        #todo 현재 Task Class 및 Sample 확인
+        data_info = {}
+        for i, data in enumerate(train_loader):
+            # if debug and (i+1)*self.batch_size == 200:
+            #     break
+            _,label = data
+            # image = image.to(self.device)
+            label = label.to(self.device)
+            
+            for b in range(label.shape[0]):
+                if 'Class_'+str(label[b].item()) in data_info.keys():
+                    data_info['Class_'+str(label[b].item())] +=1
+                else:
+                    data_info['Class_'+str(label[b].item())] =1
+        
+        print("Current Task Data Info")
+        print(data_info)
+        print("<<Convert to str>>")
+        convert_data_info = self.convert_class_from_int_to_str(data_info)
+        print(convert_data_info)
+        print()
+        
 
-    def update_schedule(self, reset=False):
-        if reset:
-            self.scheduler = select_scheduler(self.sched_name, self.optimizer, self.lr_gamma)
-            for param_group in self.optimizer.param_groups:
-                param_group["lr"] = self.lr
-        else:
-            self.scheduler.step()
+    def train_data_config(self,n_task, train_dataset,train_sampler):
+        from torch.utils.data import DataLoader
+        for t_i in range(n_task):
+            train_sampler.set_task(t_i)
+            train_dataloader= DataLoader(train_dataset, batch_size=self.batch_size, sampler=train_sampler, num_workers=4)
+            data_info = {}
+            for i, data in enumerate(train_dataloader):
+                # if debug and (i+1)*self.batch_size == 200:
+                #     break
+                _,label = data
+                # image = image.to(self.device)
+                label = label.to(self.device)
+                
+                for b in range(len(label)):
+                    if 'Class_'+str(label[b].item()) in data_info.keys():
+                        data_info['Class_'+str(label[b].item())] +=1
+                    else:
+                        data_info['Class_'+str(label[b].item())] =1
+            print(f"[Train] Task {t_i} Data Info")
+            convert_data_info = self.convert_class_from_int_to_str(data_info)
+            print(convert_data_info)
+            print()
+    
+    def test_data_config(self, test_dataloader,task_id):
+        from torch.utils.data import DataLoader
+        # for t_i in range(n_task):
+        data_info = {}
+        for i, data in enumerate(test_dataloader):
+            # if debug and (i+1)*self.batch_size == 200:
+            #     break
+            _,label = data
+            # image = image.to(self.device)
+            label = label.to(self.device)
+            
+            for b in range(len(label)):
+                if 'Class_'+str(label[b].item()) in data_info.keys():
+                    data_info['Class_'+str(label[b].item())] +=1
+                else:
+                    data_info['Class_'+str(label[b].item())] =1
+                    
+        print('<<Exposed Class>>')
+        print(self.exposed_classes)
+        
+        print(f"[Test] Task {task_id} Data Info")
+        print(data_info)
+        print("<<Convert>>")
+        convert_data_info = self.convert_class_from_int_to_str(data_info)
+        print(convert_data_info)
+        print()
+        
+        
+    def convert_class_from_int_to_str(self,data_info):
+        
+        # old_d = {'Class 0': 5000, 'Class 1': 5220, 'Class 2':3000, 'Class 3': 220}
+        # d = {'Class 0': 5000, 'Class 1': 5220, 'Class 2':3000, 'Class 3': 220}
+        # a= ['car','bird','ship','airplane']
+        # for key in list(d.keys()):
+        # n_key = int(key[6:])
+        # d[a[n_key]] = d.pop(key)
+        
+        # print(old_d)
+        # print(d)
+        
+        self.convert_li
+        for key in list(data_info.keys()):
+            old_key = int(key[6:])
+            data_info[self.convert_li[old_key]] = data_info.pop(key)
+        
+        return data_info

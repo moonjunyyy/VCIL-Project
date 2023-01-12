@@ -41,7 +41,7 @@ from utils.train_utils import select_model, select_optimizer, select_scheduler
 import timm
 from timm.models.registry import register_model
 from timm.models.vision_transformer import _cfg, default_cfgs
-from models.cifar_vit import _create_vision_transformer
+from models.vit import _create_vision_transformer
 
 logger = logging.getLogger()
 writer = SummaryWriter("tensorboard")
@@ -271,8 +271,8 @@ class L2P(ER):
             self.lr_gamma = 0.9999
         # self.optimizer.add_param_group({'params': self.model.backbone.head.parameters()})
         self.scheduler = select_scheduler(self.sched_name, self.optimizer, self.lr_gamma)
-        self.memory = MemoryDataset(self.train_transform, cls_list=self.exposed_classes,
-                                    test_transform=self.test_transform)
+        # self.memory = MemoryDataset(self.train_transform, cls_list=self.exposed_classes,
+        #                             test_transform=self.test_transform)
         self.temp_batch = []
         self.temp_label = []
         self.num_updates = 0
@@ -282,6 +282,8 @@ class L2P(ER):
         self.start_time = time.time()
         num_samples = {'cifar10': 50000, 'cifar100': 50000, 'tinyimagenet': 100000, 'imagenet': 1281167}
         self.total_samples = num_samples[self.dataset]
+        # if self.dataset=='cifar10':
+        self.convert_li = ['airplane','automobile','bird','cat','deer','dog','frog','horse','ship','truck']
 
     def online_step(self, sample, sample_num, n_worker):
         image, label = sample
@@ -293,8 +295,8 @@ class L2P(ER):
         train_loss, train_acc = self.online_train([image, label], self.batch_size * 2, n_worker,
                                                     iterations=int(self.num_updates), stream_batch_size=self.batch_size)
         self.report_training(sample_num, train_loss, train_acc)
-        for stored_sample, stored_label in zip(image, label):
-            self.update_memory((stored_sample, stored_label))
+        # for stored_sample, stored_label in zip(image, label):
+        #     self.update_memory((stored_sample, stored_label))
         self.temp_batch = []
         self.num_updates -= int(self.num_updates)
 
@@ -316,7 +318,7 @@ class L2P(ER):
         del self.optimizer.param_groups[1]
         self.optimizer.add_param_group({'params': self.model.backbone.head.parameters()})
         self.scheduler = select_scheduler(self.sched_name, self.optimizer, self.lr_gamma)
-        self.memory.add_new_class(cls_list=self.exposed_classes)
+        # self.memory.add_new_class(cls_list=self.exposed_classes)
         if 'reset' in self.sched_name:
             self.update_schedule(reset=True)
 
@@ -324,17 +326,17 @@ class L2P(ER):
         
         total_loss, correct, num_data = 0.0, 0.0, 0.0
 
-        if len(self.memory) > 0 and batch_size - stream_batch_size > 0:
-            memory_batch_size = min(len(self.memory), batch_size - stream_batch_size)
+        # if len(self.memory) > 0 and batch_size - stream_batch_size > 0:
+        #     memory_batch_size = min(len(self.memory), batch_size - stream_batch_size)
         for i in range(iterations):
             self.model.train()
             x, y = sample
             x = torch.cat([self.train_transform(transforms.ToPILImage()(img)).unsqueeze(0) for img in x])
             y = torch.cat([torch.tensor([self.exposed_classes.index(label)]) for label in y])
-            if len(self.memory) > 0:
-                memory_data = self.memory.get_batch(memory_batch_size)
-                x = torch.cat([x, memory_data['image']])
-                y = torch.cat([y, memory_data['label']])
+            # if len(self.memory) > 0:
+            #     memory_data = self.memory.get_batch(memory_batch_size)
+            #     x = torch.cat([x, memory_data['image']])
+            #     y = torch.cat([y, memory_data['label']])
             x = x.to(self.device)
             y = y.to(self.device)
 
@@ -414,9 +416,28 @@ class L2P(ER):
         self.report_test(sample_num, eval_dict["avg_loss"], eval_dict["avg_acc"])
         return eval_dict
 
-    def online_before_task(self, cur_iter):
-        # Task-Free
-        pass
+    def online_before_task(self,train_loader,debug):
+        #todo 현재 Task Class 및 Sample 확인
+        data_info = {}
+        for i, data in enumerate(train_loader):
+            # if debug and (i+1)*self.batch_size == 200:
+            #     break
+            _,label = data
+            # image = image.to(self.device)
+            label = label.to(self.device)
+            
+            for b in range(label.shape[0]):
+                if 'Class_'+str(label[b].item()) in data_info.keys():
+                    data_info['Class_'+str(label[b].item())] +=1
+                else:
+                    data_info['Class_'+str(label[b].item())] =1
+        
+        print("Current Task Data Info")
+        print(data_info)
+        print("<<Convert to str>>")
+        convert_data_info = self.convert_class_from_int_to_str(data_info)
+        print(convert_data_info)
+        print()
 
     def online_after_task(self, cur_iter):
         # Task-Free
@@ -451,7 +472,7 @@ class L2P(ER):
                 y = y.to(self.device)
                 logit = self.model(x)
 
-                loss = criterion(logit, y)
+                loss = self.criterion(logit, y)
                 pred = torch.argmax(logit, dim=-1)
                 _, preds = logit.topk(self.topk, 1, True, True)
 
@@ -487,3 +508,57 @@ class L2P(ER):
             ret_corrects[cls_idx] = cnt
 
         return ret_num_data, ret_corrects
+    
+
+    def train_data_config(self,n_task, train_dataset,train_sampler):
+        from torch.utils.data import DataLoader
+        for t_i in range(n_task):
+            train_sampler.set_task(t_i)
+            train_dataloader= DataLoader(train_dataset, batch_size=self.batch_size, sampler=train_sampler, num_workers=4)
+            data_info = {}
+            for i, data in enumerate(train_dataloader):
+                _,label = data
+                label = label.to(self.device)
+                
+                for b in range(len(label)):
+                    if 'Class_'+str(label[b].item()) in data_info.keys():
+                        data_info['Class_'+str(label[b].item())] +=1
+                    else:
+                        data_info['Class_'+str(label[b].item())] =1
+            print(f"[Train] Task {t_i} Data Info")
+            convert_data_info = self.convert_class_from_int_to_str(data_info)
+            print(convert_data_info)
+            print()
+    
+    def test_data_config(self, test_dataloader,task_id):
+        from torch.utils.data import DataLoader
+        data_info = {}
+        for i, data in enumerate(test_dataloader):
+            _,label = data
+            label = label.to(self.device)
+            
+            for b in range(len(label)):
+                if 'Class_'+str(label[b].item()) in data_info.keys():
+                    data_info['Class_'+str(label[b].item())] +=1
+                else:
+                    data_info['Class_'+str(label[b].item())] =1
+                    
+        print('<<Exposed Class>>')
+        print(self.exposed_classes)
+        
+        print(f"[Test] Task {task_id} Data Info")
+        print(data_info)
+        print("<<Convert>>")
+        convert_data_info = self.convert_class_from_int_to_str(data_info)
+        print(convert_data_info)
+        print()
+        
+        
+    def convert_class_from_int_to_str(self,data_info):
+        
+        self.convert_li
+        for key in list(data_info.keys()):
+            old_key = int(key[6:])
+            data_info[self.convert_li[old_key]] = data_info.pop(key)
+        
+        return data_info
