@@ -1,13 +1,14 @@
 #!/bin/bash
 
-#SBATCH --job-name Finetuning_iblurry_cifar100_N50_M10
+#SBATCH --job-name Finetuning_iblurry_cifar10_N50_M10
 #SBATCH -p batch
+#SBATCH -w vll1
 #SBATCH --nodes=1
-#SBATCH --gres=gpu:1
+#SBATCH --gres=gpu:2
 #SBATCH --cpus-per-gpu=4
-#SBATCH --mem-per-gpu=16G
+#SBATCH --mem-per-gpu=20G
 #SBATCH --time=4-0
-#SBATCH -o %x_%j.out
+#SBATCH -o %x_%j.log
 
 
 date
@@ -33,36 +34,36 @@ python --version
 
 # CIL CONFIG
 MODE="Finetuning"
-NOTE="Finetuning_iblurry_cifar100_N50_M10" # Short description of the experiment. (WARNING: logs/results with the same note will be overwritten!)
+NOTE="Finetuning_iblurry_cifar10_N50_M10" # Short description of the experiment. (WARNING: logs/results with the same note will be overwritten!)
 
-DATASET="cifar100" # cifar10, cifar100, tinyimagenet, imagenet
+DATASET="cifar10" # cifar10, cifar100, tinyimagenet, imagenet
 N_TASKS=5
 N=50
 M=10
 GPU_TRANSFORM="--gpu_transform"
 USE_AMP="--use_amp"
 SEEDS="1 2 3"
-VIT="True"
+# VIT="True"
 OPT="sgd"
 
 if [ "$DATASET" == "cifar10" ]; then
     MEM_SIZE=500 ONLINE_ITER=1
-    MODEL_NAME="resnet18" EVAL_PERIOD=100
+    MODEL_NAME="vit" EVAL_PERIOD=100
     BATCHSIZE=16; LR=0.05 OPT_NAME=$OPT SCHED_NAME="cos" MEMORY_EPOCH=256
 
 elif [ "$DATASET" == "cifar100" ]; then
     MEM_SIZE=2000 ONLINE_ITER=3
-    MODEL_NAME="resnet34" EVAL_PERIOD=100
+    MODEL_NAME="vit" EVAL_PERIOD=100
     BATCHSIZE=16; LR=0.001 OPT_NAME=$OPT SCHED_NAME="cos" MEMORY_EPOCH=256
 
 elif [ "$DATASET" == "tinyimagenet" ]; then
     MEM_SIZE=4000 ONLINE_ITER=3
-    MODEL_NAME="resnet34" EVAL_PERIOD=100
+    MODEL_NAME="vit" EVAL_PERIOD=100
     BATCHSIZE=32; LR=0.05 OPT_NAME=$OPT SCHED_NAME="cos" MEMORY_EPOCH=256
 
 elif [ "$DATASET" == "imagenet" ]; then
     N_TASKS=10 MEM_SIZE=20000 ONLINE_ITER=0.25
-    MODEL_NAME="resnet34" EVAL_PERIOD=1000
+    MODEL_NAME="vit" EVAL_PERIOD=1000
     BATCHSIZE=256; LR=0.05 OPT_NAME=$OPT SCHED_NAME="multistep" MEMORY_EPOCH=100
 
 else
@@ -70,10 +71,10 @@ else
     exit 1
 fi
 
-if [ "$VIT" == "True" ]; then
-    echo "Vit is used"
-    MODEL_NAME="vit"
-fi
+# if [ "$VIT" == "True" ]; then
+#     echo "Vit is used"
+#     MODEL_NAME="vit"
+# fi
 
 for RND_SEED in $SEEDS
 do
@@ -84,5 +85,5 @@ do
     --model_name $MODEL_NAME --opt_name $OPT_NAME --sched_name $SCHED_NAME \
     --lr $LR --batchsize $BATCHSIZE \
     --memory_size $MEM_SIZE $GPU_TRANSFORM --online_iter $ONLINE_ITER --data_dir /local_datasets/ \
-    --note $NOTE --eval_period $EVAL_PERIOD --memory_epoch $MEMORY_EPOCH $USE_AMP
+    --note $NOTE --eval_period $EVAL_PERIOD --memory_epoch $MEMORY_EPOCH $USE_AMP --debug
 done

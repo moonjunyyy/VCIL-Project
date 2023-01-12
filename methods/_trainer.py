@@ -280,11 +280,20 @@ class _Trainer():
             print(f"# Task {task_id} iteration")
             print("#" * 50 + "\n")
             print("[2-1] Prepare a datalist for the current task")
-            self.train_sampler.set_task(task_id)
-            
+            #* Before Training
+            #* 1. Check Current Data samples
+            #* 2. Append here whatever is needed before training process
             self.online_before_task(task_id)
+            
+            if task_id ==0:
+                self.train_data_config(self.n_tasks,self.train_dataset,self.train_sampler)
+            print()
+            self.current_task_data(self.train_dataloader)
+            
+            self.train_sampler.set_task(task_id)
             for i, (image, label) in enumerate(self.train_dataloader):
-                if self.debug and i >= 100 : break
+                if self.debug and (i+self.batchsize) >= 500:
+                    break
                 samples_cnt += image.size(0)
                 if samples_cnt > num_eval:
                 # if samples_cnt % args.eval_period == 0:
@@ -304,6 +313,7 @@ class _Trainer():
                 loss, acc = self.online_step([image,label], samples_cnt)
                 self.report_training(samples_cnt, loss, acc)
             self.online_after_task(task_id)
+            self.test_data_config(test_dataloader,task_id)
             test_sampler = OnlineTestSampler(self.test_dataset, self.exposed_classes)
             test_dataloader = DataLoader(self.test_dataset, batch_size=self.batchsize*2, sampler=test_sampler, num_workers=self.n_worker)
             eval_dict = self.online_evaluate(test_dataloader)
@@ -344,6 +354,13 @@ class _Trainer():
 
         print(f"======== Summary =======")
         print(f"A_auc {A_auc} | A_avg {A_avg} | A_last {A_last} | F_last {F_last}")
+        
+        print('\nAcc per Class')
+        # print("Class Accuracy")
+        for i in range(len(cls_acc)):
+            print(f"Task {i}")
+            print(cls_acc[i])
+        print("="*24)
     
     def add_new_class(self, class_name):
         self.exposed_classes.append(class_name)
@@ -440,3 +457,73 @@ class _Trainer():
             ret_corrects[cls_idx] = cnt
 
         return ret_num_data, ret_corrects
+    
+    # def get_dataset_classes(self,dataset):
+    #     self.class_list = dataset.classes
+    
+    def train_data_config(self, n_task, train_dataset,train_sampler):
+        # from torch.utils.data import DataLoader
+        for t_i in range(n_task):
+            train_sampler.set_task(t_i)
+            train_dataloader = DataLoader(train_dataset,batch_size=self.batchsize,sampler=train_sampler,num_workers=4)
+            data_info={}
+            for i,data in enumerate(train_dataloader):
+                _,label = data
+                label = label.to(self.device)
+                for b in range(len(label)):
+                    if 'Class_'+str(label[b].item()) in data_info.keys():
+                        data_info['Class_'+str(label[b].item())] += 1
+                    else:
+                        data_info['Class_'+str(label[b].item())] = 1
+            print(f"[Train] Task{t_i} Data Info")
+            convert_data_info = self.convert_class_label(data_info)
+            print(convert_data_info)
+            
+    def test_data_config(self, test_dataloader,task_id):
+        data_info={}
+        for i,data in enumerate(test_dataloader):
+            _,label = data
+            label = label.to(self.device)
+            
+            for b in range(len(label)):
+                if 'Class_'+str(label[b].item()) in data_info.keys():
+                    data_info['Class_'+str(label[b].item())]+=1
+                else:
+                    data_info['Class_'+str(label[b].item())]=1
+        
+        print("<<Exposed Class>>")
+        print(self.exposed_classes)
+        
+        print(f"[Test] Task {task_id} Data Info")
+        print(data_info)
+        print("<<Convert>>")
+        convert_data_info = self.convert_class_label(data_info)
+        print(convert_data_info)
+        print()
+        
+    def convert_class_label(self,data_info):
+        #* self.class_list => original class label
+        self.class_list = self.train_dataset.classes
+        for key in list(data_info.keys()):
+            old_key= int(key[6:])
+            data_info[self.class_list[old_key]] = data_info.pop(key)
+            
+        return data_info
+    
+    def current_task_data(self,train_loader):
+        data_info={}
+        for i,data in enumerate(train_loader):
+            _,label = data
+            
+            for b in range(label.shape[0]):
+                if 'Class_'+str(label[b].item()) in data_info.keys():
+                    data_info['Class_'+str(label[b].item())] +=1
+                else:
+                    data_info['Class_'+str(label[b].item())] =1
+        
+        print("Current Task Data Info")
+        print(data_info)
+        print("<<Convert to str>>")
+        convert_data_info = self.convert_class_label(data_info)
+        print(convert_data_info)
+        print()

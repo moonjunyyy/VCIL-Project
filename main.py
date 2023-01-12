@@ -24,8 +24,12 @@ from sklearn.manifold import TSNE
 import matplotlib.pyplot as plt
 
 from methods.er_baseline import ER
+from methods.Finetuning import FT
 
-methods = { "er": ER }
+methods = {
+        "er": ER ,
+        "Finetuning": FT
+           }
 os.environ["CUDA_LAUNCH_BLOCKING"]="1"
 def main():
     # Get Configurations
