@@ -401,7 +401,7 @@ class VisionTransformer(nn.Module):
 
         # Classifier Head
         self.fc_norm = norm_layer(embed_dim) if use_fc_norm else nn.Identity()
-        self.head = nn.Linear(self.embed_dim, num_classes) if num_classes > 0 else nn.Identity()
+        self.fc = nn.Linear(self.embed_dim, num_classes) if num_classes > 0 else nn.Identity()
 
         if weight_init != 'skip':
             self.init_weights(weight_init)
@@ -439,14 +439,14 @@ class VisionTransformer(nn.Module):
 
     @torch.jit.ignore
     def get_classifier(self):
-        return self.head
+        return self.fc
 
     def reset_classifier(self, num_classes: int, global_pool=None):
         self.num_classes = num_classes
         if global_pool is not None:
             assert global_pool in ('', 'avg', 'token')
             self.global_pool = global_pool
-        self.head = nn.Linear(self.embed_dim, num_classes) if num_classes > 0 else nn.Identity()
+        self.fc = nn.Linear(self.embed_dim, num_classes) if num_classes > 0 else nn.Identity()
 
     def forward_features(self, x, task_id=-1, cls_features=None, train=False):
         x = self.patch_embed(x)
@@ -465,7 +465,6 @@ class VisionTransformer(nn.Module):
         #     self.total_prompt_len = res['total_prompt_len']
         #     x = res['prompted_embedding']
         # else:
-        res=dict()
         if self.cls_token is not None:
             x = torch.cat((self.cls_token.expand(x.shape[0], -1, -1), x), dim=1)
         
@@ -477,12 +476,9 @@ class VisionTransformer(nn.Module):
             x = self.blocks(x)
         
         x = self.norm(x)
-        res['x'] = x
+        return x
 
-        return res
-
-    def forward_head(self, res, pre_logits: bool = False):
-        x = res['x']
+    def forward_head(self, x, pre_logits: bool = False):
         if self.class_token and self.head_type == 'token':
             x = x[:, 0]
         elif self.head_type == 'gap' and self.global_pool == 'avg':
@@ -495,19 +491,16 @@ class VisionTransformer(nn.Module):
             x = x.mean(dim=1)
         else:
             raise ValueError(f'Invalid classifier={self.classifier}')
-        
-        res['pre_logits'] = x
 
         x = self.fc_norm(x)
         
-        res['logits'] = self.head(x)
-        
-        return res
+        x = self.fc(x)
+        return x
 
     def forward(self, x, task_id=-1, cls_features=None, train=False):
-        res = self.forward_features(x, task_id=task_id, cls_features=cls_features, train=train)
-        res = self.forward_head(res)
-        return res
+        x = self.forward_features(x, task_id=task_id, cls_features=cls_features, train=train)
+        x = self.forward_head(x)
+        return x
 
 
 def init_weights_vit_timm(module: nn.Module, name: str = ''):
@@ -622,9 +615,9 @@ def _load_weights(model: VisionTransformer, checkpoint_path: str, prefix: str = 
     model.pos_embed.copy_(pos_embed_w)
     model.norm.weight.copy_(_n2p(w[f'{prefix}Transformer/encoder_norm/scale']))
     model.norm.bias.copy_(_n2p(w[f'{prefix}Transformer/encoder_norm/bias']))
-    if isinstance(model.head, nn.Linear) and model.head.bias.shape[0] == w[f'{prefix}head/bias'].shape[-1]:
-        model.head.weight.copy_(_n2p(w[f'{prefix}head/kernel']))
-        model.head.bias.copy_(_n2p(w[f'{prefix}head/bias']))
+    if isinstance(model.fc, nn.Linear) and model.fc.bias.shape[0] == w[f'{prefix}head/bias'].shape[-1]:
+        model.fc.weight.copy_(_n2p(w[f'{prefix}head/kernel']))
+        model.fc.bias.copy_(_n2p(w[f'{prefix}head/bias']))
     # NOTE representation layer has been removed, not used in latest 21k/1k pretrained weights
     # if isinstance(getattr(model.pre_logits, 'fc', None), nn.Linear) and f'{prefix}pre_logits/bias' in w:
     #     model.pre_logits.fc.weight.copy_(_n2p(w[f'{prefix}pre_logits/kernel']))
