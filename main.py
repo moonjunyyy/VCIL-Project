@@ -20,6 +20,8 @@ from utils.data_loader import get_train_datalist
 from utils.method_manager import select_method
 from datasets import *
 
+import time
+
 from sklearn.manifold import TSNE
 import matplotlib.pyplot as plt
 
@@ -40,3 +42,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+    time.sleep(60)
