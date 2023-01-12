@@ -1,9 +1,10 @@
 import torch
+import torch.distributed as dist
 from torch.utils.data.sampler import Sampler
 from typing import Optional, Sized
 
 class OnlineSampler(Sampler):
-    def __init__(self, data_source: Optional[Sized], num_tasks, m, n, rnd_seed, cur_iter, varing_NM = False) -> None:
+    def __init__(self, data_source: Optional[Sized], num_tasks, m, n, rnd_seed, cur_iter = 0, varing_NM = False, num_replicas=None, rank=None) -> None:
 
         self.data_source    = data_source
         self.classes    = self.data_source.classes
@@ -14,6 +15,19 @@ class OnlineSampler(Sampler):
         self.m  = m
         self.varing_NM = varing_NM
         self.task = cur_iter
+
+        if num_replicas is not None:
+            if not dist.is_available():
+                raise RuntimeError("Distibuted package is not available, but you are trying to use it.")
+            num_replicas = dist.get_world_size()
+        if rank is not None:
+            if not dist.is_available():
+                raise RuntimeError("Distibuted package is not available, but you are trying to use it.")
+            rank = dist.get_rank()
+
+        self.distributed = num_replicas is not None and rank is not None
+        self.num_replicas = num_replicas if num_replicas is not None else 1
+        self.rank = rank if rank is not None else 0
 
         self.disjoint_num   = len(self.classes) * n // 100
         self.disjoint_num   = int(self.disjoint_num // num_tasks) * num_tasks
@@ -75,7 +89,7 @@ class OnlineSampler(Sampler):
 
             print("disjoint classes: ", self.disjoint_classes)
             print("blurry classes: ", self.blurry_classes)
-
+            
             # Get indices of disjoint and blurry classes
             self.disjoint_indices   = [[] for _ in range(num_tasks)]
             self.blurry_indices     = [[] for _ in range(num_tasks)]
@@ -89,12 +103,6 @@ class OnlineSampler(Sampler):
                         self.blurry_indices[j].append(i)
                         num_blurred += 1
                         break
-
-            self.indices = [[] for _ in range(num_tasks)]
-            for i in range(num_tasks):
-                print("task %d: disjoint %d, blurry %d" % (i, len(self.disjoint_indices[i]), len(self.blurry_indices[i])))
-                self.indices[i] = self.disjoint_indices[i] + self.blurry_indices[i]
-                self.indices[i] = torch.tensor(self.indices[i])[torch.randperm(len(self.indices[i]), generator=self.generator)].tolist()
 
             # Randomly shuffle M% of blurry indices
             blurred = []
@@ -111,29 +119,92 @@ class OnlineSampler(Sampler):
             for i in range(num_tasks):
                 self.blurry_indices[i] += blurred[:num_blurred[i + 1] - num_blurred[i]]
                 blurred = blurred[num_blurred[i + 1] - num_blurred[i]:]
+            
+            self.indices = [[] for _ in range(num_tasks)]
+            for i in range(num_tasks):
+                print("task %d: disjoint %d, blurry %d" % (i, len(self.disjoint_indices[i]), len(self.blurry_indices[i])))
+                self.indices[i] = self.disjoint_indices[i] + self.blurry_indices[i]
+                self.indices[i] = torch.tensor(self.indices[i])[torch.randperm(len(self.indices[i]), generator=self.generator)].tolist()
+
+        if self.distributed:
+            self.num_samples = int(len(self.indices[self.task]) // self.num_replicas)
+            self.total_size = self.num_samples * self.num_replicas  
+            self.num_selected_samples = int(len(self.indices[self.task]) // self.num_replicas)
+        else:
+            self.num_samples = int(len(self.indices[self.task]))
+            self.total_size = self.num_samples
+            self.num_selected_samples = int(len(self.indices[self.task]))
 
     def __iter__(self):
-        return iter(self.indices[self.task])
+        if self.distributed:
+            # subsample
+            indices = self.indices[self.task][self.rank:self.total_size:self.num_replicas]
+            assert len(indices) == self.num_samples
+            return iter(indices[:self.num_selected_samples])
+        else:
+            return iter(self.indices[self.task])
 
     def __len__(self):
-        return len(self.indices[self.task])
+        return self.num_selected_samples
 
     def set_task(self, cur_iter):
+
         if cur_iter >= len(self.indices) or cur_iter < 0:
             raise ValueError("task out of range")
         self.task = cur_iter
 
+        if self.distributed:
+            self.num_samples = int(len(self.indices[self.task]) // self.num_replicas)
+            self.total_size = self.num_samples * self.num_replicas  
+            self.num_selected_samples = int(len(self.indices[self.task]) // self.num_replicas)
+        else:
+            self.num_samples = int(len(self.indices[self.task]))
+            self.total_size = self.num_samples
+            self.num_selected_samples = int(len(self.indices[self.task]))
+    
+    def get_task(self, cur_iter):
+        indices = self.indices[cur_iter][self.rank:self.total_size:self.num_replicas]
+        assert len(indices) == self.num_samples
+        return indices[:self.num_selected_samples]
 
 class OnlineTestSampler(Sampler):
-    def __init__(self, data_source: Optional[Sized], exposed_class) -> None:
+    def __init__(self, data_source: Optional[Sized], exposed_class, num_replicas=None, rank=None) -> None:
         self.data_source    = data_source
         self.classes    = self.data_source.classes
         self.targets    = self.data_source.targets
         self.exposed_class  = exposed_class
         self.indices    = [i for i in range(self.data_source.__len__()) if self.targets[i] in self.exposed_class]
 
+        if num_replicas is not None:
+            if not dist.is_available():
+                raise RuntimeError("Distibuted package is not available, but you are trying to use it.")
+            num_replicas = dist.get_world_size()
+        if rank is not None:
+            if not dist.is_available():
+                raise RuntimeError("Distibuted package is not available, but you are trying to use it.")
+            rank = dist.get_rank()
+
+        self.distributed = num_replicas is not None and rank is not None
+        self.num_replicas = num_replicas if num_replicas is not None else 1
+        self.rank = rank if rank is not None else 0
+
+        if self.distributed:
+            self.num_samples = int(len(self.indices) // self.num_replicas)
+            self.total_size = self.num_samples * self.num_replicas  
+            self.num_selected_samples = int(len(self.indices) // self.num_replicas)
+        else:
+            self.num_samples = int(len(self.indices))
+            self.total_size = self.num_samples
+            self.num_selected_samples = int(len(self.indices))
+
     def __iter__(self):
-        return iter(self.indices)
+        if self.distributed:
+            # subsample
+            indices = self.indices[self.rank:self.total_size:self.num_replicas]
+            assert len(indices) == self.num_samples
+            return iter(indices[:self.num_selected_samples])
+        else:
+            return iter(self.indices)
 
     def __len__(self):
-        return len(self.indices)
+        return self.num_selected_samples

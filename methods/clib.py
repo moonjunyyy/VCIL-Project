@@ -51,14 +51,13 @@ class CLIB(ER):
         for l in label:
             if l.item() not in self.exposed_classes:
                 self.add_new_class(l.item())
-
+        for stored_sample, stored_label in zip(image, label):
+            self.update_memory((stored_sample, stored_label))
         self.num_updates += self.online_iter * self.batch_size
         # if len(self.temp_batch) == self.temp_batchsize:
         train_loss, train_acc = self.online_train([], self.batch_size, n_worker,
                                                     iterations=int(self.num_updates), stream_batch_size=0)
         self.report_training(sample_num, train_loss, train_acc)
-        for stored_sample, stored_label in zip(image, label):
-            self.update_memory((stored_sample, stored_label))
         self.temp_batch = []
         self.num_updates -= int(self.num_updates)
     def update_memory(self, sample):
@@ -259,3 +258,100 @@ class CLIB(ER):
                             for param_group in self.optimizer.param_groups:
                                 param_group["lr"] = self.high_lr
                                 param_group["initial_lr"] = self.high_lr
+
+class CLIB(ER):
+    def __init__(self, *args, **kwargs) -> None:
+        super(CLIB, self).__init__(*args, **kwargs)
+
+    def online_step(self, sample, samples_cnt):
+        image, label = sample
+        for l in label:
+            if l.item() not in self.exposed_classes:
+                self.add_new_class(l.item())
+        for img,lbl in zip(image, label):
+            self.update_memory([img, lbl])
+        self.num_updates += self.online_iter * self.batchsize
+        train_loss, train_acc = self.online_train([torch.empty((0,)), torch.empty((0,))], iterations=int(self.num_updates))
+        self.num_updates -= int(self.num_updates)
+        return train_loss, train_acc
+    
+    def update_memory(self, sample):
+        x, y = sample
+        if len(self.memory) >= self.memory_size:
+            label_frequency = copy.deepcopy(self.memory.cls_count)
+            label_frequency[self.exposed_classes.index(y.item())] += 1
+            cls_to_replace = np.argmax(np.array(label_frequency))
+            cand_idx = self.memory.cls_idx[cls_to_replace]
+            score = self.memory.others_loss_decrease[cand_idx]
+            idx_to_replace = cand_idx[np.argmin(score)]
+            self.memory.replace_sample(sample, idx_to_replace)
+            self.dropped_idx.append(idx_to_replace)
+            self.memory_dropped_idx.append(idx_to_replace)
+        else:
+            self.memory.replace_sample(sample)
+            self.dropped_idx.append(len(self.memory) - 1)
+            self.memory_dropped_idx.append(len(self.memory) - 1)
+
+    def online_before_task(self, task_id):
+        pass
+
+    def online_after_task(self, task_id):
+        pass
+
+    def model_forward(self, x, y):
+        do_cutmix = self.cutmix and np.random.rand(1) < 0.5
+        if do_cutmix:
+            x, labels_a, labels_b, lam = cutmix_data(x=x, y=y, alpha=1.0)
+            with torch.cuda.amp.autocast(enabled=self.use_amp):
+                logit = self.model(x)
+                loss = lam * self.criterion(logit, labels_a) + (1 - lam) * self.criterion(logit, labels_b)
+        else:
+            with torch.cuda.amp.autocast(enabled=self.use_amp):
+                logit = self.model(x)
+                loss = self.criterion(logit, y)
+        return logit, loss
+
+    def online_evaluate(self, test_loader):
+        total_correct, total_num_data, total_loss = 0.0, 0.0, 0.0
+        correct_l = torch.zeros(self.n_classes)
+        num_data_l = torch.zeros(self.n_classes)
+        label = []
+
+        self.model.eval()
+        with torch.no_grad():
+            for i, data in enumerate(test_loader):
+                x, y = data
+                for j in range(len(y)):
+                    y[j] = self.exposed_classes.index(y[j].item())
+
+                x = x.to(self.device)
+                y = y.to(self.device)
+
+                logit = self.model(x)
+                loss = self.criterion(logit, y)
+                pred = torch.argmax(logit, dim=-1)
+                _, preds = logit.topk(self.topk, 1, True, True)
+                total_correct += torch.sum(preds == y.unsqueeze(1)).item()
+                total_num_data += y.size(0)
+
+                xlabel_cnt, correct_xlabel_cnt = self._interpret_pred(y, pred)
+                correct_l += correct_xlabel_cnt.detach().cpu()
+                num_data_l += xlabel_cnt.detach().cpu()
+
+                total_loss += loss.item()
+                label += y.tolist()
+
+        avg_acc = total_correct / total_num_data
+        avg_loss = total_loss / len(test_loader)
+        cls_acc = (correct_l / (num_data_l + 1e-5)).numpy().tolist()
+        
+        eval_dict = {"avg_loss": avg_loss, "avg_acc": avg_acc, "cls_acc": cls_acc}
+        return eval_dict
+
+    def update_schedule(self, reset=False):
+        if reset:
+            self.scheduler = select_scheduler(self.sched_name, self.optimizer, self.lr_gamma)
+            for param_group in self.optimizer.param_groups:
+                param_group["lr"] = self.lr
+        else:
+            self.scheduler.step()

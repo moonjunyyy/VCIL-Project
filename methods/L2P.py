@@ -41,7 +41,7 @@ from utils.train_utils import select_model, select_optimizer, select_scheduler
 import timm
 from timm.models.registry import register_model
 from timm.models.vision_transformer import _cfg, default_cfgs
-from models.cifar_vit import _create_vision_transformer
+from models.vit import _create_vision_transformer
 
 logger = logging.getLogger()
 writer = SummaryWriter("tensorboard")
