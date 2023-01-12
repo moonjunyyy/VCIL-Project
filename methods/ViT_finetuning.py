@@ -22,6 +22,7 @@ from methods.er_baseline import ER
 from utils.data_loader import cutmix_data, ImageDataset
 from utils.augment import Cutout, Invert, Solarize, select_autoaugment
 
+
 import logging
 import copy
 import time
@@ -40,8 +41,7 @@ from utils.train_utils import select_model, select_optimizer, select_scheduler
 
 import timm
 from timm.models.registry import register_model
-from timm.models.vision_transformer import _cfg, default_cfgs
-from models.vit import _create_vision_transformer
+from timm.models.vision_transformer import _cfg, _create_vision_transformer, default_cfgs
 
 logger = logging.getLogger()
 writer = SummaryWriter("tensorboard")
@@ -64,159 +64,7 @@ def vit_base_patch16_224_l2p(pretrained=False, **kwargs):
     model = _create_vision_transformer('vit_base_patch16_224_l2p', pretrained=pretrained, **model_kwargs)
     return model
 
-class Prompt(nn.Module):
-    def __init__(self,
-                 pool_size            : int,
-                 selection_size       : int,
-                 prompt_len           : int,
-                 dimention            : int,
-                 _diversed_selection  : bool = True,
-                 _batchwise_selection : bool = True,
-                 **kwargs):
-        super().__init__()
-
-        self.pool_size      = pool_size
-        self.selection_size = selection_size
-        self.prompt_len     = prompt_len
-        self.dimention      = dimention
-        self._diversed_selection  = _diversed_selection
-        self._batchwise_selection = _batchwise_selection
-
-        self.key     = nn.Parameter(torch.randn(pool_size, dimention, requires_grad= True))
-        self.prompts = nn.Parameter(torch.randn(pool_size, prompt_len, dimention, requires_grad= True))
-        
-        torch.nn.init.uniform_(self.key,     -1, 1)
-        torch.nn.init.uniform_(self.prompts, -1, 1)
-
-        self.register_buffer('frequency', torch.ones (pool_size))
-        self.register_buffer('counter',   torch.zeros(pool_size))
-    
-    def forward(self, query : torch.Tensor, **kwargs):
-
-        B, D = query.shape
-        assert D == self.dimention, f'Query dimention {D} does not match prompt dimention {self.dimention}'
-        # Select prompts
-        match = 1 - F.cosine_similarity(query.unsqueeze(1), self.key, dim=-1)
-        if self.training and self._diversed_selection:
-            topk = match * F.normalize(self.frequency, p=1, dim=-1)
-        else:
-            topk = match
-        _ ,topk = topk.topk(self.selection_size, dim=-1, largest=False, sorted=True)
-        # Batch-wise prompt selection
-        if self._batchwise_selection:
-            idx, counts = topk.unique(sorted=True, return_counts=True)
-            _,  mosts  = counts.topk(self.selection_size, largest=True, sorted=True)
-            topk = idx[mosts].clone().expand(B, -1)
-        # Frequency counter
-        self.counter += torch.bincount(topk.reshape(-1).clone(), minlength = self.pool_size)
-        # selected prompts
-        selection = self.prompts.repeat(B, 1, 1, 1).gather(1, topk.unsqueeze(-1).unsqueeze(-1).expand(-1, -1, self.prompt_len, self.dimention).clone())
-        simmilarity = match.gather(1, topk)
-        # get unsimilar prompts also 
-        return simmilarity, selection
-
-    def update(self):
-        if self.training:
-            self.frequency += self.counter
-        counter = self.counter.clone()
-        self.counter *= 0
-        if self.training:
-            return self.frequency - 1
-        else:
-            return counter
-
-class L2P_Model(nn.Module):
-    def __init__(self,
-                 pool_size      : int   = 10,
-                 selection_size : int   = 5,
-                 prompt_len     : int   = 5,
-                 class_num      : int   = 100,
-                 backbone_name  : str   = None,
-                 lambd          : float = 0.5,
-                 _batchwise_selection  : bool = False,
-                 _diversed_selection   : bool = True,
-                 **kwargs):
-
-        super().__init__()
-        
-        if backbone_name is None:
-            raise ValueError('backbone_name must be specified')
-        if pool_size < selection_size:
-            raise ValueError('pool_size must be larger than selection_size')
-
-        self.prompt_len     = prompt_len
-        self.selection_size = selection_size
-        self.lambd          = lambd
-        self._batchwise_selection = _batchwise_selection
-        self.class_num            = class_num
-
-        # model_kwargs = dict(
-        # patch_size=16, embed_dim=768, depth=12, num_heads=12, **kwargs)
-        
-        # self.add_module('backbone', timm.models.create_model(backbone_name, pretrained=True, num_classes=class_num))
-        self.add_module('backbone', timm.models.create_model(backbone_name, pretrained=True, num_classes=class_num,
-                                                             drop_rate=0.,drop_path_rate=0.,drop_block_rate=None))
-        for name, param in self.backbone.named_parameters():
-            if 'head' not in name:
-                param.requires_grad = False
-        self.backbone.head.weight.requires_grad = True
-        self.backbone.head.bias.requires_grad   = True
-
-        self.head = self.backbone.head
-        
-        self.prompt = Prompt(
-            pool_size,
-            selection_size,
-            prompt_len,
-            self.backbone.num_features,
-            _diversed_selection  = _diversed_selection,
-            _batchwise_selection = _batchwise_selection)
-
-        self.register_buffer('simmilarity', torch.zeros(1), persistent=False)
-        self.register_buffer('unsimmilarity', torch.zeros(1), persistent=False)
-    
-    def forward(self, inputs : torch.Tensor, **kwargs) -> torch.Tensor:
-        x = self.backbone.patch_embed(inputs)
-        B, N, D = x.size()
-        cls_token = self.backbone.cls_token.expand(B, -1, -1)
-        token_appended = torch.cat((cls_token, x), dim=1)
-        with torch.no_grad():
-            x = self.backbone.pos_drop(token_appended + self.backbone.pos_embed)
-            query = self.backbone.blocks(x)
-            query = self.backbone.norm(query)[:, 0].clone()
-        simmilarity, prompts = self.prompt(query)
-        self.simmilarity = simmilarity.mean()
-        prompts = prompts.contiguous().view(B, self.selection_size * self.prompt_len, D)
-        prompts = prompts + self.backbone.pos_embed[:,0].clone().expand(self.selection_size * self.prompt_len, -1)
-        x = self.backbone.pos_drop(token_appended + self.backbone.pos_embed)
-        x = torch.cat((x[:,0].unsqueeze(1), prompts, x[:,1:]), dim=1)
-        x = self.backbone.blocks(x)
-        x = self.backbone.norm(x)
-        x = x[:, 1:self.selection_size * self.prompt_len + 1].clone()
-        x = x.mean(dim=1)
-        x = self.backbone.head(x)
-        return x
-    
-    def loss_fn(self, output, target):
-        B, C = output.size()
-        return F.cross_entropy(output, target) + self.lambd * self.simmilarity
-
-    def convert_train_task(self, task : torch.Tensor, **kwargs):
-        self.mask += -torch.inf
-        self.mask[task] = 0
-        return
-
-    def get_count(self):
-        return self.prompt.update()
-
-    def train(self: T, mode: bool = True, **kwargs):
-        ten = super().train(mode)
-        self.backbone.eval()
-        return ten
-    
-
-
-class L2P(ER):
+class ViT_FT(ER):
     def __init__(
             self, criterion, device, train_transform, test_transform, n_classes, **kwargs
     ):
@@ -259,20 +107,30 @@ class L2P(ER):
         if self.use_amp:
             self.scaler = torch.cuda.amp.GradScaler()
 
+        self.data_cnt       = 0
 
-        self.model = L2P_Model(backbone_name='vit_base_patch16_224_l2p', class_num=1).to(self.device)
-        self.criterion = self.model.loss_fn
+        self.sched_name     = "const"
+        self.batch_size     = kwargs["batchsize"]
+        self.n_worker       = kwargs["n_worker"]
 
+        self.model =  timm.create_model('vit_base_patch16_224_l2p', pretrained=True, num_classes=1).to(self.device)
+        for param in self.model.parameters():
+            param.requires_grad = True
+        self.model.head.weight.requires_grad = True
+        self.model.head.bias.requires_grad = True
+
+        self.model.parameters()
+        
         params = [param for name, param in self.model.named_parameters() if 'head' not in name]
         self.optimizer = select_optimizer(self.opt_name, self.lr, self.model, True)
         if 'imagenet' in self.dataset:
             self.lr_gamma = 0.99995
         else:
             self.lr_gamma = 0.9999
-        # self.optimizer.add_param_group({'params': self.model.backbone.head.parameters()})
+
         self.scheduler = select_scheduler(self.sched_name, self.optimizer, self.lr_gamma)
-        # self.memory = MemoryDataset(self.train_transform, cls_list=self.exposed_classes,
-        #                             test_transform=self.test_transform)
+        self.criterion = criterion.to(self.device)
+        # self.criterion = self.model.loss_fn
         self.temp_batch = []
         self.temp_label = []
         self.num_updates = 0
@@ -282,8 +140,10 @@ class L2P(ER):
         self.start_time = time.time()
         num_samples = {'cifar10': 50000, 'cifar100': 50000, 'tinyimagenet': 100000, 'imagenet': 1281167}
         self.total_samples = num_samples[self.dataset]
-        # if self.dataset=='cifar10':
-        self.convert_li = ['airplane','automobile','bird','cat','deer','dog','frog','horse','ship','truck']
+        if self.dataset=='cifar10':
+            self.convert_li = ['airplane','automobile','bird','cat','deer','dog','frog','horse','ship','truck']
+        else:
+            raise RuntimeError('No conver_li')
 
     def online_step(self, sample, sample_num, n_worker):
         image, label = sample
@@ -303,21 +163,20 @@ class L2P(ER):
     def add_new_class(self, class_name):
         self.exposed_classes.append(class_name)
         self.num_learned_class = len(self.exposed_classes)
-        prev_weight = copy.deepcopy(self.model.backbone.head.weight.data)
-        prev_bias   = copy.deepcopy(self.model.backbone.head.bias.data)
-        self.model.backbone.reset_classifier(self.num_learned_class)
+        prev_weight = copy.deepcopy(self.model.head.weight.data)
+        prev_bias   = copy.deepcopy(self.model.head.bias.data)
+        self.model.reset_classifier(self.num_learned_class)
 
-        self.model.backbone.head.to(self.device)
+        self.model.head.to(self.device)
         with torch.no_grad():
             if self.num_learned_class > 1:
-                self.model.backbone.head.weight[:self.num_learned_class - 1] = prev_weight
-                self.model.backbone.head.bias[:self.num_learned_class - 1]   = prev_bias
+                self.model.head.weight[:self.num_learned_class - 1] = prev_weight
+                self.model.head.bias[:self.num_learned_class - 1]   = prev_bias
         for param in self.optimizer.param_groups[1]['params']:
             if param in self.optimizer.state.keys():
                 del self.optimizer.state[param]
         del self.optimizer.param_groups[1]
-        self.optimizer.add_param_group({'params': self.model.backbone.head.parameters()})
-        self.scheduler = select_scheduler(self.sched_name, self.optimizer, self.lr_gamma)
+        self.optimizer.add_param_group({'params': self.model.head.parameters()})
         # self.memory.add_new_class(cls_list=self.exposed_classes)
         if 'reset' in self.sched_name:
             self.update_schedule(reset=True)
@@ -416,28 +275,9 @@ class L2P(ER):
         self.report_test(sample_num, eval_dict["avg_loss"], eval_dict["avg_acc"])
         return eval_dict
 
-    def online_before_task(self,train_loader,debug):
-        #todo 현재 Task Class 및 Sample 확인
-        data_info = {}
-        for i, data in enumerate(train_loader):
-            # if debug and (i+1)*self.batch_size == 200:
-            #     break
-            _,label = data
-            # image = image.to(self.device)
-            label = label.to(self.device)
-            
-            for b in range(label.shape[0]):
-                if 'Class_'+str(label[b].item()) in data_info.keys():
-                    data_info['Class_'+str(label[b].item())] +=1
-                else:
-                    data_info['Class_'+str(label[b].item())] =1
-        
-        print("Current Task Data Info")
-        print(data_info)
-        print("<<Convert to str>>")
-        convert_data_info = self.convert_class_from_int_to_str(data_info)
-        print(convert_data_info)
-        print()
+    def online_before_task(self, cur_iter):
+        # Task-Free
+        pass
 
     def online_after_task(self, cur_iter):
         # Task-Free
@@ -453,7 +293,7 @@ class L2P(ER):
             self.memory.replace_sample(sample)
 
     def reset_opt(self):
-        self.optimizer = select_optimizer(self.opt_name, self.lr, self.model, True)
+        self.optimizer = select_optimizer(self.opt_name, self.lr, self.model)
         self.scheduler = select_scheduler(self.sched_name, self.optimizer, self.lr_gamma)
 
     def evaluation(self, test_loader, criterion):
@@ -472,7 +312,7 @@ class L2P(ER):
                 y = y.to(self.device)
                 logit = self.model(x)
 
-                loss = self.criterion(logit, y)
+                loss = criterion(logit, y)
                 pred = torch.argmax(logit, dim=-1)
                 _, preds = logit.topk(self.topk, 1, True, True)
 
@@ -493,6 +333,49 @@ class L2P(ER):
 
         return ret
 
+    
+    def evaluation_with_feature(self, test_loader, criterion):
+        total_correct, total_num_data, total_loss = 0.0, 0.0, 0.0
+        correct_l = torch.zeros(self.n_classes) 
+        num_data_l = torch.zeros(self.n_classes)
+        label = []
+
+        self.model.eval()
+        embedding = [np.empty((0, 768)) for _ in range(self.n_classes)]
+        with torch.no_grad():
+            for i, data in enumerate(test_loader):
+                x, y = data
+                for j in range(len(y)):
+                    y[j] = self.exposed_classes.index(y[j].item())
+                x = x.to(self.device)
+                y = y.to(self.device)
+                logit = self.model(x)
+                        
+                x = self.model.forward_features(x)
+                for cls in y:
+                    embedding[cls] = np.concatenate([embedding[cls], x[cls].cpu().numpy()])
+                logit = self.model.forward_head(x)
+
+                loss = self.criterion(logit, y)
+                pred = torch.argmax(logit, dim=-1)
+                _, preds = logit.topk(self.topk, 1, True, True)
+
+                total_correct += torch.sum(preds == y.unsqueeze(1)).item()
+                total_num_data += y.size(0)
+
+                xlabel_cnt, correct_xlabel_cnt = self._interpret_pred(y, pred)
+                correct_l += correct_xlabel_cnt.detach().cpu()
+                num_data_l += xlabel_cnt.detach().cpu()
+
+                total_loss += loss.item()
+                label += y.tolist()
+
+        avg_acc = total_correct / total_num_data
+        avg_loss = total_loss / len(test_loader)
+        cls_acc = (correct_l / (num_data_l + 1e-5)).numpy().tolist()
+        ret = {"avg_loss": avg_loss, "avg_acc": avg_acc, "cls_acc": cls_acc, "embedding": embedding}
+        return ret
+
     def _interpret_pred(self, y, pred):
         # xlable is batch
         ret_num_data = torch.zeros(self.n_classes)
@@ -509,7 +392,6 @@ class L2P(ER):
 
         return ret_num_data, ret_corrects
     
-
     def train_data_config(self,n_task, train_dataset,train_sampler):
         from torch.utils.data import DataLoader
         for t_i in range(n_task):

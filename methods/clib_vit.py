@@ -107,6 +107,8 @@ class CLIB_ViT(ER):
         self.high_lr_loss = []
         self.low_lr_loss = []
         self.current_lr = self.lr
+        
+        self.convert_li = ['airplane','automobile','bird','cat','deer','dog','frog','horse','ship','truck']
 
     def online_step(self, sample, sample_num, n_worker):
         image, label = sample
@@ -383,3 +385,97 @@ class CLIB_ViT(ER):
         
         ret = {"avg_loss": avg_loss, "avg_acc": avg_acc, "cls_acc": cls_acc}
         return ret
+    
+    def online_before_task(self,train_loader,debug):
+        #todo 현재 Task Class 및 Sample 확인
+        data_info = {}
+        for i, data in enumerate(train_loader):
+            # if debug and (i+1)*self.batch_size == 200:
+            #     break
+            _,label = data
+            # image = image.to(self.device)
+            label = label.to(self.device)
+            
+            for b in range(label.shape[0]):
+                if 'Class_'+str(label[b].item()) in data_info.keys():
+                    data_info['Class_'+str(label[b].item())] +=1
+                else:
+                    data_info['Class_'+str(label[b].item())] =1
+        
+        print("Current Task Data Info")
+        print(data_info)
+        print("<<Convert to str>>")
+        convert_data_info = self.convert_class_from_int_to_str(data_info)
+        print(convert_data_info)
+        print()
+        
+
+    def train_data_config(self,n_task, train_dataset,train_sampler):
+        from torch.utils.data import DataLoader
+        for t_i in range(n_task):
+            train_sampler.set_task(t_i)
+            train_dataloader= DataLoader(train_dataset, batch_size=self.batch_size, sampler=train_sampler, num_workers=4)
+            data_info = {}
+            for i, data in enumerate(train_dataloader):
+                # if debug and (i+1)*self.batch_size == 200:
+                #     break
+                _,label = data
+                # image = image.to(self.device)
+                label = label.to(self.device)
+                
+                for b in range(len(label)):
+                    if 'Class_'+str(label[b].item()) in data_info.keys():
+                        data_info['Class_'+str(label[b].item())] +=1
+                    else:
+                        data_info['Class_'+str(label[b].item())] =1
+            print(f"[Train] Task {t_i} Data Info")
+            convert_data_info = self.convert_class_from_int_to_str(data_info)
+            print(convert_data_info)
+            print()
+    
+    def test_data_config(self, test_dataloader,task_id):
+        from torch.utils.data import DataLoader
+        # for t_i in range(n_task):
+        data_info = {}
+        for i, data in enumerate(test_dataloader):
+            # if debug and (i+1)*self.batch_size == 200:
+            #     break
+            _,label = data
+            # image = image.to(self.device)
+            label = label.to(self.device)
+            
+            for b in range(len(label)):
+                if 'Class_'+str(label[b].item()) in data_info.keys():
+                    data_info['Class_'+str(label[b].item())] +=1
+                else:
+                    data_info['Class_'+str(label[b].item())] =1
+                    
+        print('<<Exposed Class>>')
+        print(self.exposed_classes)
+        
+        print(f"[Test] Task {task_id} Data Info")
+        print(data_info)
+        print("<<Convert>>")
+        convert_data_info = self.convert_class_from_int_to_str(data_info)
+        print(convert_data_info)
+        print()
+        
+        
+    def convert_class_from_int_to_str(self,data_info):
+        
+        # old_d = {'Class 0': 5000, 'Class 1': 5220, 'Class 2':3000, 'Class 3': 220}
+        # d = {'Class 0': 5000, 'Class 1': 5220, 'Class 2':3000, 'Class 3': 220}
+        # a= ['car','bird','ship','airplane']
+        # for key in list(d.keys()):
+        # n_key = int(key[6:])
+        # d[a[n_key]] = d.pop(key)
+        
+        # print(old_d)
+        # print(d)
+        
+        self.convert_li
+        for key in list(data_info.keys()):
+            old_key = int(key[6:])
+            data_info[self.convert_li[old_key]] = data_info.pop(key)
+        
+        return data_info
