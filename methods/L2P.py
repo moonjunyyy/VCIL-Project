@@ -412,7 +412,7 @@ class L2P(ER):
             self.scheduler.step()
 
     def online_evaluate(self, test_loader, sample_num):
-        eval_dict = self.evaluation(test_loader, self.criterion)
+        eval_dict = self.evaluation(test_loader)
         self.report_test(sample_num, eval_dict["avg_loss"], eval_dict["avg_acc"])
         return eval_dict
 
@@ -456,7 +456,7 @@ class L2P(ER):
         self.optimizer = select_optimizer(self.opt_name, self.lr, self.model, True)
         self.scheduler = select_scheduler(self.sched_name, self.optimizer, self.lr_gamma)
 
-    def evaluation(self, test_loader, criterion):
+    def evaluation(self, test_loader):
         total_correct, total_num_data, total_loss = 0.0, 0.0, 0.0
         correct_l = torch.zeros(self.n_classes)
         num_data_l = torch.zeros(self.n_classes)

@@ -1,6 +1,6 @@
 #!/bin/bash
 
-#SBATCH -J L2P_iblurry_cifar10_N50_M10
+#SBATCH -J L2P_iblurry_cifar10_N50_M10_seed3
 #SBATCH -p batch
 #SBATCH -w vll1
 #SBATCH --nodes=1
@@ -39,7 +39,7 @@ N=50
 M=10
 GPU_TRANSFORM="--gpu_transform"
 USE_AMP="--use_amp"
-SEEDS="1 2 3"
+SEEDS="3"
 VIT="True"
 OPT="adam"
 
@@ -62,7 +62,7 @@ elif [ "$DATASET" == "imagenet" ]; then
     N_TASKS=10 MEM_SIZE=20000 ONLINE_ITER=0.25
     MODEL_NAME="resnet34" EVAL_PERIOD=1000
     BATCHSIZE=256; LR=0.03 OPT_NAME="adam" SCHED_NAME="const" MEMORY_EPOCH=100
-    BATCHSIZE=256; LR=0.05 OPT_NAME=$OPT SCHED_NAME="multistep" MEMORY_EPOCH=100
+    # BATCHSIZE=256; LR=0.05 OPT_NAME=$OPT SCHED_NAME="multistep" MEMORY_EPOCH=100
 
 else
     echo "Undefined setting"

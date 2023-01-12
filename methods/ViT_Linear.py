@@ -271,13 +271,32 @@ class ViT_LP(ER):
             self.scheduler.step()
 
     def online_evaluate(self, test_loader, sample_num):
-        eval_dict = self.evaluation(test_loader, self.criterion)
+        eval_dict = self.evaluation(test_loader)
         self.report_test(sample_num, eval_dict["avg_loss"], eval_dict["avg_acc"])
         return eval_dict
 
-    def online_before_task(self, cur_iter):
-        # Task-Free
-        pass
+    def online_before_task(self,train_loader,debug):
+        #todo 현재 Task Class 및 Sample 확인
+        data_info = {}
+        for i, data in enumerate(train_loader):
+            # if debug and (i+1)*self.batch_size == 200:
+            #     break
+            _,label = data
+            # image = image.to(self.device)
+            label = label.to(self.device)
+            
+            for b in range(label.shape[0]):
+                if 'Class_'+str(label[b].item()) in data_info.keys():
+                    data_info['Class_'+str(label[b].item())] +=1
+                else:
+                    data_info['Class_'+str(label[b].item())] =1
+        
+        print("Current Task Data Info")
+        print(data_info)
+        print("<<Convert to str>>")
+        convert_data_info = self.convert_class_from_int_to_str(data_info)
+        print(convert_data_info)
+        print()
 
     def online_after_task(self, cur_iter):
         # Task-Free
@@ -296,7 +315,7 @@ class ViT_LP(ER):
         self.optimizer = select_optimizer(self.opt_name, self.lr, self.model)
         self.scheduler = select_scheduler(self.sched_name, self.optimizer, self.lr_gamma)
 
-    def evaluation(self, test_loader, criterion):
+    def evaluation(self, test_loader):
         total_correct, total_num_data, total_loss = 0.0, 0.0, 0.0
         correct_l = torch.zeros(self.n_classes)
         num_data_l = torch.zeros(self.n_classes)
@@ -312,7 +331,7 @@ class ViT_LP(ER):
                 y = y.to(self.device)
                 logit = self.model(x)
 
-                loss = criterion(logit, y)
+                loss = self.criterion(logit, y)
                 pred = torch.argmax(logit, dim=-1)
                 _, preds = logit.topk(self.topk, 1, True, True)
 

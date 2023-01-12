@@ -52,7 +52,7 @@ def main():
     )
     fileHandler.setFormatter(formatter)
     logger.addHandler(fileHandler)
-
+    # os.makedirs('{args.log_path}/tensorboard/{args.dataset}/{args.note}/')
     writer = SummaryWriter(f'{args.log_path}/tensorboard/{args.dataset}/{args.note}/seed_{args.rnd_seed}')
 
     logger.info(args)
@@ -156,11 +156,11 @@ def main():
         method.online_before_task(train_dataloader,args.debug)
         
         for i, data in enumerate(train_dataloader):
-            if args.debug and (i+1)*args.batchsize >= 50 : break
+            if args.debug and (i+1)*args.batchsize >= 500 : break
             samples_cnt += args.batchsize
             method.online_step(data, samples_cnt, args.n_worker)
-            # if samples_cnt > num_eval:
-            if samples_cnt % args.eval_period == 0:
+            if samples_cnt > num_eval:
+            # if samples_cnt % args.eval_period == 0:
                 num_eval += args.eval_period
                 test_sampler = OnlineTestSampler(test_dataset, method.exposed_classes)
                 test_dataloader = DataLoader(test_dataset, batch_size=512, sampler=test_sampler, num_workers=4)
@@ -177,8 +177,10 @@ def main():
         # else:
         #     eval_dict = method.evaluation(test_dataloader, samples_cnt)
         method.test_data_config(test_dataloader,cur_iter)
-        eval_dict = method.evaluation(test_dataloader, samples_cnt)
+        # eval_dict = method.evaluation(test_dataloader)
+        eval_dict = method.online_evaluate(test_dataloader, samples_cnt)
         task_acc = eval_dict['avg_acc']
+        # task_acc = eval_dict['avg_acc']
 
         # if args.mode == "ViT":
         #     features.append(eval_dict['embedding'])
@@ -189,6 +191,11 @@ def main():
 
         logger.info("[2-5] Report task result")
         writer.add_scalar("Metrics/TaskAcc", task_acc, cur_iter)
+        print()
+        print("Task Acc:",eval_dict['avg_acc'])
+        print()
+        
+        
 
     # if args.mode == "ViT":
     #     # Tsne visualization feature

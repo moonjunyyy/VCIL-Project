@@ -31,7 +31,7 @@ conda --version
 python --version
 
 # CIL CONFIG
-NOTE="CLIB_ViT_iblurry_CIFAR100_N50_M10" # Short description of the experiment. (WARNING: logs/results with the same note will be overwritten!)
+NOTE="CLIB_ViT_iblurry_CIFAR100_N50_M10_Final" # Short description of the experiment. (WARNING: logs/results with the same note will be overwritten!)
 MODE="clib_vit"
 DATASET="cifar10" # cifar10, cifar100, tinyimagenet, imagenet
 N_TASKS=5
@@ -60,7 +60,7 @@ elif [ "$DATASET" == "tinyimagenet" ]; then
 elif [ "$DATASET" == "imagenet" ]; then
     N_TASKS=10 MEM_SIZE=20000 ONLINE_ITER=0.25
     MODEL_NAME="resnet34" EVAL_PERIOD=1000
-    BATCHSIZE=256; LR=3e-4 OPT_NAME="adam" SCHED_NAME="default" IMP_UPDATE_PERIOD=10
+    BATCHSIZE=256; LR=3e-4 OPT_NAME="adam" SCHED_NAME="default" IMP_UPDATE_PERIOD=10 --debug
 
 else
     echo "Undefined setting"

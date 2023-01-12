@@ -125,6 +125,8 @@ class CLIB_ViT(ER):
         self.report_training(sample_num, train_loss, train_acc)
         self.temp_batch = []
         self.num_updates -= int(self.num_updates)
+        self.update_schedule()
+        
     def update_memory(self, sample):
         self.samplewise_importance_memory(sample)
 
@@ -165,6 +167,11 @@ class CLIB_ViT(ER):
             else:
                 loss.backward()
                 self.optimizer.step()
+            
+            #todo code 다시 돌려야함
+            # self.update_schedule()
+            #todo -------------------
+            
             self.samplewise_loss_update()
 
             total_loss += loss.item()

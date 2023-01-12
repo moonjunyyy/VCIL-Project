@@ -1,6 +1,6 @@
 #!/bin/bash
 
-#SBATCH -J L2P_iblurry_cifar10_N50_M10_RND
+#SBATCH -J L2P_iblurry_cifar10_N50_M10_RND_seed3
 #SBATCH -p batch
 #SBATCH -w vll1
 #SBATCH --nodes=1
@@ -39,7 +39,7 @@ N=50
 M=10
 GPU_TRANSFORM="--gpu_transform"
 USE_AMP="--use_amp"
-SEEDS="1 2 3"
+SEEDS="3"
 VIT="True"
 OPT="adam"
 

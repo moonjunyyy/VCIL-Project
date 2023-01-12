@@ -1,6 +1,6 @@
 #!/bin/bash
 
-#SBATCH -J CLIB_ViT_iblurry_CIFAR10_N50_M10_RND
+#SBATCH -J CLIB_ViT_iblurry_CIFAR10_N50_M10_RND_Final
 #SBATCH -p batch
 #SBATCH -w vll1
 #SBATCH --nodes=1
@@ -31,7 +31,7 @@ conda --version
 python --version
 
 # CIL CONFIG
-NOTE="CLIB_ViT_iblurry_CIFAR10_N50_M10_RND" # Short description of the experiment. (WARNING: logs/results with the same note will be overwritten!)
+NOTE="CLIB_ViT_iblurry_CIFAR10_N50_M10_RND_Final" # Short description of the experiment. (WARNING: logs/results with the same note will be overwritten!)
 MODE="clib_vit"
 DATASET="cifar10" # cifar10, cifar100, tinyimagenet, imagenet
 N_TASKS=5

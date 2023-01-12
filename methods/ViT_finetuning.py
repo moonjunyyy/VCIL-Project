@@ -114,15 +114,19 @@ class ViT_FT(ER):
         self.n_worker       = kwargs["n_worker"]
 
         self.model =  timm.create_model('vit_base_patch16_224_l2p', pretrained=True, num_classes=1).to(self.device)
-        for param in self.model.parameters():
-            param.requires_grad = True
-        self.model.head.weight.requires_grad = True
-        self.model.head.bias.requires_grad = True
+        # for param in self.model.parameters():
+        #     param.requires_grad = False
+        # self.model.head.weight.requires_grad = True
+        # self.model.head.bias.requires_grad = True
 
         self.model.parameters()
         
+        # params = [param for name, param in self.model.named_parameters() if 'head' not in name]
+        # self.optimizer = select_optimizer(self.opt_name, self.lr, self.model, True)
         params = [param for name, param in self.model.named_parameters() if 'head' not in name]
-        self.optimizer = select_optimizer(self.opt_name, self.lr, self.model, True)
+        self.optimizer = optim.Adam(params, lr=self.lr, weight_decay=0,eps=1e-4)
+        self.optimizer.add_param_group({'params': self.model.head.parameters()})
+        
         if 'imagenet' in self.dataset:
             self.lr_gamma = 0.99995
         else:
@@ -187,37 +191,45 @@ class ViT_FT(ER):
 
         # if len(self.memory) > 0 and batch_size - stream_batch_size > 0:
         #     memory_batch_size = min(len(self.memory), batch_size - stream_batch_size)
-        for i in range(iterations):
-            self.model.train()
-            x, y = sample
-            x = torch.cat([self.train_transform(transforms.ToPILImage()(img)).unsqueeze(0) for img in x])
-            y = torch.cat([torch.tensor([self.exposed_classes.index(label)]) for label in y])
-            # if len(self.memory) > 0:
-            #     memory_data = self.memory.get_batch(memory_batch_size)
-            #     x = torch.cat([x, memory_data['image']])
-            #     y = torch.cat([y, memory_data['label']])
-            x = x.to(self.device)
-            y = y.to(self.device)
+        
+        with torch.autograd.detect_anomaly():
+            for i in range(iterations):
+                self.model.train()
+                x, y = sample
+                x = torch.cat([self.train_transform(transforms.ToPILImage()(img)).unsqueeze(0) for img in x])
+                y = torch.cat([torch.tensor([self.exposed_classes.index(label)]) for label in y])
+                # if len(self.memory) > 0:
+                #     memory_data = self.memory.get_batch(memory_batch_size)
+                #     x = torch.cat([x, memory_data['image']])
+                #     y = torch.cat([y, memory_data['label']])
+                # with torch.cuda.amp.autocast(enabled=False):
+                x = x.to(self.device)
+                y = y.to(self.device)
 
-            self.optimizer.zero_grad()
+                self.optimizer.zero_grad()
 
-            logit, loss = self.model_forward(x,y)
+                logit, loss = self.model_forward(x,y)
 
-            _, preds = logit.topk(self.topk, 1, True, True)
+                _, preds = logit.topk(self.topk, 1, True, True)
 
-            if self.use_amp:
-                self.scaler.scale(loss).backward()
-                self.scaler.step(self.optimizer)
-                self.scaler.update()
-            else:
-                loss.backward()
-                self.optimizer.step()
+                if self.use_amp:
+                    self.scaler.scale(loss).backward()
+                    
+                    self.scaler.unscale_(self.optimizer)
+                    torch.nn.utils.clip_grad_norm_(self.model.parameters(), 2.)
 
-            self.update_schedule()
+                    
+                    self.scaler.step(self.optimizer)
+                    self.scaler.update()
+                else:
+                    loss.backward()
+                    self.optimizer.step()
 
-            total_loss += loss.item()
-            correct += torch.sum(preds == y.unsqueeze(1)).item()
-            num_data += y.size(0)
+                self.update_schedule()
+
+                total_loss += loss.item()
+                correct += torch.sum(preds == y.unsqueeze(1)).item()
+                num_data += y.size(0)
 
         return total_loss / iterations, correct / num_data
 
@@ -271,13 +283,32 @@ class ViT_FT(ER):
             self.scheduler.step()
 
     def online_evaluate(self, test_loader, sample_num):
-        eval_dict = self.evaluation(test_loader, self.criterion)
+        eval_dict = self.evaluation(test_loader)
         self.report_test(sample_num, eval_dict["avg_loss"], eval_dict["avg_acc"])
         return eval_dict
 
-    def online_before_task(self, cur_iter):
-        # Task-Free
-        pass
+    def online_before_task(self,train_loader,debug):
+        #todo 현재 Task Class 및 Sample 확인
+        data_info = {}
+        for i, data in enumerate(train_loader):
+            # if debug and (i+1)*self.batch_size == 200:
+            #     break
+            _,label = data
+            # image = image.to(self.device)
+            label = label.to(self.device)
+            
+            for b in range(label.shape[0]):
+                if 'Class_'+str(label[b].item()) in data_info.keys():
+                    data_info['Class_'+str(label[b].item())] +=1
+                else:
+                    data_info['Class_'+str(label[b].item())] =1
+        
+        print("Current Task Data Info")
+        print(data_info)
+        print("<<Convert to str>>")
+        convert_data_info = self.convert_class_from_int_to_str(data_info)
+        print(convert_data_info)
+        print()
 
     def online_after_task(self, cur_iter):
         # Task-Free
@@ -296,7 +327,7 @@ class ViT_FT(ER):
         self.optimizer = select_optimizer(self.opt_name, self.lr, self.model)
         self.scheduler = select_scheduler(self.sched_name, self.optimizer, self.lr_gamma)
 
-    def evaluation(self, test_loader, criterion):
+    def evaluation(self, test_loader):
         total_correct, total_num_data, total_loss = 0.0, 0.0, 0.0
         correct_l = torch.zeros(self.n_classes)
         num_data_l = torch.zeros(self.n_classes)
@@ -312,7 +343,7 @@ class ViT_FT(ER):
                 y = y.to(self.device)
                 logit = self.model(x)
 
-                loss = criterion(logit, y)
+                loss = self.criterion(logit, y)
                 pred = torch.argmax(logit, dim=-1)
                 _, preds = logit.topk(self.topk, 1, True, True)
 
@@ -391,7 +422,7 @@ class ViT_FT(ER):
             ret_corrects[cls_idx] = cnt
 
         return ret_num_data, ret_corrects
-    
+
     def train_data_config(self,n_task, train_dataset,train_sampler):
         from torch.utils.data import DataLoader
         for t_i in range(n_task):
