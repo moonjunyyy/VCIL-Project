@@ -12,6 +12,8 @@ import torchvision.transforms as transforms
 from torch.utils.tensorboard import SummaryWriter
 from scipy.stats import ttest_ind
 
+import torch.distributed as dist
+
 from methods.er_baseline import ER
 from utils.data_loader import cutmix_data, ImageDataset, StreamDataset, MemoryDataset
 
@@ -262,35 +264,56 @@ class CLIB(ER):
 class CLIB(ER):
     def __init__(self, *args, **kwargs) -> None:
         super(CLIB, self).__init__(*args, **kwargs)
+        self.loss = torch.empty((0,))
+        self.dropped_idx = []
+        self.memory_dropped_idx = []
+        self.imp_update_counter = 0
+        self.imp_update_period = kwargs['imp_update_period']
+        if kwargs["sched_name"] == 'default':
+            self.sched_name = 'adaptive_lr'
+
+        # Adaptive LR variables
+        self.lr_step = kwargs["lr_step"]
+        self.lr_length = kwargs["lr_length"]
+        self.lr_period = kwargs["lr_period"]
+        self.prev_loss = None
+        self.lr_is_high = True
+        self.high_lr = self.lr
+        self.low_lr = self.lr_step * self.lr
+        self.high_lr_loss = []
+        self.low_lr_loss = []
+        self.current_lr = self.lr
 
     def online_step(self, sample, samples_cnt):
         image, label = sample
-        for l in label:
-            if l.item() not in self.exposed_classes:
-                self.add_new_class(l.item())
-        for img,lbl in zip(image, label):
-            self.update_memory([img, lbl])
+        self.add_new_class(label)
+        self.update_memory(sample)
         self.num_updates += self.online_iter * self.batchsize
         train_loss, train_acc = self.online_train([torch.empty((0,)), torch.empty((0,))], iterations=int(self.num_updates))
         self.num_updates -= int(self.num_updates)
         return train_loss, train_acc
     
     def update_memory(self, sample):
+        image, label = sample
+        image = torch.cat(self.all_gather(image.to(self.device)))
+        label = torch.cat(self.all_gather(label.to(self.device)))
         x, y = sample
-        if len(self.memory) >= self.memory_size:
-            label_frequency = copy.deepcopy(self.memory.cls_count)
-            label_frequency[self.exposed_classes.index(y.item())] += 1
-            cls_to_replace = np.argmax(np.array(label_frequency))
-            cand_idx = self.memory.cls_idx[cls_to_replace]
-            score = self.memory.others_loss_decrease[cand_idx]
-            idx_to_replace = cand_idx[np.argmin(score)]
-            self.memory.replace_sample(sample, idx_to_replace)
-            self.dropped_idx.append(idx_to_replace)
-            self.memory_dropped_idx.append(idx_to_replace)
-        else:
-            self.memory.replace_sample(sample)
-            self.dropped_idx.append(len(self.memory) - 1)
-            self.memory_dropped_idx.append(len(self.memory) - 1)
+        
+        for x, y in zip(image, label):
+            if len(self.memory) >= self.memory_size:
+                label_frequency = copy.deepcopy(self.memory.cls_count)
+                label_frequency[self.exposed_classes.index(y.item())] += 1
+                cls_to_replace = torch.argmax(label_frequency)
+                cand_idx = self.memory.labels == self.memory.cls_list[cls_to_replace]
+                score = self.memory.others_loss_decrease[cand_idx]
+                idx_to_replace = cand_idx[torch.argmin(score)]
+                self.memory.replace_data([x, y], idx_to_replace)
+                self.dropped_idx.append(idx_to_replace)
+                self.memory_dropped_idx.append(idx_to_replace)
+            else:
+                self.memory.replace_data([x, y])
+                self.dropped_idx.append(len(self.memory) - 1)
+                self.memory_dropped_idx.append(len(self.memory) - 1)
 
     def online_before_task(self, task_id):
         pass
@@ -304,12 +327,50 @@ class CLIB(ER):
             x, labels_a, labels_b, lam = cutmix_data(x=x, y=y, alpha=1.0)
             with torch.cuda.amp.autocast(enabled=self.use_amp):
                 logit = self.model(x)
-                loss = lam * self.criterion(logit, labels_a) + (1 - lam) * self.criterion(logit, labels_b)
+                loss = lam * self.criterion(logit, labels_a.to(torch.long)) + (1 - lam) * self.criterion(logit, labels_b.to(torch.long))
         else:
             with torch.cuda.amp.autocast(enabled=self.use_amp):
                 logit = self.model(x)
-                loss = self.criterion(logit, y)
+                loss = self.criterion(logit, y.to(torch.long))
         return logit, loss
+
+    def online_train(self, data, iterations):
+        self.model.train()
+        total_loss, total_correct, total_num_data = 0.0, 0.0, 0.0
+        image, label = data
+        for j in range(len(label)):
+            label[j] = self.exposed_classes.index(label[j].item())
+        for i in range(iterations):
+            x = image.detach().clone()
+            y = label.detach().clone()
+            if len(self.memory) > 0 and self.memory_batchsize > 0:
+                memory_batchsize = min(self.memory_batchsize, len(self.memory))
+                memory_images, memory_labels = self.memory.get_batch(memory_batchsize)
+                x = torch.cat([x, memory_images], dim=0)
+                y = torch.cat([y, memory_labels], dim=0)
+
+            x = torch.cat([self.train_transform(transforms.ToPILImage()(_x)).unsqueeze(0) for _x in x])
+
+            x = x.to(self.device)
+            y = y.to(self.device)
+
+            self.optimizer.zero_grad()
+            logit, loss = self.model_forward(x,y)
+            _, preds = logit.topk(self.topk, 1, True, True)
+           
+            self.samplewise_loss_update()
+
+            self.scaler.scale(loss).backward()
+            self.scaler.step(self.optimizer)
+            self.scaler.update()
+            self.update_schedule()
+
+            total_loss += loss.item()
+            total_correct += torch.sum(preds == y.unsqueeze(1)).item()
+            total_num_data += y.size(0)
+
+
+        return total_loss / iterations, total_correct / total_num_data
 
     def online_evaluate(self, test_loader):
         total_correct, total_num_data, total_loss = 0.0, 0.0, 0.0
@@ -349,9 +410,106 @@ class CLIB(ER):
         return eval_dict
 
     def update_schedule(self, reset=False):
-        if reset:
-            self.scheduler = select_scheduler(self.sched_name, self.optimizer, self.lr_gamma)
-            for param_group in self.optimizer.param_groups:
-                param_group["lr"] = self.lr
+        if self.sched_name == 'adaptive_lr':
+            self.adaptive_lr(period=self.lr_period, min_iter=self.lr_length)
+            self.model.train()
         else:
-            self.scheduler.step()
+            super().update_schedule(reset)
+
+    def adaptive_lr(self, period=10, min_iter=10, significance=0.05):
+        if self.imp_update_counter % self.imp_update_period == 0:
+            self.train_count += 1
+            mask = torch.ones(len(self.loss), dtype=bool)
+            mask[self.dropped_idx] = False
+            if self.train_count % period == 0:
+                if self.lr_is_high:
+                    if self.prev_loss is not None and self.train_count > 20:
+                        self.high_lr_loss.append(torch.mean((self.prev_loss - self.loss[:len(self.prev_loss)])[mask[:len(self.prev_loss)]]).cpu())
+                        if len(self.high_lr_loss) > min_iter:
+                            del self.high_lr_loss[0]
+                    self.prev_loss = self.loss
+                    self.lr_is_high = False
+                    for param_group in self.optimizer.param_groups:
+                        param_group["lr"] = self.low_lr
+                        param_group["initial_lr"] = self.low_lr
+                else:
+                    if self.prev_loss is not None and self.train_count > 20:
+                        self.low_lr_loss.append(torch.mean((self.prev_loss - self.loss[:len(self.prev_loss)])[mask[:len(self.prev_loss)]]).cpu())
+                        if len(self.low_lr_loss) > min_iter:
+                            del self.low_lr_loss[0]
+                    self.prev_loss = self.loss
+                    self.lr_is_high = True
+                    for param_group in self.optimizer.param_groups:
+                        param_group["lr"] = self.high_lr
+                        param_group["initial_lr"] = self.high_lr
+                self.dropped_idx = []
+                if len(self.high_lr_loss) == len(self.low_lr_loss) and len(self.high_lr_loss) >= min_iter:
+                    stat, pvalue = ttest_ind(self.low_lr_loss, self.high_lr_loss, equal_var=False, alternative='greater')
+                    print(pvalue)
+                    if pvalue < significance:
+                        self.high_lr = self.low_lr
+                        self.low_lr *= self.lr_step
+                        self.high_lr_loss = []
+                        self.low_lr_loss = []
+                        if self.lr_is_high:
+                            self.lr_is_high = False
+                            for param_group in self.optimizer.param_groups:
+                                param_group["lr"] = self.low_lr
+                                param_group["initial_lr"] = self.low_lr
+                        else:
+                            self.lr_is_high = True
+                            for param_group in self.optimizer.param_groups:
+                                param_group["lr"] = self.high_lr
+                                param_group["initial_lr"] = self.high_lr
+                    elif pvalue > 1 - significance:
+                        self.low_lr = self.high_lr
+                        self.high_lr /= self.lr_step
+                        self.high_lr_loss = []
+                        self.low_lr_loss = []
+                        if self.lr_is_high:
+                            self.lr_is_high = False
+                            for param_group in self.optimizer.param_groups:
+                                param_group["lr"] = self.low_lr
+                                param_group["initial_lr"] = self.low_lr
+                        else:
+                            self.lr_is_high = True
+                            for param_group in self.optimizer.param_groups:
+                                param_group["lr"] = self.high_lr
+                                param_group["initial_lr"] = self.high_lr
+
+
+    def samplewise_loss_update(self, ema_ratio=0.90, batchsize=512):
+        self.imp_update_counter += 1
+        if self.imp_update_counter % self.imp_update_period == 0:
+            if len(self.memory) > 0:
+                self.model.eval()
+                with torch.no_grad():
+                    x = self.memory.images.clone()
+                    y = self.memory.labels.clone()
+                    if self.distributed:
+                        if dist.get_rank() == 0:
+                            xlist = [x[i::dist.get_world_size()] for i in range(dist.get_world_size())]
+                            ylist = [y[i::dist.get_world_size()] for i in range(dist.get_world_size())]
+                            x = x[::dist.get_world_size()].contiguous()
+                            y = y[::dist.get_world_size()].contiguous()
+                            dist.scatter(x, xlist, src=0)
+                            dist.scatter(y, ylist, src=0)
+                        else:
+                            x = x[dist.get_rank()::dist.get_world_size()].contiguous()
+                            y = y[dist.get_rank()::dist.get_world_size()].contiguous()
+                            dist.scatter(x, src=0)
+                            dist.scatter(y, src=0)
+                    for j in range(len(y)):
+                        y[j] = self.exposed_classes.index(y[j].item())
+                    x = x.to(self.device)
+                    y = y.to(self.device)
+                    with torch.cuda.amp.autocast(enabled=self.use_amp):
+                        logit = torch.cat(
+                            [self.model(transforms.Resize((self.inp_size,self.inp_size))(x[i * batchsize:min((i + 1) * batchsize, len(x))].to(self.device)))
+                            for i in range(-(-len(x) // batchsize))], dim=0)
+                    loss = F.cross_entropy(logit, y.to(torch.int64), reduction='none')
+                    if self.distributed:
+                        loss = torch.cat(self.all_gather(loss), dim=-1).flatten()
+                self.memory.update_loss_history(loss, self.loss, ema_ratio=ema_ratio, dropped_idx=self.memory_dropped_idx)
+                self.memory_dropped_idx = []
+                self.loss = loss

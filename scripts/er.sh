@@ -50,8 +50,8 @@ if [ "$DATASET" == "cifar10" ]; then
 
 elif [ "$DATASET" == "cifar100" ]; then
     MEM_SIZE=2000 ONLINE_ITER=3
-    MODEL_NAME="vit" EVAL_PERIOD=500
-    BATCHSIZE=64; LR=3e-4 OPT_NAME="adam" SCHED_NAME="default"
+    MODEL_NAME="vit" EVAL_PERIOD=1000
+    BATCHSIZE=128; LR=3e-4 OPT_NAME="adam" SCHED_NAME="default"
 
 elif [ "$DATASET" == "tinyimagenet" ]; then
     MEM_SIZE=4000 ONLINE_ITER=3
@@ -77,5 +77,5 @@ do
     --model_name $MODEL_NAME --opt_name $OPT_NAME --sched_name $SCHED_NAME \
     --lr $LR --batchsize $BATCHSIZE \
     --memory_size $MEM_SIZE $GPU_TRANSFORM --online_iter $ONLINE_ITER --data_dir /local_datasets \
-    --note $NOTE --eval_period $EVAL_PERIOD $USE_AMP --debug
+    --note $NOTE --eval_period $EVAL_PERIOD $USE_AMP
 done
