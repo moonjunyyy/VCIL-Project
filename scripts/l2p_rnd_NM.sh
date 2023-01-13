@@ -1,6 +1,6 @@
 #!/bin/bash
 
-#SBATCH -J L2P_iblurry_cifar10_N50_M10_RND
+#SBATCH -J L2P_iblurry_cifar100_N50_M10_RND_test
 #SBATCH -p batch
 #SBATCH -w vll1
 #SBATCH --nodes=1
@@ -31,7 +31,7 @@ conda --version
 python --version
 
 # CIL CONFIG
-NOTE="L2P_iblurry_cifar10_N50_M10_RND" # Short description of the experiment. (WARNING: logs/results with the same note will be overwritten!)
+NOTE="L2P_iblurry_cifar10_N50_M10_RND_test" # Short description of the experiment. (WARNING: logs/results with the same note will be overwritten!)
 MODE="L2P"
 DATASET="cifar10" # cifar10, cifar100, tinyimagenet, imagenet
 N_TASKS=5
@@ -45,22 +45,22 @@ OPT="adam"
 
 if [ "$DATASET" == "cifar10" ]; then
     MEM_SIZE=500 ONLINE_ITER=1
-    MODEL_NAME="resnet18" EVAL_PERIOD=100
+    MODEL_NAME="L2P" EVAL_PERIOD=100
     BATCHSIZE=16; LR=0.03 OPT_NAME="adam" SCHED_NAME="const" MEMORY_EPOCH=256
 
 elif [ "$DATASET" == "cifar100" ]; then
     MEM_SIZE=2000 ONLINE_ITER=1
-    MODEL_NAME="resnet34" EVAL_PERIOD=100
+    MODEL_NAME="L2P" EVAL_PERIOD=100
     BATCHSIZE=16; LR=0.0075 OPT_NAME="adam" SCHED_NAME="const" MEMORY_EPOCH=256
 
 elif [ "$DATASET" == "tinyimagenet" ]; then
     MEM_SIZE=4000 ONLINE_ITER=3
-    MODEL_NAME="resnet34" EVAL_PERIOD=100
+    MODEL_NAME="L2P" EVAL_PERIOD=100
     BATCHSIZE=32; LR=0.03 OPT_NAME="adam" SCHED_NAME="const" MEMORY_EPOCH=256
 
 elif [ "$DATASET" == "imagenet" ]; then
     N_TASKS=10 MEM_SIZE=20000 ONLINE_ITER=0.25
-    MODEL_NAME="resnet34" EVAL_PERIOD=1000
+    MODEL_NAME="L2P" EVAL_PERIOD=1000
     BATCHSIZE=256; LR=0.03 OPT_NAME="adam" SCHED_NAME="const" MEMORY_EPOCH=100
     BATCHSIZE=256; LR=0.05 OPT_NAME=$OPT SCHED_NAME="multistep" MEMORY_EPOCH=100
 
@@ -83,5 +83,5 @@ do
     --model_name $MODEL_NAME --opt_name $OPT_NAME --sched_name $SCHED_NAME \
     --lr $LR --batchsize $BATCHSIZE \
     --memory_size $MEM_SIZE $GPU_TRANSFORM --online_iter $ONLINE_ITER --data_dir /local_datasets \
-    --note $NOTE --eval_period $EVAL_PERIOD --memory_epoch $MEMORY_EPOCH $USE_AMP --rnd_NM
+    --note $NOTE --eval_period $EVAL_PERIOD --memory_epoch $MEMORY_EPOCH $USE_AMP --rnd_NM --debug
 done

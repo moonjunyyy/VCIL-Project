@@ -100,7 +100,7 @@ class L2P(nn.Module):
                  selection_size : int   = 5,
                  prompt_len     : int   = 5,
                  class_num      : int   = 100,
-                 backbone_name  : str   = None,
+                 backbone_name  : str   = "vit_base_patch16_224",
                  lambd          : float = 0.5,
                  _batchwise_selection  : bool = False,
                  _diversed_selection   : bool = True,
@@ -128,10 +128,10 @@ class L2P(nn.Module):
         for name, param in self.backbone.named_parameters():
             if 'head' not in name:
                 param.requires_grad = False
-        self.backbone.head.weight.requires_grad = True
-        self.backbone.head.bias.requires_grad   = True
+        self.backbone.fc.weight.requires_grad = True
+        self.backbone.fc.bias.requires_grad   = True
 
-        self.fc = self.backbone.head
+        self.fc = self.backbone.fc
         
         self.prompt = Prompt(
             pool_size,

@@ -374,8 +374,8 @@ class FT(_Trainer):
         for j in range(len(label)):
             label[j] = self.exposed_classes.index(label[j].item())
         for i in range(iterations):
-            x = image.detach().clone()
-            y = label.detach().clone()
+            x = image
+            y = label
             # if len(self.memory) > 0 and self.memory_batchsize > 0:
             #     memory_batchsize = min(self.memory_batchsize, len(self.memory))
             #     memory_images, memory_labels = self.memory.get_batch(memory_batchsize)

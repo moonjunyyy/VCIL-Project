@@ -2,7 +2,7 @@
 
 #SBATCH --job-name Finetuning_iblurry_cifar100_N50_M10
 #SBATCH -p batch
-#SBATCH -w vll1
+#SBATCH -w vll2
 #SBATCH --nodes=1
 #SBATCH --gres=gpu:4
 #SBATCH --cpus-per-gpu=4
@@ -85,5 +85,8 @@ do
     --model_name $MODEL_NAME --opt_name $OPT_NAME --sched_name $SCHED_NAME \
     --lr $LR --batchsize $BATCHSIZE \
     --memory_size $MEM_SIZE $GPU_TRANSFORM --online_iter $ONLINE_ITER --data_dir /local_datasets/ \
-    --note $NOTE --eval_period $EVAL_PERIOD --memory_epoch $MEMORY_EPOCH $USE_AMP --debug
+    --note $NOTE --eval_period $EVAL_PERIOD --memory_epoch $MEMORY_EPOCH $USE_AMP --debug \
+
+    
+   
 done

@@ -295,7 +295,7 @@ class _Trainer():
             self.current_task_data(self.train_dataloader)
             
             for i, (image, label) in enumerate(self.train_dataloader):
-                if self.debug and (i+self.batchsize) >= 100:
+                if self.debug and (i+self.batchsize) >= 200:
                     break
                 
                 samples_cnt += image.size(0)

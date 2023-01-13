@@ -6,7 +6,7 @@ from methods.rainbow_memory import RM
 from methods.ewc import EWCpp
 from methods.mir import MIR
 from methods.clib import CLIB
-from methods.L2P import L2P
+from models.L2P import L2P
 from methods.ViT_finetuning import ViT_FT
 from methods.ViT_Linear import ViT_LP
 

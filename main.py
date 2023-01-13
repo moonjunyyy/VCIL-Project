@@ -28,10 +28,21 @@ import matplotlib.pyplot as plt
 from methods.er_baseline import ER
 from methods.Finetuning import FT
 
+
+from methods.bic import BiasCorrection
+from methods.rainbow_memory import RM
+from methods.ewc import EWCpp
+from methods.mir import MIR
+from methods.clib import CLIB
+from models.L2P import L2P
+
+
 methods = {
         "er": ER ,
-        "Finetuning": FT
+        "Finetuning": FT,
+        "L2P": L2P,
            }
+
 os.environ["CUDA_LAUNCH_BLOCKING"]="1"
 def main():
     # Get Configurations
