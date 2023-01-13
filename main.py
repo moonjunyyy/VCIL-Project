@@ -17,7 +17,7 @@ from utils.onlinesampler import OnlineSampler, OnlineTestSampler
 from utils.augment import Cutout, select_autoaugment
 from utils.data_loader import get_test_datalist, get_statistics
 from utils.data_loader import get_train_datalist
-from utils.method_manager import select_method
+# from utils.method_manager import select_method
 from datasets import *
 
 import time
@@ -34,13 +34,15 @@ from methods.rainbow_memory import RM
 from methods.ewc import EWCpp
 from methods.mir import MIR
 from methods.clib import CLIB
-from models.L2P import L2P
+from methods.clib_vit import CLIB_ViT
+from methods.L2P import L2P
 
 
 methods = {
         "er": ER ,
         "Finetuning": FT,
         "L2P": L2P,
+        "clib_vit":CLIB_ViT
            }
 
 os.environ["CUDA_LAUNCH_BLOCKING"]="1"

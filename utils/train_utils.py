@@ -8,7 +8,7 @@ from timm.models.registry import register_model
 from timm.models.vision_transformer import _cfg, _create_vision_transformer, default_cfgs
 from timm.models import create_model
 from models.vit import _create_vision_transformer
-from models.L2P import L2P
+# from models.L2P import L2P
 
 @register_model
 def vit_base_patch16_224(pretrained=False, **kwargs):
@@ -141,8 +141,8 @@ def select_model(model_name, dataset, num_classes=None):
         model = timm.create_model(
                             "vit_base_patch16_224",pretrained=True,num_classes=num_classes,
                             drop_rate=0.,drop_path_rate=0.,drop_block_rate=None,)
-    elif model_name == "L2P":
-        model = L2P()
+    # elif model_name == "L2P":
+    #     model = L2P()
     else:
         model = model_class(opt)
 

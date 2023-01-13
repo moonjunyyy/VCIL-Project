@@ -1,10 +1,10 @@
 #!/bin/bash
 
-#SBATCH -J L2P_iblurry_cifar10_N50_M10
+#SBATCH -J L2P_iblurry_cifar100_N50_M10_seed1
 #SBATCH -p batch
-#SBATCH -w vll1
+#SBATCH -w agi1
 #SBATCH --nodes=1
-#SBATCH --gres=gpu:1
+#SBATCH --gres=gpu:2
 #SBATCH --cpus-per-gpu=4
 #SBATCH --mem-per-gpu=20G
 #SBATCH --time=14-0
@@ -31,9 +31,9 @@ conda --version
 python --version
 
 # CIL CONFIG
-NOTE="L2P_iblurry_cifar10_N50_M10" # Short description of the experiment. (WARNING: logs/results with the same note will be overwritten!)
+NOTE="L2P_iblurry_cifar100_N50_M10" # Short description of the experiment. (WARNING: logs/results with the same note will be overwritten!)
 MODE="L2P"
-DATASET="cifar10" # cifar10, cifar100, tinyimagenet, imagenet
+DATASET="cifar100" # cifar10, cifar100, tinyimagenet, imagenet
 N_TASKS=5
 N=50
 M=10
@@ -50,7 +50,7 @@ if [ "$DATASET" == "cifar10" ]; then
 
 elif [ "$DATASET" == "cifar100" ]; then
     MEM_SIZE=2000 ONLINE_ITER=1
-    MODEL_NAME="L2P" EVAL_PERIOD=100
+    MODEL_NAME="L2P" EVAL_PERIOD=1000
     BATCHSIZE=16; LR=0.0075 OPT_NAME="adam" SCHED_NAME="const" MEMORY_EPOCH=256
 
 elif [ "$DATASET" == "tinyimagenet" ]; then

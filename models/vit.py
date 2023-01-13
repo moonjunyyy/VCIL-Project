@@ -383,7 +383,7 @@ class VisionTransformer(nn.Module):
         self.pos_drop = nn.Dropout(p=drop_rate)
 
         self.prompt_pool = prompt_pool
-        self.head_type = head_type
+        self.fc_type = head_type
         self.use_prompt_mask = use_prompt_mask
         
         # if prompt_length is not None and pool_size is not None and prompt_pool: 
@@ -479,14 +479,14 @@ class VisionTransformer(nn.Module):
         return x
 
     def forward_head(self, x, pre_logits: bool = False):
-        if self.class_token and self.head_type == 'token':
+        if self.class_token and self.fc_type == 'token':
             x = x[:, 0]
-        elif self.head_type == 'gap' and self.global_pool == 'avg':
+        elif self.fc_type == 'gap' and self.global_pool == 'avg':
             x = x.mean(dim=1)
-        elif self.head_type == 'prompt' and self.prompt_pool:
+        elif self.fc_type == 'prompt' and self.prompt_pool:
             x = x[:, 1:(1 + self.total_prompt_len)] if self.class_token else x[:, 0:self.total_prompt_len]
             x = x.mean(dim=1)
-        elif self.head_type == 'token+prompt' and self.prompt_pool and self.class_token:
+        elif self.fc_type == 'token+prompt' and self.prompt_pool and self.class_token:
             x = x[:, 0:self.total_prompt_len + 1]
             x = x.mean(dim=1)
         else:

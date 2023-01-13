@@ -345,14 +345,33 @@ class FT(_Trainer):
         # self.current_task_data(train_loader)
         pass
     
+    # def add_new_class(self, class_name):
+    #     self.exposed_classes.append(class_name)
+    #     self.num_learned_class = len(self.exposed_classes)
+    #     prev_weight = copy.deepcopy(self.model_without_ddp.fc.weight.data)
+    #     self.model_without_ddp.fc = nn.Linear(self.model_without_ddp.fc.in_features, self.num_learned_class).to(self.device)
+    #     with torch.no_grad():
+    #         if self.num_learned_class > 1:
+    #             self.model_without_ddp.fc.weight[:self.num_learned_class - 1] = prev_weight
+    #     for param in self.optimizer.param_groups[1]['params']:
+    #         if param in self.optimizer.state.keys():
+    #             del self.optimizer.state[param]
+    #     del self.optimizer.param_groups[1]
+    #     params = [param for name, param in self.model.named_parameters() if 'fc' in name]
+    #     self.optimizer.add_param_group({'params': params})
+    #     # self.memory.add_new_class(cls_list=self.exposed_classes)
+    #     if 'reset' in self.sched_name:
+    #         self.update_schedule(reset=True)
     def add_new_class(self, class_name):
         self.exposed_classes.append(class_name)
         self.num_learned_class = len(self.exposed_classes)
         prev_weight = copy.deepcopy(self.model_without_ddp.fc.weight.data)
+        prev_bias = copy.deepcopy(self.model_without_ddp.fc.bias.data)
         self.model_without_ddp.fc = nn.Linear(self.model_without_ddp.fc.in_features, self.num_learned_class).to(self.device)
         with torch.no_grad():
             if self.num_learned_class > 1:
                 self.model_without_ddp.fc.weight[:self.num_learned_class - 1] = prev_weight
+                self.model_without_ddp.fc.bias[:self.num_learned_class - 1]   = prev_bias
         for param in self.optimizer.param_groups[1]['params']:
             if param in self.optimizer.state.keys():
                 del self.optimizer.state[param]

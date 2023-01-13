@@ -191,7 +191,7 @@ class _Trainer():
     def setup_distributed_model(self):
 
         print("Building model...")
-        self.model = select_model(self.model_name, self.dataset, 1)
+        self.model = select_model(self.model_name, self.dataset, 1).to(self.device)
         self.scaler = torch.cuda.amp.GradScaler(enabled=self.use_amp)
         self.writer = SummaryWriter(f"{self.log_path}/tensorboard/{self.dataset}/{self.note}/seed_{self.rnd_seed}")
         
@@ -295,7 +295,7 @@ class _Trainer():
             self.current_task_data(self.train_dataloader)
             
             for i, (image, label) in enumerate(self.train_dataloader):
-                if self.debug and (i+self.batchsize) >= 200:
+                if self.debug and (i+1)*self.batchsize >= 2000:
                     break
                 
                 samples_cnt += image.size(0)
@@ -335,6 +335,7 @@ class _Trainer():
             print("[2-4] Update the information for the current task")
             task_records["task_acc"].append(task_acc)
             task_records["cls_acc"].append(eval_dict["cls_acc"])
+            # print(f"Test | Sample # {samples_cnt} | test_loss {avg_loss:.4f} | test_acc {avg_acc:.4f} | ")
 
             print("[2-5] Report task result")
             self.writer.add_scalar("Metrics/TaskAcc", task_acc, task_id)
