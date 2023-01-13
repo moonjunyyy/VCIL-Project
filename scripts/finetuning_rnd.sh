@@ -33,15 +33,15 @@ python --version
 
 # CIL CONFIG
 MODE="Finetuning"
-NOTE="Finetuning_iblurry_cifar100_N50_M10_RANDOM" # Short description of the experiment. (WARNING: logs/results with the same note will be overwritten!)
+NOTE="Finetuning_iblurry_cifar10_N50_M10_RANDOM" # Short description of the experiment. (WARNING: logs/results with the same note will be overwritten!)
 
-DATASET="cifar100" # cifar10, cifar100, tinyimagenet, imagenet
+DATASET="cifar10" # cifar10, cifar100, tinyimagenet, imagenet
 N_TASKS=5
 N=50
 M=10
 GPU_TRANSFORM="--gpu_transform"
 USE_AMP="--use_amp"
-SEEDS="1 2 3"
+SEEDS="1"
 VIT="True"
 OPT="sgd"
 

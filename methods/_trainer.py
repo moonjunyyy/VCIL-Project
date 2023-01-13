@@ -192,7 +192,7 @@ class _Trainer():
     def setup_distributed_model(self):
 
         print("Building model...")
-        self.model = select_model(self.model_name, self.dataset, 1)
+        self.model = select_model(self.model_name, self.dataset, 1).to(self.device)
         self.scaler = torch.cuda.amp.GradScaler(enabled=self.use_amp)
         self.writer = SummaryWriter(f"{self.log_path}/tensorboard/{self.dataset}/{self.note}/seed_{self.rnd_seed}")
         
@@ -253,6 +253,9 @@ class _Trainer():
         self.total_samples = len(self.train_dataset)
 
         print(f"[1] Select a CIL method ({self.mode})")
+        # #!-----------------------------------------------
+        # print(self.train_dataset.classes)
+        # #!-----------------------------------------------
         self.setup_distributed_model()
 
         if self.rnd_seed is not None:
@@ -288,7 +291,6 @@ class _Trainer():
             self.train_sampler.set_task(task_id)
             self.current_task_data(self.train_dataloader)
             
-            self.online_before_task(task_id)
             for i, (image, label) in enumerate(self.train_dataloader):
                 if self.debug and i >= 100 : break
                 samples_cnt += image.size(0) * self.world_size
@@ -308,13 +310,15 @@ class _Trainer():
                         eval_results["data_cnt"].append(num_eval)
                         self.report_test(num_eval, eval_dict["avg_loss"], eval_dict['avg_acc'])
                     num_eval += self.eval_period
-                loss, acc = self.online_step([image,label], samples_cnt)
-                self.report_training(samples_cnt, loss, acc)
+                # loss, acc = self.online_step([image,label], samples_cnt)
+                # self.report_training(samples_cnt, loss, acc)
             self.online_after_task(task_id)
+            
             test_sampler = OnlineTestSampler(self.test_dataset, self.exposed_classes)
             test_dataloader = DataLoader(self.test_dataset, batch_size=self.batchsize*2, sampler=test_sampler, num_workers=self.n_worker)
             self.test_data_config(test_dataloader,task_id)
             eval_dict = self.online_evaluate(test_dataloader)
+            
             if self.distributed:
                 eval_dict =  torch.tensor([eval_dict['avg_loss'], eval_dict['avg_acc'], *eval_dict['cls_acc']], device=self.device)
                 dist.reduce(eval_dict, dst=0, op=dist.ReduceOp.SUM)
@@ -354,6 +358,13 @@ class _Trainer():
 
         print(f"======== Summary =======")
         print(f"A_auc {A_auc} | A_avg {A_avg} | A_last {A_last} | F_last {F_last}")
+        
+        print('\nAcc per Class')
+        # print("Class Accuracy")
+        for i in range(len(cls_acc)):
+            print(f"Task {i}")
+            print(cls_acc[i])
+        print("="*24)
     
     def add_new_class(self, class_name):
         # For DDP, normally go into this function
