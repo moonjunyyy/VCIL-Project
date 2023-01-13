@@ -424,7 +424,7 @@ class CLIB(ER):
             if self.train_count % period == 0:
                 if self.lr_is_high:
                     if self.prev_loss is not None and self.train_count > 20:
-                        self.high_lr_loss.append(torch.mean((self.prev_loss - self.loss[:len(self.prev_loss)])[mask[:len(self.prev_loss)]]))
+                        self.high_lr_loss.append(torch.mean((self.prev_loss - self.loss[:len(self.prev_loss)])[mask[:len(self.prev_loss)]]).cpu())
                         if len(self.high_lr_loss) > min_iter:
                             del self.high_lr_loss[0]
                     self.prev_loss = self.loss
@@ -434,7 +434,7 @@ class CLIB(ER):
                         param_group["initial_lr"] = self.low_lr
                 else:
                     if self.prev_loss is not None and self.train_count > 20:
-                        self.low_lr_loss.append(torch.mean((self.prev_loss - self.loss[:len(self.prev_loss)])[mask[:len(self.prev_loss)]]))
+                        self.low_lr_loss.append(torch.mean((self.prev_loss - self.loss[:len(self.prev_loss)])[mask[:len(self.prev_loss)]]).cpu())
                         if len(self.low_lr_loss) > min_iter:
                             del self.low_lr_loss[0]
                     self.prev_loss = self.loss
