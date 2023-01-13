@@ -73,7 +73,7 @@ class _Trainer():
         self.imp_update_period   = kwargs.get("imp_update_period")
 
         self.dist_backend = 'nccl'
-        self.dist_url = 'env://'
+        self.dist_url = 'tcp://' + os.environ['MASTER_ADDR'] + ':' + os.environ['MASTER_PORT']
 
         self.lr_step     = kwargs.get("lr_step")    # for adaptive LR
         self.lr_length   = kwargs.get("lr_length")  # for adaptive LR
@@ -173,6 +173,7 @@ class _Trainer():
                 transforms.Resize((inp_size, inp_size)),
                 transforms.ToTensor(),
                 transforms.Normalize(mean, std),])
+        self.inp_size = inp_size
 
         _r = dist.get_rank() if self.distributed else None       # means that it is not distributed
         _w = dist.get_world_size() if self.distributed else None # means that it is not distributed
@@ -186,7 +187,7 @@ class _Trainer():
         self.train_dataloader    = DataLoader(self.train_dataset, batch_size=self.temp_batchsize, sampler=self.train_sampler, num_workers=self.n_worker)
         
         self.seen = 0
-        self.memory = Memory(self.train_dataset)
+        self.memory = Memory(self.device)
 
     def setup_distributed_model(self):
 
@@ -285,7 +286,7 @@ class _Trainer():
             self.online_before_task(task_id)
             for i, (image, label) in enumerate(self.train_dataloader):
                 if self.debug and i >= 100 : break
-                samples_cnt += image.size(0)
+                samples_cnt += image.size(0) * self.world_size
                 if samples_cnt > num_eval:
                 # if samples_cnt % args.eval_period == 0:
                     test_sampler = OnlineTestSampler(self.test_dataset, self.exposed_classes)
@@ -293,13 +294,14 @@ class _Trainer():
                     eval_dict = self.online_evaluate(test_dataloader)
                     if self.distributed:
                         eval_dict =  torch.tensor([eval_dict['avg_loss'], eval_dict['avg_acc'], *eval_dict['cls_acc']], device=self.device)
-                        dist.all_reduce(eval_dict, op=dist.ReduceOp.SUM)
+                        dist.reduce(eval_dict, dst=0, op=dist.ReduceOp.SUM)
                         eval_dict = eval_dict.cpu().numpy()
                         eval_dict = {'avg_loss': eval_dict[0]/self.world_size, 'avg_acc': eval_dict[1]/self.world_size, 'cls_acc': eval_dict[2:]/self.world_size}
-                    eval_results["test_acc"].append(eval_dict['avg_acc'])
-                    eval_results["avg_acc"].append(eval_dict['cls_acc'])
-                    eval_results["data_cnt"].append(num_eval)
-                    self.report_test(num_eval, eval_dict["avg_loss"], eval_dict['avg_acc'])
+                    if self.is_main_process():
+                        eval_results["test_acc"].append(eval_dict['avg_acc'])
+                        eval_results["avg_acc"].append(eval_dict['cls_acc'])
+                        eval_results["data_cnt"].append(num_eval)
+                        self.report_test(num_eval, eval_dict["avg_loss"], eval_dict['avg_acc'])
                     num_eval += self.eval_period
                 loss, acc = self.online_step([image,label], samples_cnt)
                 self.report_training(samples_cnt, loss, acc)
@@ -309,19 +311,21 @@ class _Trainer():
             eval_dict = self.online_evaluate(test_dataloader)
             if self.distributed:
                 eval_dict =  torch.tensor([eval_dict['avg_loss'], eval_dict['avg_acc'], *eval_dict['cls_acc']], device=self.device)
-                dist.all_reduce(eval_dict, op=dist.ReduceOp.SUM)
+                dist.reduce(eval_dict, dst=0, op=dist.ReduceOp.SUM)
+                # dist.all_reduce(eval_dict, op=dist.ReduceOp.SUM)
                 eval_dict = eval_dict.cpu().numpy()
-                eval_dict = {'avg_loss': eval_dict[0]/self.world_size, 'avg_acc': eval_dict[1]/self.world_size, 'cls_acc': eval_dict[2:]/self.world_size}
-            task_acc = eval_dict['avg_acc']
+                eval_dict = {'avg_loss': eval_dict[0]/self.world_size, 'avg_acc': eval_dict[1]/self.world_size, 'cls_acc': eval_dict[2:]/self.world_size}        
+            if self.is_main_process():
+                task_acc = eval_dict['avg_acc']
+                print("[2-4] Update the information for the current task")
+                task_records["task_acc"].append(task_acc)
+                task_records["cls_acc"].append(eval_dict["cls_acc"])
 
-            print("[2-4] Update the information for the current task")
-            task_records["task_acc"].append(task_acc)
-            task_records["cls_acc"].append(eval_dict["cls_acc"])
-
-            print("[2-5] Report task result")
-            self.writer.add_scalar("Metrics/TaskAcc", task_acc, task_id)
+                print("[2-5] Report task result")
+                self.writer.add_scalar("Metrics/TaskAcc", task_acc, task_id)
         
-        np.save(f"{self.log_path}/logs/{self.dataset}/{self.note}/seed_{self.rnd_seed}.npy", task_records["task_acc"])
+        if self.is_main_process():        
+            np.save(f"{self.log_path}/logs/{self.dataset}/{self.note}/seed_{self.rnd_seed}.npy", task_records["task_acc"])
 
         if self.mode == 'gdumb':
             eval_results, task_records = self.evaluate_all(self.test_dataset, self.memory_epoch, self.batchsize, self.n_worker)
@@ -346,20 +350,31 @@ class _Trainer():
         print(f"A_auc {A_auc} | A_avg {A_avg} | A_last {A_last} | F_last {F_last}")
     
     def add_new_class(self, class_name):
-        self.exposed_classes.append(class_name)
-        self.num_learned_class = len(self.exposed_classes)
+        # For DDP, normally go into this function
+        len_class = len(self.exposed_classes)
+        exposed_classes = []
+        for label in class_name:
+            if label.item() not in self.exposed_classes:
+                self.exposed_classes.append(label.item())
+        if self.distributed:
+            exposed_classes = torch.cat(self.all_gather(torch.tensor(self.exposed_classes, device=self.device))).cpu().tolist()
+            for cls in exposed_classes:
+                if cls not in self.exposed_classes:
+                    self.exposed_classes.append(cls)
+        self.memory.add_new_class(cls_list=self.exposed_classes)
+
         prev_weight = copy.deepcopy(self.model_without_ddp.fc.weight.data)
+        self.num_learned_class = len(self.exposed_classes)
         self.model_without_ddp.fc = nn.Linear(self.model_without_ddp.fc.in_features, self.num_learned_class).to(self.device)
         with torch.no_grad():
             if self.num_learned_class > 1:
-                self.model_without_ddp.fc.weight[:self.num_learned_class - 1] = prev_weight
+                self.model_without_ddp.fc.weight[:len_class] = prev_weight
         for param in self.optimizer.param_groups[1]['params']:
             if param in self.optimizer.state.keys():
                 del self.optimizer.state[param]
         del self.optimizer.param_groups[1]
         params = [param for name, param in self.model.named_parameters() if 'fc' in name]
         self.optimizer.add_param_group({'params': params})
-        self.memory.add_new_class(cls_list=self.exposed_classes)
         if 'reset' in self.sched_name:
             self.update_schedule(reset=True)
 
@@ -440,3 +455,33 @@ class _Trainer():
             ret_corrects[cls_idx] = cnt
 
         return ret_num_data, ret_corrects
+
+    def all_gather(self, item):
+        local_size = torch.tensor(item.size(0), device=self.device)
+        all_sizes = [torch.zeros_like(local_size) for _ in range(dist.get_world_size())]
+        for i in range(dist.get_world_size()):
+            if i == dist.get_rank():
+                dist.gather(local_size, all_sizes, dst=i)
+            else:
+                dist.gather(local_size, dst=i)
+        # dist.all_gather(all_sizes, local_size, async_op=False)
+        max_size = max(all_sizes)
+
+        size_diff = max_size.item() - local_size.item()
+        if size_diff:
+            padding = torch.zeros(size_diff, device=self.device, dtype=item.dtype)
+            item = torch.cat((item, padding))
+
+        all_qs_padded = [torch.zeros_like(item) for _ in range(dist.get_world_size())]
+
+        for i in range(dist.get_world_size()):
+            if i == dist.get_rank():
+                dist.gather(item, all_qs_padded, dst=i)
+            else:
+                dist.gather(item, dst=i)
+
+        # dist.all_gather(all_qs_padded, item)
+        all_qs = []
+        for q, size in zip(all_qs_padded, all_sizes):
+            all_qs.append(q[:size])
+        return all_qs
