@@ -295,8 +295,9 @@ class CLIB(ER):
     
     def update_memory(self, sample):
         image, label = sample
-        image = torch.cat(self.all_gather(image.to(self.device)))
-        label = torch.cat(self.all_gather(label.to(self.device)))
+        if self.distributed:
+            image = torch.cat(self.all_gather(image.to(self.device)))
+            label = torch.cat(self.all_gather(label.to(self.device)))
         x, y = sample
         
         for x, y in zip(image, label):
@@ -304,7 +305,7 @@ class CLIB(ER):
                 label_frequency = copy.deepcopy(self.memory.cls_count)
                 label_frequency[self.exposed_classes.index(y.item())] += 1
                 cls_to_replace = torch.argmax(label_frequency)
-                cand_idx = self.memory.labels == self.memory.cls_list[cls_to_replace]
+                cand_idx = (self.memory.labels == self.memory.cls_list[cls_to_replace]).nonzero().squeeze()
                 score = self.memory.others_loss_decrease[cand_idx]
                 idx_to_replace = cand_idx[torch.argmin(score)]
                 self.memory.replace_data([x, y], idx_to_replace)
@@ -420,7 +421,7 @@ class CLIB(ER):
         if self.imp_update_counter % self.imp_update_period == 0:
             self.train_count += 1
             mask = torch.ones(len(self.loss), dtype=bool)
-            mask[self.dropped_idx] = False
+            mask[torch.tensor(self.dropped_idx, dtype=torch.int64).squeeze()] = False
             if self.train_count % period == 0:
                 if self.lr_is_high:
                     if self.prev_loss is not None and self.train_count > 20:

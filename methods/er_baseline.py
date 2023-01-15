@@ -46,8 +46,9 @@ class ER(_Trainer):
     
     def update_memory(self, sample):
         image, label = sample
-        image = torch.cat(self.all_gather(image.to(self.device)))
-        label = torch.cat(self.all_gather(label.to(self.device)))
+        if self.distributed:
+            image = torch.cat(self.all_gather(image.to(self.device)))
+            label = torch.cat(self.all_gather(label.to(self.device)))
         idx = []
         if self.is_main_process():
             for lbl in label:
@@ -55,14 +56,20 @@ class ER(_Trainer):
                 if len(self.memory) < self.memory_size:
                     idx.append(-1)
                 else:
-                    j = torch.randint(0, self.seen, (1,)).item()
+                    j = torch.randint(0, self.seen, (1,), generator=self.generator).item()
                     if j < self.memory_size:
                         idx.append(j)
                     else:
                         idx.append(self.memory_size)
         if self.distributed:
+            idx = torch.tensor(idx).to(self.device)
+            size = torch.tensor([idx.size(0)]).to(self.device)
+            dist.broadcast(size, 0)
+            if dist.get_rank() != 0:
+                idx = torch.zeros(size.item(), dtype=torch.long).to(self.device)
             dist.barrier() # wait for all processes to reach this point
-            dist.broadcast(torch.tensor(idx).to(self.device), 0)
+            dist.broadcast(idx, 0)
+            idx = idx.cpu().tolist()
         # idx = torch.cat(self.all_gather(torch.tensor(idx).to(self.device))).cpu().tolist()
         for i, index in enumerate(idx):
             if len(self.memory) >= self.memory_size:

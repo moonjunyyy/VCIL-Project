@@ -188,6 +188,7 @@ class _Trainer():
         
         self.seen = 0
         self.memory = Memory(self.device)
+        self.generator = torch.Generator().manual_seed(self.rnd_seed)
 
     def setup_distributed_model(self):
 
@@ -333,22 +334,23 @@ class _Trainer():
             np.save(f'{self.log_path}/logs/{self.dataset}/{self.note}/seed_{self.rnd_seed}_eval.npy', eval_results['test_acc'])
             np.save(f'{self.log_path}/logs/{self.dataset}/{self.note}/seed_{self.rnd_seed}_eval_time.npy', eval_results['data_cnt'])
 
-        # Accuracy (A)
-        A_auc = np.mean(eval_results["test_acc"])
-        A_avg = np.mean(task_records["task_acc"])
-        A_last = task_records["task_acc"][self.n_tasks - 1]
+        if self.is_main_process():        
+            # Accuracy (A)
+            A_auc = np.mean(eval_results["test_acc"])
+            A_avg = np.mean(task_records["task_acc"])
+            A_last = task_records["task_acc"][self.n_tasks - 1]
 
-        # Forgetting (F)
-        cls_acc = np.array(task_records["cls_acc"])
-        acc_diff = []
-        for j in range(self.n_classes):
-            if np.max(cls_acc[:-1, j]) > 0:
-                acc_diff.append(np.max(cls_acc[:-1, j]) - cls_acc[-1, j])
-        F_last = np.mean(acc_diff)
+            # Forgetting (F)
+            cls_acc = np.array(task_records["cls_acc"])
+            acc_diff = []
+            for j in range(self.n_classes):
+                if np.max(cls_acc[:-1, j]) > 0:
+                    acc_diff.append(np.max(cls_acc[:-1, j]) - cls_acc[-1, j])
+            F_last = np.mean(acc_diff)
 
-        print(f"======== Summary =======")
-        print(f"A_auc {A_auc} | A_avg {A_avg} | A_last {A_last} | F_last {F_last}")
-    
+            print(f"======== Summary =======")
+            print(f"A_auc {A_auc} | A_avg {A_avg} | A_last {A_last} | F_last {F_last}")
+        
     def add_new_class(self, class_name):
         # For DDP, normally go into this function
         len_class = len(self.exposed_classes)
@@ -358,6 +360,7 @@ class _Trainer():
                 self.exposed_classes.append(label.item())
         if self.distributed:
             exposed_classes = torch.cat(self.all_gather(torch.tensor(self.exposed_classes, device=self.device))).cpu().tolist()
+            self.exposed_classes = []
             for cls in exposed_classes:
                 if cls not in self.exposed_classes:
                     self.exposed_classes.append(cls)
