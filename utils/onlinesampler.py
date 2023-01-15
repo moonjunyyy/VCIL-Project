@@ -76,8 +76,8 @@ class OnlineSampler(Sampler):
                 self.indices[i] = torch.tensor(self.indices[i])[torch.randperm(len(self.indices[i]), generator=self.generator)].tolist()
         else:
             # Divide classes into N% of disjoint and (100 - N)% of blurry
-            class_order         = torch.randperm(len(self.classes), generator=self.generator)
-            self.disjoint_classes   = class_order[:self.disjoint_num].tolist()
+            class_order = torch.randperm(len(self.classes), generator=self.generator)
+            self.disjoint_classes = class_order[:self.disjoint_num].tolist()
             if self.disjoint_num > 0:
                 self.disjoint_slice = [0] + torch.randint(0, self.disjoint_num, (num_tasks - 1,), generator=self.generator).sort().values.tolist() + [self.disjoint_num]
                 self.disjoint_classes = [self.disjoint_classes[self.disjoint_slice[i]:self.disjoint_slice[i + 1]] for i in range(num_tasks)]

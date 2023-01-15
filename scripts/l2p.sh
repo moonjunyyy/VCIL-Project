@@ -1,10 +1,10 @@
 #!/bin/bash
 
-#SBATCH -J L2P_iblurry_cifar100_N50_M10_seed1
+#SBATCH -J L2P_iblurry_cifar100_N50_M10
 #SBATCH -p batch
-#SBATCH -w agi1
+#SBATCH -w vll2
 #SBATCH --nodes=1
-#SBATCH --gres=gpu:2
+#SBATCH --gres=gpu:4
 #SBATCH --cpus-per-gpu=4
 #SBATCH --mem-per-gpu=20G
 #SBATCH --time=14-0
@@ -29,9 +29,9 @@ conda activate torch38gpu
 
 conda --version
 python --version
-
+echo "Batch size 32 onlin iter 3"
 # CIL CONFIG
-NOTE="L2P_iblurry_cifar100_N50_M10" # Short description of the experiment. (WARNING: logs/results with the same note will be overwritten!)
+NOTE="L2P_iblurry_cifar100_N50_M10_gpu4" # Short description of the experiment. (WARNING: logs/results with the same note will be overwritten!)
 MODE="L2P"
 DATASET="cifar100" # cifar10, cifar100, tinyimagenet, imagenet
 N_TASKS=5
@@ -45,23 +45,23 @@ OPT="adam"
 
 if [ "$DATASET" == "cifar10" ]; then
     MEM_SIZE=500 ONLINE_ITER=1
-    MODEL_NAME="L2P" EVAL_PERIOD=100
-    BATCHSIZE=16; LR=0.03 OPT_NAME="adam" SCHED_NAME="const" MEMORY_EPOCH=256
+    MODEL_NAME="vit" EVAL_PERIOD=1000
+    BATCHSIZE=32; LR=3e-4 OPT_NAME="adam" SCHED_NAME="default" MEMORY_EPOCH=256
 
 elif [ "$DATASET" == "cifar100" ]; then
-    MEM_SIZE=2000 ONLINE_ITER=1
-    MODEL_NAME="L2P" EVAL_PERIOD=1000
-    BATCHSIZE=16; LR=0.0075 OPT_NAME="adam" SCHED_NAME="const" MEMORY_EPOCH=256
+    MEM_SIZE=2000 ONLINE_ITER=3
+    MODEL_NAME="vit" EVAL_PERIOD=1000
+    BATCHSIZE=32; LR=3e-4 OPT_NAME="adam" SCHED_NAME="default" MEMORY_EPOCH=256
 
 elif [ "$DATASET" == "tinyimagenet" ]; then
     MEM_SIZE=4000 ONLINE_ITER=3
-    MODEL_NAME="L2P" EVAL_PERIOD=100
-    BATCHSIZE=32; LR=0.03 OPT_NAME="adam" SCHED_NAME="const" MEMORY_EPOCH=256
+    MODEL_NAME="vit" EVAL_PERIOD=1000
+    BATCHSIZE=32; LR=3e-4 OPT_NAME="adam" SCHED_NAME="default" MEMORY_EPOCH=256
 
 elif [ "$DATASET" == "imagenet" ]; then
     N_TASKS=10 MEM_SIZE=20000 ONLINE_ITER=0.25
-    MODEL_NAME="L2P" EVAL_PERIOD=1000
-    BATCHSIZE=256; LR=0.03 OPT_NAME="adam" SCHED_NAME="const" MEMORY_EPOCH=100
+    MODEL_NAME="vit" EVAL_PERIOD=1000
+    BATCHSIZE=256; LR=0.03 OPT_NAME="adam" SCHED_NAME="default" MEMORY_EPOCH=100
     BATCHSIZE=256; LR=0.05 OPT_NAME=$OPT SCHED_NAME="multistep" MEMORY_EPOCH=100
 
 else
@@ -81,7 +81,7 @@ do
     --n_tasks $N_TASKS --m $M --n $N \
     --rnd_seed $RND_SEED \
     --model_name $MODEL_NAME --opt_name $OPT_NAME --sched_name $SCHED_NAME \
-    --lr $LR --batchsize $BATCHSIZE \
+    --lr $LR --batchsize $BATCHSIZE --n_worker 4 \
     --memory_size $MEM_SIZE $GPU_TRANSFORM --online_iter $ONLINE_ITER --data_dir /local_datasets \
     --note $NOTE --eval_period $EVAL_PERIOD --memory_epoch $MEMORY_EPOCH $USE_AMP
 done

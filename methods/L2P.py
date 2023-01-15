@@ -41,6 +41,7 @@ from utils.data_loader import ImageDataset, StreamDataset, MemoryDataset, cutmix
 from utils.train_utils import select_model, select_optimizer, select_scheduler
 
 import timm
+from timm.models import create_model
 from timm.models.registry import register_model
 from timm.models.vision_transformer import _cfg, default_cfgs
 from models.vit import _create_vision_transformer
@@ -50,20 +51,20 @@ writer = SummaryWriter("tensorboard")
 
 T = TypeVar('T', bound = 'nn.Module')
 
-default_cfgs['vit_base_patch16_224_l2p'] = _cfg(
+default_cfgs['vit_base_patch16_224'] = _cfg(
         url='https://storage.googleapis.com/vit_models/imagenet21k/ViT-B_16.npz',
         num_classes=21843)
 
 # Register the backbone model to timm
 @register_model
-def vit_base_patch16_224_l2p(pretrained=False, **kwargs):
+def vit_base_patch16_224(pretrained=False, **kwargs):
     """ ViT-Base model (ViT-B/32) from original paper (https://arxiv.org/abs/2010.11929).
     ImageNet-21k weights @ 224x224, source https://github.com/google-research/vision_transformer.
     NOTE: this model has valid 21k classifier head and no representation (pre-logits) layer
     """
     model_kwargs = dict(
         patch_size=16, embed_dim=768, depth=12, num_heads=12, **kwargs)
-    model = _create_vision_transformer('vit_base_patch16_224_l2p', pretrained=pretrained, **model_kwargs)
+    model = _create_vision_transformer('vit_base_patch16_224', pretrained=pretrained, **model_kwargs)
     return model
 
 class Prompt(nn.Module):
@@ -134,7 +135,7 @@ class L2P_Model(nn.Module):
                  prompt_len     : int   = 5,
                  class_num      : int   = 100,
                  backbone_name  : str   = None,
-                 lambd          : float = 0.5,
+                 lambd          : float = 0.1,
                  _batchwise_selection  : bool = False,
                  _diversed_selection   : bool = True,
                  **kwargs):
@@ -156,11 +157,11 @@ class L2P_Model(nn.Module):
         # patch_size=16, embed_dim=768, depth=12, num_heads=12, **kwargs)
         
         # self.add_module('backbone', timm.models.create_model(backbone_name, pretrained=True, num_classes=class_num))
-        self.add_module('backbone', timm.models.create_model(backbone_name, pretrained=True, num_classes=class_num,
+        self.add_module('backbone', timm.create_model(backbone_name, pretrained=True, num_classes=class_num,
                                                              drop_rate=0.,drop_path_rate=0.,drop_block_rate=None))
         for name, param in self.backbone.named_parameters():
-            # print(name)
-            if 'head' not in name:
+            
+            if 'fc.' not in name:
                 param.requires_grad = False
         self.backbone.fc.weight.requires_grad = True
         self.backbone.fc.bias.requires_grad   = True
@@ -197,6 +198,7 @@ class L2P_Model(nn.Module):
         x = self.backbone.norm(x)
         x = x[:, 1:self.selection_size * self.prompt_len + 1].clone()
         x = x.mean(dim=1)
+        x = self.backbone.fc_norm(x)
         x = self.backbone.fc(x)
         return x
     
@@ -215,155 +217,152 @@ class L2P_Model(nn.Module):
     def train(self: T, mode: bool = True, **kwargs):
         ten = super().train(mode)
         self.backbone.eval()
+        self.prompt.train()
+        # #todo-----------------
+        # self.prompt.train()
+        # #todo-----------------
         return ten
+
+    # def eval(self: T, mode: bool = True, **kwargs):
+    #     ten = super().eval(mode)
+    #     self.backbone.eval()
+    #     self.prompt.eval()
+    #     # #todo-----------------
+    #     # self.prompt.train()
+    #     # #todo-----------------
+    #     return ten
     
+    # def get_params(self):
+    #     params = [param for name, param in self.backbone.named_parameters() if 'fc' not in name]
+    #     net_params = params + [param for param in self.prompt.parameters()]
+        
+    #     fc_params = [param for name, param in self.backbone.named_parameters() if 'fc' in name]
+    #     return net_params, fc_params
 
 
 class L2P(_Trainer):
     def __init__(self,*args,**kwargs):
         super(L2P,self).__init__(*args,**kwargs)
-    # def __init__(
-    #         self, criterion, device, train_transform, test_transform, n_classes, **kwargs
-    # ):
-        # self.num_learned_class = 0
-        # self.num_learning_class = 1
-        # self.n_classes = kwargs["n_classes"]
-        # self.exposed_classes = []
-        # self.seen = 0
-        # self.topk = kwargs["topk"]
-
-        # self.device = kwargs["device"]
-        # self.dataset = kwargs["dataset"]
-        # self.model_name = kwargs["model_name"]
-        # self.opt_name = kwargs["opt_name"]
-        # self.sched_name = kwargs["sched_name"]
-        # if self.sched_name == "default":
-        #     self.sched_name = 'exp_reset'
-        # self.lr = kwargs["lr"]
-
-        # self.train_transform = kwargs["train_transform"]
-        # self.cutmix = "cutmix" in kwargs["transforms"]
-        # self.test_transform = kwargs["test_transform"]
-
-        # self.memory_size = kwargs["memory_size"]
-        # self.data_dir = kwargs["data_dir"]
-
-        # self.online_iter = kwargs["online_iter"]
-        # self.batch_size = kwargs["batchsize"]
+    def setup_distributed_model(self):
+        print("Building model...")
+        # self.model = select_model(self.model_name, self.dataset, 1).to(self.device)
+        self.model = L2P_Model(backbone_name='vit_base_patch16_224', class_num=1)
+        # for name,param in self.model.named_parameters():
+        #     # print(name)
+        #     if 'fc.' in name or 'prompt.' in name:
+        #         param.requires_grad=True
+        #     else:
+        #         param.requires_grad=False
         
-        # self.temp_batchsize = kwargs["temp_batchsize"]
-        # if self.temp_batchsize is None:
-        #     self.temp_batchsize = self.batch_size//2
-        # if self.temp_batchsize > self.batch_size:
-        #     self.temp_batchsize = self.batch_size
+        self.scaler = torch.cuda.amp.GradScaler(enabled=self.use_amp)
+        self.writer = SummaryWriter(f"{self.log_path}/tensorboard/{self.dataset}/{self.note}/seed_{self.rnd_seed}")
         
-        # self.memory_size -= self.temp_batchsize
+        self.model.to(self.device)
+        self.model_without_ddp = self.model
+        if self.distributed:
+            self.model = torch.nn.parallel.DistributedDataParallel(self.model)
+            self.model._set_static_graph()
+            self.model_without_ddp = self.model.module
+        self.criterion = self.model_without_ddp.loss_fn if hasattr(self.model_without_ddp, "loss_fn") else nn.CrossEntropyLoss(reduction="mean")
+        # self.optimizer = select_optimizer(self.opt_name, self.lr, self.model)
+        #todo------------------------------
+        # params = [param for name, param in self.model_without_ddp.backbone.named_parameters() if 'fc' not in name]
+        # net_params = params + [param for param in self.model_without_ddp.prompt.parameters()]
+        # freeze_params = [param for name, param in self.model_without_ddp.backbone.named_parameters() if 'backbone.fc' not in name]
+        
+        
+        # train_params = [param for name, param in self.model_without_ddp.backbone.named_parameters() if 'backbone.fc' in name] + [param for param in self.model_without_ddp.prompt.parameters()]
+        # if self.opt_name=="adam":
+        #     params = [param for name, param in self.model.named_parameters() if 'fc.' not in name]
+        #     self.optimizer = optim.Adam(params, lr=self.lr, weight_decay=0)
+        # elif self.opt_name=="sgd":
+        #     params = [param for name, param in self.model.named_parameters() if 'fc.' not in name]
+        #     self.optimizer = optim.SGD(params, lr=self.lr, momentum=0.9, nesterov=True, weight_decay=1e-4)
+        # else:
+        #     raise NotImplementedError("Please select the opt_name [adam, sgd]")
+        # fc_params = [param for name, param in self.model.named_parameters() if 'fc.' in name]
+        # self.optimizer.add_param_group({'params':fc_params})
+        #todo------------------------------
+        self.optimizer = select_optimizer(self.opt_name, self.lr, self.model)
+        self.scheduler = select_scheduler(self.sched_name, self.optimizer)
 
-        # self.gpu_transform = kwargs["gpu_transform"]
-        # self.use_amp = kwargs["use_amp"]
-        # if self.use_amp:
-        #     self.scaler = torch.cuda.amp.GradScaler()
-
-
-        self.model = L2P_Model(backbone_name='vit_base_patch16_224_l2p', class_num=1)
+        n_params = sum(p.numel() for p in self.model_without_ddp.parameters())
+        print(f"Total Parameters :\t{n_params}")
+        n_params = sum(p.numel() for p in self.model_without_ddp.parameters() if p.requires_grad)
+        print(f"Learnable Parameters :\t{n_params}")
+        print("")
+        # self.model = L2P_Model(backbone_name='vit_base_patch16_224_l2p', class_num=1)
+        #?---------------------------------------------
         # for n,p in self.model.named_parameters():
         #     print(n)
-
-        # self.criterion = kwargs["criterion"]
-
-        # params = [param for name, param in self.model.named_parameters() if 'head' not in name]
-        # self.optimizer = select_optimizer(self.opt_name, self.lr, self.model, True)
-        # if 'imagenet' in self.dataset:
-        #     self.lr_gamma = 0.99995
-        # else:
-        #     self.lr_gamma = 0.9999
-        # # self.optimizer.add_param_group({'params': self.model.backbone.head.parameters()})
-        # self.scheduler = select_scheduler(self.sched_name, self.optimizer, self.lr_gamma)
-        # # self.memory = MemoryDataset(self.train_transform, cls_list=self.exposed_classes,
-        # #                             test_transform=self.test_transform)
-        # self.temp_batch = []
-        # self.temp_label = []
-        # self.num_updates = 0
-        # self.train_count = 0
-        # self.batch_size = kwargs["batchsize"]
-
-        # self.start_time = time.time()
-        # num_samples = {'cifar10': 50000, 'cifar100': 50000, 'tinyimagenet': 100000, 'imagenet': 1281167}
-        # self.total_samples = num_samples[self.dataset]
+        # for n,p in self.model.prompt.named_parameters():
+        #     print(n)
+        #?---------------------------------------------
         
-    #     # if self.dataset=='cifar10':
-    #     self.convert_li = ['airplane','automobile','bird','cat','deer','dog','frog','horse','ship','truck']
-
     def online_step(self, sample, sample_num):
         image, label = sample
-        for l in label:
-            if l.item() not in self.exposed_classes:
-                self.add_new_class(l.item())
+        # for l in label:
+        #     if l.item() not in self.exposed_classes:
+        #         self.add_new_class(l.item())
+        self.add_new_class(label)
 
         self.num_updates += self.online_iter * self.batchsize
-        train_loss, train_acc = self.online_train([image, label], iterations=int(self.num_updates))
+        # print(self.optimizer)
+        train_loss, train_acc = self.online_train([image.clone(), label.clone()], iterations=int(self.num_updates))
+        # self.update_schedule()
         # self.report_training(sample_num, train_loss, train_acc)
-        # for stored_sample, stored_label in zip(image, label):
-        #     self.update_memory((stored_sample, stored_label))
-        
+        self.temp_batch = []
         self.num_updates -= int(self.num_updates)
         return train_loss, train_acc
 
-    # def add_new_class(self, class_name):
-    #     self.exposed_classes.append(class_name)
-    #     self.num_learned_class = len(self.exposed_classes)
-    #     prev_weight = copy.deepcopy(self.model_without_ddp.fc.weight.data)
-    #     prev_bias   = copy.deepcopy(self.model_without_ddp.fc.bias.data)
-    #     self.model_without_ddp.fc = nn.Linear(self.model_without_ddp.fc.in_features, self.num_learned_class).to(self.device)
-        
-    #     # self.model.backbone.reset_classifier(self.num_learned_class)
-
-    #     # self.model.backbone.head.to(self.device)
-    #     with torch.no_grad():
-    #         if self.num_learned_class > 1:
-    #             self.model_without_ddp.fc.weight[:self.num_learned_class - 1] = prev_weight
-    #             self.model_without_ddp.fc.bias[:self.num_learned_class - 1]   = prev_bias
-    #     for param in self.optimizer.param_groups[1]['params']:
-    #         if param in self.optimizer.state.keys():
-    #             del self.optimizer.state[param]
-    #     del self.optimizer.param_groups[1]
-    #     self.optimizer.add_param_group({'params': self.model_without_ddp.fc.parameters()})
-    #     # self.scheduler = select_scheduler(self.sched_name, self.optimizer, self.lr_gamma)
-    #     # self.memory.add_new_class(cls_list=self.exposed_classes)
-    #     if 'reset' in self.sched_name:
-    #         self.update_schedule(reset=True)
-            
     def add_new_class(self, class_name):
-        self.exposed_classes.append(class_name)
+        len_class = len(self.exposed_classes)
+        exposed_classes = []
+        for label in class_name:
+            if label.item() not in self.exposed_classes:
+                self.exposed_classes.append(label.item())
+        if self.distributed:
+            exposed_classes = torch.cat(self.all_gather(torch.tensor(self.exposed_classes, device=self.device))).cpu().tolist()
+            self.exposed_classes=[]
+            for cls in exposed_classes:
+                if cls not in self.exposed_classes:
+                    self.exposed_classes.append(cls)
+        # self.memory.add_new_class(cls_list=self.exposed_classes)
+
+        prev_weight = copy.deepcopy(self.model_without_ddp.backbone.fc.weight.data)
         self.num_learned_class = len(self.exposed_classes)
-        prev_weight = copy.deepcopy(self.model_without_ddp.fc.weight.data)
-        prev_bias = copy.deepcopy(self.model_without_ddp.fc.bias.data)
-        self.model_without_ddp.fc = nn.Linear(self.model_without_ddp.fc.in_features, self.num_learned_class).to(self.device)
+        self.model_without_ddp.backbone.fc = nn.Linear(self.model_without_ddp.backbone.fc.in_features, self.num_learned_class).to(self.device)
         with torch.no_grad():
             if self.num_learned_class > 1:
-                self.model_without_ddp.fc.weight[:self.num_learned_class - 1] = prev_weight
-                self.model_without_ddp.fc.bias[:self.num_learned_class - 1]   = prev_bias
+                self.model_without_ddp.backbone.fc.weight[:len_class] = prev_weight
+        
         for param in self.optimizer.param_groups[1]['params']:
             if param in self.optimizer.state.keys():
                 del self.optimizer.state[param]
         del self.optimizer.param_groups[1]
-        params = [param for name, param in self.model.named_parameters() if 'fc' in name]
+        # params = [param for name, param in self.model_without_ddp.backbone.named_parameters() if 'fc' in name] + [param for param in self.model_without_ddp.prompt.parameters()]
+        params = [param for name, param in self.model.named_parameters() if 'fc.' in name]
         self.optimizer.add_param_group({'params': params})
-        # self.memory.add_new_class(cls_list=self.exposed_classes)
         if 'reset' in self.sched_name:
             self.update_schedule(reset=True)
 
     def online_train(self, sample, iterations=1):
-        
-        total_loss, correct, num_data = 0.0, 0.0, 0.0
-
+        self.model.train()
+        total_loss, total_correct, total_num_data = 0.0, 0.0, 0.0
+        image, label = sample
+        for j in range(len(label)):
+            label[j] = self.exposed_classes.index(label[j].item())
         for i in range(iterations):
-            self.model.train()
-            x, y = sample
-            x = torch.cat([self.train_transform(transforms.ToPILImage()(img)).unsqueeze(0) for img in x])
-            y = torch.cat([torch.tensor([self.exposed_classes.index(label)]) for label in y])
+            x = image.detach().clone()
+            y = label.detach().clone()
+            
+            x = torch.cat([self.train_transform(transforms.ToPILImage()(_x)).unsqueeze(0) for _x in x])
+            # y = torch.cat([torch.tensor([self.exposed_classes.index(label)]) for label in y])
             x = x.to(self.device)
             y = y.to(self.device)
+            
+            # if i==0:
+            #     print(f"[Train] Label:{y}")
 
             self.optimizer.zero_grad()
 
@@ -371,59 +370,31 @@ class L2P(_Trainer):
 
             _, preds = logit.topk(self.topk, 1, True, True)
 
-            if self.use_amp:
-                self.scaler.scale(loss).backward()
-                self.scaler.step(self.optimizer)
-                self.scaler.update()
-            else:
-                loss.backward()
-                self.optimizer.step()
-
+            self.scaler.scale(loss).backward()
+            self.scaler.step(self.optimizer)
+            self.scaler.update()
             self.update_schedule()
 
             total_loss += loss.item()
-            correct += torch.sum(preds == y.unsqueeze(1)).item()
-            num_data += y.size(0)
-
-        return total_loss / iterations, correct / num_data
+            total_correct += torch.sum(preds == y.unsqueeze(1)).item()
+            total_num_data += y.size(0)
+            
+        # self.update_schedule()
+        # print(f'[Train] exposed_Class:{len(self.exposed_classes)} // total_num_data:{total_num_data}')
+        return total_loss / iterations, total_correct / total_num_data
 
     def model_forward(self, x, y):
         do_cutmix = self.cutmix and np.random.rand(1) < 0.5
         if do_cutmix:
             x, labels_a, labels_b, lam = cutmix_data(x=x, y=y, alpha=1.0)
-            if self.use_amp:
-                with torch.cuda.amp.autocast():
-                    logit = self.model(x)
-                    loss = lam * self.criterion(logit, labels_a) + (1 - lam) * self.criterion(logit, labels_b)
-            else:
+            with torch.cuda.amp.autocast(enabled=self.use_amp):
                 logit = self.model(x)
                 loss = lam * self.criterion(logit, labels_a) + (1 - lam) * self.criterion(logit, labels_b)
         else:
-            if self.use_amp:
-                with torch.cuda.amp.autocast():
-                    logit = self.model(x)
-                    loss = self.criterion(logit, y)
-            else:
+            with torch.cuda.amp.autocast(enabled=self.use_amp):
                 logit = self.model(x)
                 loss = self.criterion(logit, y)
         return logit, loss
-
-    # def report_training(self, sample_num, train_loss, train_acc):
-    #     writer.add_scalar(f"train/loss", train_loss, sample_num)
-    #     writer.add_scalar(f"train/acc", train_acc, sample_num)
-    #     logger.info(
-    #         f"Train | Sample # {sample_num} | train_loss {train_loss:.4f} | train_acc {train_acc:.4f} | "
-    #         f"lr {self.optimizer.param_groups[0]['lr']:.6f} | "
-    #         f"running_time {datetime.timedelta(seconds=int(time.time() - self.start_time))} | "
-    #         f"ETA {datetime.timedelta(seconds=int((time.time() - self.start_time) * (self.total_samples-sample_num) / sample_num))}"
-    #     )
-
-    # def report_test(self, sample_num, avg_loss, avg_acc):
-    #     writer.add_scalar(f"test/loss", avg_loss, sample_num)
-    #     writer.add_scalar(f"test/acc", avg_acc, sample_num)
-    #     logger.info(
-    #         f"Test | Sample # {sample_num} | test_loss {avg_loss:.4f} | test_acc {avg_acc:.4f} | "
-    #     )
 
     def update_schedule(self, reset=False):
         if reset:
@@ -433,10 +404,80 @@ class L2P(_Trainer):
         else:
             self.scheduler.step()
 
-    # def online_evaluate(self, test_loader):
-    #     eval_dict = self.evaluation(test_loader, self.criterion)
-    #     # self.report_test(sample_num, eval_dict["avg_loss"], eval_dict["avg_acc"])
+    def online_evaluate(self, test_loader):
+        total_correct, total_num_data, total_loss = 0.0, 0.0, 0.0
+        correct_l = torch.zeros(self.n_classes)
+        num_data_l = torch.zeros(self.n_classes)
+        label = []
+
+        self.model.eval()
+        with torch.no_grad():
+            for i, data in enumerate(test_loader):
+                x, y = data
+                for j in range(len(y)):
+                    y[j] = self.exposed_classes.index(y[j].item())
+
+                x = x.to(self.device)
+                y = y.to(self.device)
+                # if i==0:
+                #     print(f"[Eval] Label:{y}")
+                # logit = self.model(x)
+                # loss = self.criterion(logit, y)
+                logit, loss = self.model_forward(x,y)
+                #!==============================================================
+                pred = torch.argmax(logit, dim=-1)
+                _, preds = logit.topk(self.topk, 1, True, True)
+                total_correct += torch.sum(preds == y.unsqueeze(1)).item()
+                total_num_data += y.size(0)
+
+                xlabel_cnt, correct_xlabel_cnt = self._interpret_pred(y, pred)
+                correct_l += correct_xlabel_cnt.detach().cpu()
+                num_data_l += xlabel_cnt.detach().cpu()
+                #!==============================================================
+
+                total_loss += loss.item()
+                label += y.tolist()
+        # print(f'[EVAL] total_correct:{total_correct} // total_num_data:{total_num_data}')
+        avg_acc = total_correct / total_num_data
+        avg_loss = total_loss / len(test_loader)
+        cls_acc = (correct_l / (num_data_l + 1e-5)).numpy().tolist()
         
+        # print(f'[EVAL] avg_loss:{avg_loss} avg_acc:{avg_acc}')
+        eval_dict = {"avg_loss": avg_loss, "avg_acc": avg_acc, "cls_acc": cls_acc}
+        return eval_dict
+
+    def online_before_task(self,task_id):
+        # if task_id == 0:
+        #     del self.optimizer
+        #     # def get_params(self):
+        #     params = [param for name, param in self.model_without_ddp.backbone.named_parameters() if 'fc' not in name]
+        #     net_params = params + [param for param in self.model_without_ddp.prompt.parameters()]
+            
+        #     fc_params = [param for name, param in self.model_without_ddp.backbone.named_parameters() if 'fc' in name]
+        #     # return net_params, fc_params
+            
+            
+        #     # net_params, fc_params = self.model_without_ddp.get_params()
+        #     if self.opt_name=="adam":
+        #         self.optimizer = optim.Adam(net_params, lr=self.lr, weight_decay=0)
+        #     elif self.opt_name=="sgd":
+        #         self.optimizer = optim.SGD(net_params, lr=self.lr, momentum=0.9, nesterov=True, weight_decay=1e-4)
+        #     else:
+        #         raise NotImplementedError("Please select the opt_name [adam, sgd]")
+        #     self.optimizer.add_param_group({'params':fc_params})
+        # else:
+        #     pass
+        pass
+
+    def online_after_task(self, cur_iter):
+        # Task-Free
+        pass
+
+    # def reset_opt(self):
+    #     self.optimizer = select_optimizer(self.opt_name, self.lr, self.model, True)
+    #     self.scheduler = select_scheduler(self.sched_name, self.optimizer, self.lr_gamma)
+
+    # def online_evaluate(self, test_loader):
     #     total_correct, total_num_data, total_loss = 0.0, 0.0, 0.0
     #     correct_l = torch.zeros(self.n_classes)
     #     num_data_l = torch.zeros(self.n_classes)
@@ -469,84 +510,25 @@ class L2P(_Trainer):
     #     avg_acc = total_correct / total_num_data
     #     avg_loss = total_loss / len(test_loader)
     #     cls_acc = (correct_l / (num_data_l + 1e-5)).numpy().tolist()
-        
-    #     eval_dict = {"avg_loss": avg_loss, "avg_acc": avg_acc, "cls_acc": cls_acc}
+    #     ret = {"avg_loss": avg_loss, "avg_acc": avg_acc, "cls_acc": cls_acc}
 
-    #     return eval_dict
+    #     return ret
 
+    # def _interpret_pred(self, y, pred):
+    #     # xlable is batch
+    #     ret_num_data = torch.zeros(self.n_classes)
+    #     ret_corrects = torch.zeros(self.n_classes)
 
-    def online_before_task(self,task_id):
-        #todo 현재 Task Class 및 Sample 확인
-        # print("self.model")
-        # for n,p in self.model.named_parameters():
-        #     print(n)
-        
-        # print("self.model_without_ddp")
-        # for n,p in self.model_without_ddp.named_parameters():
-        #     print(n)
+    #     xlabel_cls, xlabel_cnt = y.unique(return_counts=True)
+    #     for cls_idx, cnt in zip(xlabel_cls, xlabel_cnt):
+    #         ret_num_data[cls_idx] = cnt
 
-        pass
+    #     correct_xlabel = y.masked_select(y == pred)
+    #     correct_cls, correct_cnt = correct_xlabel.unique(return_counts=True)
+    #     for cls_idx, cnt in zip(correct_cls, correct_cnt):
+    #         ret_corrects[cls_idx] = cnt
 
-    def online_after_task(self, cur_iter):
-        # Task-Free
-        pass
-
-    def reset_opt(self):
-        self.optimizer = select_optimizer(self.opt_name, self.lr, self.model, True)
-        self.scheduler = select_scheduler(self.sched_name, self.optimizer, self.lr_gamma)
-
-    def online_evaluate(self, test_loader):
-        total_correct, total_num_data, total_loss = 0.0, 0.0, 0.0
-        correct_l = torch.zeros(self.n_classes)
-        num_data_l = torch.zeros(self.n_classes)
-        label = []
-
-        self.model.eval()
-        with torch.no_grad():
-            for i, data in enumerate(test_loader):
-                x, y = data
-                for j in range(len(y)):
-                    y[j] = self.exposed_classes.index(y[j].item())
-                x = x.to(self.device)
-                y = y.to(self.device)
-                logit = self.model(x)
-
-                loss = self.criterion(logit, y)
-                pred = torch.argmax(logit, dim=-1)
-                _, preds = logit.topk(self.topk, 1, True, True)
-
-                total_correct += torch.sum(preds == y.unsqueeze(1)).item()
-                total_num_data += y.size(0)
-
-                xlabel_cnt, correct_xlabel_cnt = self._interpret_pred(y, pred)
-                correct_l += correct_xlabel_cnt.detach().cpu()
-                num_data_l += xlabel_cnt.detach().cpu()
-
-                total_loss += loss.item()
-                label += y.tolist()
-
-        avg_acc = total_correct / total_num_data
-        avg_loss = total_loss / len(test_loader)
-        cls_acc = (correct_l / (num_data_l + 1e-5)).numpy().tolist()
-        ret = {"avg_loss": avg_loss, "avg_acc": avg_acc, "cls_acc": cls_acc}
-
-        return ret
-
-    def _interpret_pred(self, y, pred):
-        # xlable is batch
-        ret_num_data = torch.zeros(self.n_classes)
-        ret_corrects = torch.zeros(self.n_classes)
-
-        xlabel_cls, xlabel_cnt = y.unique(return_counts=True)
-        for cls_idx, cnt in zip(xlabel_cls, xlabel_cnt):
-            ret_num_data[cls_idx] = cnt
-
-        correct_xlabel = y.masked_select(y == pred)
-        correct_cls, correct_cnt = correct_xlabel.unique(return_counts=True)
-        for cls_idx, cnt in zip(correct_cls, correct_cnt):
-            ret_corrects[cls_idx] = cnt
-
-        return ret_num_data, ret_corrects
+    #     return ret_num_data, ret_corrects
     
 
     # def train_data_config(self,n_task, train_dataset,train_sampler):
