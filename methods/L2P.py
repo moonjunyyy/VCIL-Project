@@ -223,22 +223,6 @@ class L2P_Model(nn.Module):
         # #todo-----------------
         return ten
 
-    # def eval(self: T, mode: bool = True, **kwargs):
-    #     ten = super().eval(mode)
-    #     self.backbone.eval()
-    #     self.prompt.eval()
-    #     # #todo-----------------
-    #     # self.prompt.train()
-    #     # #todo-----------------
-    #     return ten
-    
-    # def get_params(self):
-    #     params = [param for name, param in self.backbone.named_parameters() if 'fc' not in name]
-    #     net_params = params + [param for param in self.prompt.parameters()]
-        
-    #     fc_params = [param for name, param in self.backbone.named_parameters() if 'fc' in name]
-    #     return net_params, fc_params
-
 class L2P(ER):
     def __init__(self, *args, **kwargs) -> None:
         super(ER, self).__init__(*args, **kwargs)
