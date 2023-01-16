@@ -288,7 +288,7 @@ class CLIB(ER):
         image, label = sample
         self.add_new_class(label)
         self.update_memory(sample)
-        self.num_updates += self.online_iter * self.batchsize
+        self.num_updates += self.online_iter * self.batchsize * self.world_size
         train_loss, train_acc = self.online_train([torch.empty((0,)), torch.empty((0,))], iterations=int(self.num_updates))
         self.num_updates -= int(self.num_updates)
         return train_loss, train_acc

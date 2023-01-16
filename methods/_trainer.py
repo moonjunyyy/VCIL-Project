@@ -140,7 +140,7 @@ class _Trainer():
         self.n_classes = n_classes
 
         train_transform = []
-        if self.model_name == 'vit':
+        if self.model_name == 'vit' or self.model_name == 'L2P':
             inp_size = 224
         self.cutmix = "cutmix" in self.transforms 
         if "cutout" in self.transforms:
@@ -188,7 +188,6 @@ class _Trainer():
         
         self.seen = 0
         self.memory = Memory(self.device)
-        self.generator = torch.Generator().manual_seed(self.rnd_seed)
 
     def setup_distributed_model(self):
 
@@ -367,16 +366,21 @@ class _Trainer():
         self.memory.add_new_class(cls_list=self.exposed_classes)
 
         prev_weight = copy.deepcopy(self.model_without_ddp.fc.weight.data)
+        prev_bias   = copy.deepcopy(self.model_without_ddp.fc.bias.data)
         self.num_learned_class = len(self.exposed_classes)
         self.model_without_ddp.fc = nn.Linear(self.model_without_ddp.fc.in_features, self.num_learned_class).to(self.device)
         with torch.no_grad():
             if self.num_learned_class > 1:
                 self.model_without_ddp.fc.weight[:len_class] = prev_weight
+                self.model_without_ddp.fc.weight[len_class:] = 0
+
+                self.model_without_ddp.fc.bias[:len_class] = 0
+                self.model_without_ddp.fc.bias[len_class:] = 0
         for param in self.optimizer.param_groups[1]['params']:
             if param in self.optimizer.state.keys():
                 del self.optimizer.state[param]
         del self.optimizer.param_groups[1]
-        params = [param for name, param in self.model.named_parameters() if 'fc' in name]
+        params = [param for name, param in self.model.named_parameters() if 'fc.' in name]
         self.optimizer.add_param_group({'params': params})
         if 'reset' in self.sched_name:
             self.update_schedule(reset=True)
