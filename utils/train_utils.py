@@ -30,18 +30,18 @@ def select_optimizer(opt_name, lr, model):
 
     if opt_name == "adam":
         # print("opt_name: adam")
-        params = [param for name, param in model.named_parameters() if 'fc' not in name]
-        fc_params = [param for name, param in model.named_parameters() if 'fc' in name]
+        params = [param for name, param in model.named_parameters() if 'fc.' not in name]
+        fc_params = [param for name, param in model.named_parameters() if 'fc.' in name]
         opt = optim.Adam(params, lr=lr, weight_decay=0)
         opt.add_param_group({'params': fc_params})
     elif opt_name == "radam":
-        params = [param for name, param in model.named_parameters() if 'fc' not in name]
-        fc_params = [param for name, param in model.named_parameters() if 'fc' in name]
+        params = [param for name, param in model.named_parameters() if 'fc.' not in name]
+        fc_params = [param for name, param in model.named_parameters() if 'fc.' in name]
         opt = torch_optimizer.RAdam(params, lr=lr, weight_decay=0.00001)
         opt.add_param_group({'params': fc_params})
     elif opt_name == "sgd":
-        params = [param for name, param in model.named_parameters() if 'fc' not in name]
-        fc_params = [param for name, param in model.named_parameters() if 'fc' in name]
+        params = [param for name, param in model.named_parameters() if 'fc.' not in name]
+        fc_params = [param for name, param in model.named_parameters() if 'fc.' in name]
         opt = optim.SGD(
             params, lr=lr, momentum=0.9, nesterov=True, weight_decay=1e-4
         )
@@ -53,15 +53,15 @@ def select_optimizer(opt_name, lr, model):
 def select_optimizer_with_extern_params(opt_name, lr, model, extern_param=None):
 
     if opt_name == "adam":
-        params = [param for name, param in extern_param.named_parameters() if 'fc' not in name]
+        params = [param for name, param in extern_param.named_parameters() if 'fc.' not in name]
         opt = optim.Adam(params, lr=lr, weight_decay=0)
         opt.add_param_group({'params': model.fc.parameters()})
     elif opt_name == "radam":
-        params = [param for name, param in extern_param.named_parameters() if 'fc' not in name]
+        params = [param for name, param in extern_param.named_parameters() if 'fc.' not in name]
         opt = torch_optimizer.RAdam(params, lr=lr, weight_decay=0.00001)
         opt.add_param_group({'params': model.fc.parameters()})
     elif opt_name == "sgd":
-        params = [param for name, param in extern_param.named_parameters() if 'fc' not in name]
+        params = [param for name, param in extern_param.named_parameters() if 'fc.' not in name]
         opt = optim.SGD(
             params, lr=lr, momentum=0.9, nesterov=True, weight_decay=1e-4
         )
@@ -141,7 +141,7 @@ def select_model(model_name, dataset, num_classes=None):
                             "vit_base_patch16_224",pretrained=True,num_classes=num_classes,
                             drop_rate=0.,drop_path_rate=0.,drop_block_rate=None,)
     elif model_name == "L2P":
-        model = L2P()
+        model = L2P(backbone_name="vit_base_patch16_224", class_num=1)
     else:
         model = model_class(opt)
 

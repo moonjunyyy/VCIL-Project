@@ -126,12 +126,11 @@ class L2P(nn.Module):
         self.add_module('backbone', timm.models.create_model(backbone_name, pretrained=True, num_classes=class_num,
                                                              drop_rate=0.,drop_path_rate=0.,drop_block_rate=None))
         for name, param in self.backbone.named_parameters():
-            if 'head' not in name:
                 param.requires_grad = False
-        self.backbone.head.weight.requires_grad = True
-        self.backbone.head.bias.requires_grad   = True
+        self.backbone.fc.weight.requires_grad = True
+        self.backbone.fc.bias.requires_grad   = True
 
-        self.fc = self.backbone.head
+        self.fc = self.backbone.fc
         
         self.prompt = Prompt(
             pool_size,

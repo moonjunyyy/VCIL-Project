@@ -140,7 +140,7 @@ class _Trainer():
         self.n_classes = n_classes
 
         train_transform = []
-        if self.model_name == 'vit':
+        if self.model_name == 'vit' or self.model_name == 'L2P':
             inp_size = 224
         self.cutmix = "cutmix" in self.transforms 
         if "cutout" in self.transforms:
@@ -333,22 +333,23 @@ class _Trainer():
             np.save(f'{self.log_path}/logs/{self.dataset}/{self.note}/seed_{self.rnd_seed}_eval.npy', eval_results['test_acc'])
             np.save(f'{self.log_path}/logs/{self.dataset}/{self.note}/seed_{self.rnd_seed}_eval_time.npy', eval_results['data_cnt'])
 
-        # Accuracy (A)
-        A_auc = np.mean(eval_results["test_acc"])
-        A_avg = np.mean(task_records["task_acc"])
-        A_last = task_records["task_acc"][self.n_tasks - 1]
+        if self.is_main_process():        
+            # Accuracy (A)
+            A_auc = np.mean(eval_results["test_acc"])
+            A_avg = np.mean(task_records["task_acc"])
+            A_last = task_records["task_acc"][self.n_tasks - 1]
 
-        # Forgetting (F)
-        cls_acc = np.array(task_records["cls_acc"])
-        acc_diff = []
-        for j in range(self.n_classes):
-            if np.max(cls_acc[:-1, j]) > 0:
-                acc_diff.append(np.max(cls_acc[:-1, j]) - cls_acc[-1, j])
-        F_last = np.mean(acc_diff)
+            # Forgetting (F)
+            cls_acc = np.array(task_records["cls_acc"])
+            acc_diff = []
+            for j in range(self.n_classes):
+                if np.max(cls_acc[:-1, j]) > 0:
+                    acc_diff.append(np.max(cls_acc[:-1, j]) - cls_acc[-1, j])
+            F_last = np.mean(acc_diff)
 
-        print(f"======== Summary =======")
-        print(f"A_auc {A_auc} | A_avg {A_avg} | A_last {A_last} | F_last {F_last}")
-    
+            print(f"======== Summary =======")
+            print(f"A_auc {A_auc} | A_avg {A_avg} | A_last {A_last} | F_last {F_last}")
+        
     def add_new_class(self, class_name):
         # For DDP, normally go into this function
         len_class = len(self.exposed_classes)
@@ -358,22 +359,28 @@ class _Trainer():
                 self.exposed_classes.append(label.item())
         if self.distributed:
             exposed_classes = torch.cat(self.all_gather(torch.tensor(self.exposed_classes, device=self.device))).cpu().tolist()
+            self.exposed_classes = []
             for cls in exposed_classes:
                 if cls not in self.exposed_classes:
                     self.exposed_classes.append(cls)
         self.memory.add_new_class(cls_list=self.exposed_classes)
 
         prev_weight = copy.deepcopy(self.model_without_ddp.fc.weight.data)
+        prev_bias   = copy.deepcopy(self.model_without_ddp.fc.bias.data)
         self.num_learned_class = len(self.exposed_classes)
         self.model_without_ddp.fc = nn.Linear(self.model_without_ddp.fc.in_features, self.num_learned_class).to(self.device)
         with torch.no_grad():
             if self.num_learned_class > 1:
                 self.model_without_ddp.fc.weight[:len_class] = prev_weight
+                self.model_without_ddp.fc.weight[len_class:] = 0
+
+                self.model_without_ddp.fc.bias[:len_class] = 0
+                self.model_without_ddp.fc.bias[len_class:] = 0
         for param in self.optimizer.param_groups[1]['params']:
             if param in self.optimizer.state.keys():
                 del self.optimizer.state[param]
         del self.optimizer.param_groups[1]
-        params = [param for name, param in self.model.named_parameters() if 'fc' in name]
+        params = [param for name, param in self.model.named_parameters() if 'fc.' in name]
         self.optimizer.add_param_group({'params': params})
         if 'reset' in self.sched_name:
             self.update_schedule(reset=True)

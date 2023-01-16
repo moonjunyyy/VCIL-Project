@@ -217,150 +217,155 @@ class L2P_Model(nn.Module):
 
 
 class L2P(ER):
-    def __init__(
-            self, criterion, device, train_transform, test_transform, n_classes, **kwargs
-    ):
-        self.num_learned_class = 0
-        self.num_learning_class = 1
-        self.n_classes = n_classes
-        self.exposed_classes = []
-        self.seen = 0
-        self.topk = kwargs["topk"]
+    def __init__(self, *args, **kwargs) -> None:
+        super(ER, self).__init__(*args, **kwargs)
+        # self.num_learned_class = 0
+        # self.num_learning_class = 1
+        # self.n_classes = n_classes
+        # self.exposed_classes = []
+        # self.seen = 0
+        # self.topk = kwargs["topk"]
 
-        self.device = device
-        self.dataset = kwargs["dataset"]
-        self.model_name = kwargs["model_name"]
-        self.opt_name = kwargs["opt_name"]
-        self.sched_name = kwargs["sched_name"]
-        if self.sched_name == "default":
-            self.sched_name = 'exp_reset'
-        self.lr = kwargs["lr"]
+        # self.device = device
+        # self.dataset = kwargs["dataset"]
+        # self.model_name = kwargs["model_name"]
+        # self.opt_name = kwargs["opt_name"]
+        # self.sched_name = kwargs["sched_name"]
+        # if self.sched_name == "default":
+        #     self.sched_name = 'exp_reset'
+        # self.lr = kwargs["lr"]
 
-        self.train_transform = train_transform
-        self.cutmix = "cutmix" in kwargs["transforms"]
-        self.test_transform = test_transform
+        # self.train_transform = train_transform
+        # self.cutmix = "cutmix" in kwargs["transforms"]
+        # self.test_transform = test_transform
 
-        self.memory_size = kwargs["memory_size"]
-        self.data_dir = kwargs["data_dir"]
+        # self.memory_size = kwargs["memory_size"]
+        # self.data_dir = kwargs["data_dir"]
 
-        self.online_iter = kwargs["online_iter"]
-        self.batch_size = kwargs["batchsize"]
+        # self.online_iter = kwargs["online_iter"]
+        # self.batch_size = kwargs["batchsize"]
         
-        self.temp_batchsize = kwargs["temp_batchsize"]
-        if self.temp_batchsize is None:
-            self.temp_batchsize = self.batch_size//2
-        if self.temp_batchsize > self.batch_size:
-            self.temp_batchsize = self.batch_size
+        # self.temp_batchsize = kwargs["temp_batchsize"]
+        # if self.temp_batchsize is None:
+        #     self.temp_batchsize = self.batch_size//2
+        # if self.temp_batchsize > self.batch_size:
+        #     self.temp_batchsize = self.batch_size
         
-        self.memory_size -= self.temp_batchsize
+        # self.memory_size -= self.temp_batchsize
 
-        self.gpu_transform = kwargs["gpu_transform"]
-        self.use_amp = kwargs["use_amp"]
-        if self.use_amp:
-            self.scaler = torch.cuda.amp.GradScaler()
+        # self.gpu_transform = kwargs["gpu_transform"]
+        # self.use_amp = kwargs["use_amp"]
+        # if self.use_amp:
+        #     self.scaler = torch.cuda.amp.GradScaler()
 
 
-        self.model = L2P_Model(backbone_name='vit_base_patch16_224_l2p', class_num=1).to(self.device)
-        self.criterion = self.model.loss_fn
+        # self.model = L2P_Model(backbone_name='vit_base_patch16_224_l2p', class_num=1).to(self.device)
+        # self.criterion = self.model.loss_fn
 
-        params = [param for name, param in self.model.named_parameters() if 'head' not in name]
-        self.optimizer = select_optimizer(self.opt_name, self.lr, self.model, True)
+        # params = [param for name, param in self.model.named_parameters() if 'head' not in name]
+        # self.optimizer = select_optimizer(self.opt_name, self.lr, self.model, True)
         if 'imagenet' in self.dataset:
             self.lr_gamma = 0.99995
         else:
             self.lr_gamma = 0.9999
-        # self.optimizer.add_param_group({'params': self.model.backbone.head.parameters()})
-        self.scheduler = select_scheduler(self.sched_name, self.optimizer, self.lr_gamma)
-        # self.memory = MemoryDataset(self.train_transform, cls_list=self.exposed_classes,
-        #                             test_transform=self.test_transform)
-        self.temp_batch = []
-        self.temp_label = []
-        self.num_updates = 0
-        self.train_count = 0
-        self.batch_size = kwargs["batchsize"]
+        # # self.optimizer.add_param_group({'params': self.model.backbone.head.parameters()})
+        # self.scheduler = select_scheduler(self.sched_name, self.optimizer, self.lr_gamma)
+        # # self.memory = MemoryDataset(self.train_transform, cls_list=self.exposed_classes,
+        # #                             test_transform=self.test_transform)
+        # self.temp_batch = []
+        # self.temp_label = []
+        # self.num_updates = 0
+        # self.train_count = 0
+        # self.batch_size = kwargs["batchsize"]
 
-        self.start_time = time.time()
-        num_samples = {'cifar10': 50000, 'cifar100': 50000, 'tinyimagenet': 100000, 'imagenet': 1281167}
-        self.total_samples = num_samples[self.dataset]
-        # if self.dataset=='cifar10':
-        self.convert_li = ['airplane','automobile','bird','cat','deer','dog','frog','horse','ship','truck']
+        # self.start_time = time.time()
+        # num_samples = {'cifar10': 50000, 'cifar100': 50000, 'tinyimagenet': 100000, 'imagenet': 1281167}
+        # self.total_samples = num_samples[self.dataset]
+        # # if self.dataset=='cifar10':
+        # self.convert_li = ['airplane','automobile','bird','cat','deer','dog','frog','horse','ship','truck']
 
-    def online_step(self, sample, sample_num, n_worker):
+    def online_step(self, sample, samples_cnt):
         image, label = sample
-        for l in label:
-            if l.item() not in self.exposed_classes:
-                self.add_new_class(l.item())
-
-        self.num_updates += self.online_iter * self.batch_size
-        train_loss, train_acc = self.online_train([image, label], self.batch_size * 2, n_worker,
-                                                    iterations=int(self.num_updates), stream_batch_size=self.batch_size)
-        self.report_training(sample_num, train_loss, train_acc)
+        self.add_new_class(label)
+        self.num_updates += self.online_iter * self.batchsize
+        train_loss, train_acc = train_loss, train_acc = self.online_train([image, label], iterations=int(self.num_updates))
         # for stored_sample, stored_label in zip(image, label):
         #     self.update_memory((stored_sample, stored_label))
-        self.temp_batch = []
         self.num_updates -= int(self.num_updates)
+        return train_loss, train_acc
 
-    def add_new_class(self, class_name):
-        self.exposed_classes.append(class_name)
+    def add_new_class(self, class_name):# For DDP, normally go into this function
+        len_class = len(self.exposed_classes)
+        exposed_classes = []
+        for label in class_name:
+            if label.item() not in self.exposed_classes:
+                self.exposed_classes.append(label.item())
+        if self.distributed:
+            exposed_classes = torch.cat(self.all_gather(torch.tensor(self.exposed_classes, device=self.device))).cpu().tolist()
+            self.exposed_classes = []
+            for cls in exposed_classes:
+                if cls not in self.exposed_classes:
+                    self.exposed_classes.append(cls)
+        self.memory.add_new_class(cls_list=self.exposed_classes)
         self.num_learned_class = len(self.exposed_classes)
-        prev_weight = copy.deepcopy(self.model.backbone.head.weight.data)
-        prev_bias   = copy.deepcopy(self.model.backbone.head.bias.data)
+        prev_weight = copy.deepcopy(self.model.backbone.fc.weight.data)
+        prev_bias   = copy.deepcopy(self.model.backbone.fc.bias.data)
         self.model.backbone.reset_classifier(self.num_learned_class)
 
-        self.model.backbone.head.to(self.device)
+        self.model.backbone.fc.to(self.device)
         with torch.no_grad():
             if self.num_learned_class > 1:
-                self.model.backbone.head.weight[:self.num_learned_class - 1] = prev_weight
-                self.model.backbone.head.bias[:self.num_learned_class - 1]   = prev_bias
+                self.model.backbone.fc.weight[:len_class] = prev_weight
+                self.model.backbone.fc.bias[:len_class]   = prev_bias
         for param in self.optimizer.param_groups[1]['params']:
             if param in self.optimizer.state.keys():
                 del self.optimizer.state[param]
         del self.optimizer.param_groups[1]
-        self.optimizer.add_param_group({'params': self.model.backbone.head.parameters()})
+        self.optimizer.add_param_group({'params': self.model.backbone.fc.parameters()})
         self.scheduler = select_scheduler(self.sched_name, self.optimizer, self.lr_gamma)
         # self.memory.add_new_class(cls_list=self.exposed_classes)
         if 'reset' in self.sched_name:
             self.update_schedule(reset=True)
 
-    def online_train(self, sample, batch_size, n_worker, iterations=1, stream_batch_size=1):
+    # def online_train(self, sample, batch_size, n_worker, iterations=1, stream_batch_size=1):
         
-        total_loss, correct, num_data = 0.0, 0.0, 0.0
+    #     total_loss, correct, num_data = 0.0, 0.0, 0.0
 
-        # if len(self.memory) > 0 and batch_size - stream_batch_size > 0:
-        #     memory_batch_size = min(len(self.memory), batch_size - stream_batch_size)
-        for i in range(iterations):
-            self.model.train()
-            x, y = sample
-            x = torch.cat([self.train_transform(transforms.ToPILImage()(img)).unsqueeze(0) for img in x])
-            y = torch.cat([torch.tensor([self.exposed_classes.index(label)]) for label in y])
-            # if len(self.memory) > 0:
-            #     memory_data = self.memory.get_batch(memory_batch_size)
-            #     x = torch.cat([x, memory_data['image']])
-            #     y = torch.cat([y, memory_data['label']])
-            x = x.to(self.device)
-            y = y.to(self.device)
+    #     # if len(self.memory) > 0 and batch_size - stream_batch_size > 0:
+    #     #     memory_batch_size = min(len(self.memory), batch_size - stream_batch_size)
+    #     for i in range(iterations):
+    #         self.model.train()
+    #         x, y = sample
+    #         x = torch.cat([self.train_transform(transforms.ToPILImage()(img)).unsqueeze(0) for img in x])
+    #         y = torch.cat([torch.tensor([self.exposed_classes.index(label)]) for label in y])
+    #         # if len(self.memory) > 0:
+    #         #     memory_data = self.memory.get_batch(memory_batch_size)
+    #         #     x = torch.cat([x, memory_data['image']])
+    #         #     y = torch.cat([y, memory_data['label']])
+    #         x = x.to(self.device)
+    #         y = y.to(self.device)
 
-            self.optimizer.zero_grad()
+    #         self.optimizer.zero_grad()
 
-            logit, loss = self.model_forward(x,y)
+    #         logit, loss = self.model_forward(x,y)
 
-            _, preds = logit.topk(self.topk, 1, True, True)
+    #         _, preds = logit.topk(self.topk, 1, True, True)
 
-            if self.use_amp:
-                self.scaler.scale(loss).backward()
-                self.scaler.step(self.optimizer)
-                self.scaler.update()
-            else:
-                loss.backward()
-                self.optimizer.step()
+    #         if self.use_amp:
+    #             self.scaler.scale(loss).backward()
+    #             self.scaler.step(self.optimizer)
+    #             self.scaler.update()
+    #         else:
+    #             loss.backward()
+    #             self.optimizer.step()
 
-            self.update_schedule()
+    #         self.update_schedule()
 
-            total_loss += loss.item()
-            correct += torch.sum(preds == y.unsqueeze(1)).item()
-            num_data += y.size(0)
+    #         total_loss += loss.item()
+    #         correct += torch.sum(preds == y.unsqueeze(1)).item()
+    #         num_data += y.size(0)
 
-        return total_loss / iterations, correct / num_data
+    #     return total_loss / iterations, correct / num_data
 
     def model_forward(self, x, y):
         do_cutmix = self.cutmix and np.random.rand(1) < 0.5
@@ -416,7 +421,8 @@ class L2P(ER):
         self.report_test(sample_num, eval_dict["avg_loss"], eval_dict["avg_acc"])
         return eval_dict
 
-    def online_before_task(self,train_loader,debug):
+    def online_before_task(self,train_loader):
+        return
         #todo 현재 Task Class 및 Sample 확인
         data_info = {}
         for i, data in enumerate(train_loader):

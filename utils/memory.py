@@ -31,7 +31,7 @@ class Memory:
                 indice = (self.labels == label).nonzero().squeeze()
                 self.others_loss_decrease = torch.cat([self.others_loss_decrease, torch.mean(self.others_loss_decrease[indice[:-1]]).unsqueeze(0)])
         else:
-            self.cls_count[(self.cls_list == self.labels[idx]).nonzero().squeeze()] -= 1
+            self.cls_count[(self.cls_list == self.labels[idx].item()).nonzero().squeeze()] -= 1
             self.images[idx] = image
             self.labels[idx] = label
             self.cls_count[(self.cls_list == label).nonzero().squeeze()] += 1
@@ -68,7 +68,7 @@ class Memory:
             loss_diff = torch.mean(loss - prev_loss)
         elif len(prev_loss) > 0:
             mask = torch.ones(len(loss), dtype=bool)
-            mask[dropped_idx] = False
+            mask[torch.tensor(dropped_idx, dtype=torch.int64).squeeze()] = False
             loss_diff = torch.mean((torch.tensor(loss[:len(prev_loss)] - prev_loss))[mask[:len(prev_loss)]])
         else:
             loss_diff = 0

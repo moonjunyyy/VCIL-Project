@@ -24,8 +24,8 @@ master_addr=$(scontrol show hostnames "$SLURM_JOB_NODELIST" | head -n 1)
 export MASTER_ADDR=$master_addr
 echo "MASTER_ADDR="$MASTER_ADDR
 
-source /data/keonhee/init.sh
-conda activate torch38gpu
+source /data/junyeong/init.sh
+conda activate iblurry
 
 conda --version
 python --version
@@ -45,12 +45,12 @@ OPT="adam"
 
 if [ "$DATASET" == "cifar10" ]; then
     MEM_SIZE=500 ONLINE_ITER=1
-    MODEL_NAME="resnet18" EVAL_PERIOD=100
+    MODEL_NAME="L2P" EVAL_PERIOD=100
     BATCHSIZE=16; LR=0.03 OPT_NAME="adam" SCHED_NAME="const" MEMORY_EPOCH=256
 
 elif [ "$DATASET" == "cifar100" ]; then
     MEM_SIZE=2000 ONLINE_ITER=1
-    MODEL_NAME="resnet34" EVAL_PERIOD=100
+    MODEL_NAME="L2P" EVAL_PERIOD=100
     BATCHSIZE=16; LR=0.0075 OPT_NAME="adam" SCHED_NAME="const" MEMORY_EPOCH=256
 
 elif [ "$DATASET" == "tinyimagenet" ]; then
@@ -69,10 +69,6 @@ else
     exit 1
 fi
 
-if [ "$VIT" == "True" ]; then
-    echo "Vit is used"
-    MODEL_NAME="vit"
-fi
 
 for RND_SEED in $SEEDS
 do
