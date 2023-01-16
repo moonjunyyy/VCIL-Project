@@ -49,7 +49,7 @@ if [ "$DATASET" == "cifar10" ]; then
     BATCHSIZE=128; LR=3e-4 OPT_NAME="adam" SCHED_NAME="default" MEMORY_EPOCH=256
 
 elif [ "$DATASET" == "cifar100" ]; then
-    MEM_SIZE=2000 ONLINE_ITER=3
+    MEM_SIZE=2000 ONLINE_ITER=1
     MODEL_NAME="vit" EVAL_PERIOD=1000
     BATCHSIZE=32; LR=3e-4 OPT_NAME="adam" SCHED_NAME="default" MEMORY_EPOCH=256
 

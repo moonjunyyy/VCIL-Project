@@ -306,7 +306,7 @@ class L2P(_Trainer):
         #         self.add_new_class(l.item())
         self.add_new_class(label)
 
-        self.num_updates += self.online_iter * self.batchsize
+        self.num_updates += self.online_iter * self.batchsize * self.world_size
         # print(self.optimizer)
         train_loss, train_acc = self.online_train([image.clone(), label.clone()], iterations=int(self.num_updates))
         # self.update_schedule()
@@ -373,7 +373,8 @@ class L2P(_Trainer):
             self.scaler.scale(loss).backward()
             self.scaler.step(self.optimizer)
             self.scaler.update()
-            self.update_schedule()
+            
+            torch.cuda.synchronize()
 
             total_loss += loss.item()
             total_correct += torch.sum(preds == y.unsqueeze(1)).item()
