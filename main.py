@@ -28,13 +28,8 @@ import matplotlib.pyplot as plt
 from methods.er_baseline import ER
 from methods.clib import CLIB
 from methods.L2P import L2P
-from methods.Finetuning import FT
 
-methods = { "er": ER,
-           "clib":CLIB,
-           "L2P":L2P,
-           "Finetuning":FT,
-           }
+methods = { "er": ER, "clib":CLIB, 'L2P':L2P }
 os.environ["CUDA_LAUNCH_BLOCKING"]="1"
 def main():
     # Get Configurations

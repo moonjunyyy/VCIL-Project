@@ -2,9 +2,15 @@
 
 #SBATCH -J L2P_iblurry_cifar100_N50_M10_test
 #SBATCH -p batch
+<<<<<<< HEAD
 #SBATCH -w vll1
 #SBATCH --nodes=1
 #SBATCH --gres=gpu:2
+=======
+#SBATCH -w augi2
+#SBATCH --nodes=1
+#SBATCH --gres=gpu:1
+>>>>>>> 3c8379adda05ffbeb8c429211ca1fba0894653c8
 #SBATCH --cpus-per-gpu=4
 #SBATCH --mem-per-gpu=20G
 #SBATCH --time=14-0
@@ -31,7 +37,11 @@ conda --version
 python --version
 echo "Batch size 16 onlin iter 3"
 # CIL CONFIG
+<<<<<<< HEAD
 NOTE="L2P_iblurry_cifar100_N50_M10_test" # Short description of the experiment. (WARNING: logs/results with the same note will be overwritten!)
+=======
+NOTE="L2P_iblurry_cifar100_N50_M10_Ori" # Short description of the experiment. (WARNING: logs/results with the same note will be overwritten!)
+>>>>>>> 3c8379adda05ffbeb8c429211ca1fba0894653c8
 MODE="L2P"
 DATASET="cifar100" # cifar10, cifar100, tinyimagenet, imagenet
 N_TASKS=5

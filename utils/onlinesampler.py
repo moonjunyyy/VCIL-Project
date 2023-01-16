@@ -190,7 +190,7 @@ class OnlineTestSampler(Sampler):
 
         if self.distributed:
             self.num_samples = int(len(self.indices) // self.num_replicas)
-            self.total_size = self.num_samples * self.num_replicas  
+            self.total_size = self.num_samples * self.num_replicas
             self.num_selected_samples = int(len(self.indices) // self.num_replicas)
         else:
             self.num_samples = int(len(self.indices))
