@@ -224,72 +224,14 @@ class L2P_Model(nn.Module):
         return ten
 
 class L2P(ER):
-    def __init__(self, *args, **kwargs) -> None:
+    def __init__(self, *args, **kwargs):
         super(ER, self).__init__(*args, **kwargs)
-        # self.num_learned_class = 0
-        # self.num_learning_class = 1
-        # self.n_classes = n_classes
-        # self.exposed_classes = []
-        # self.seen = 0
-        # self.topk = kwargs["topk"]
-
-        # self.device = device
-        # self.dataset = kwargs["dataset"]
-        # self.model_name = kwargs["model_name"]
-        # self.opt_name = kwargs["opt_name"]
-        # self.sched_name = kwargs["sched_name"]
-        # if self.sched_name == "default":
-        #     self.sched_name = 'exp_reset'
-        # self.lr = kwargs["lr"]
-
-        # self.train_transform = train_transform
-        # self.cutmix = "cutmix" in kwargs["transforms"]
-        # self.test_transform = test_transform
-
-        # self.memory_size = kwargs["memory_size"]
-        # self.data_dir = kwargs["data_dir"]
-
-        # self.online_iter = kwargs["online_iter"]
-        # self.batch_size = kwargs["batchsize"]
         
-        # self.temp_batchsize = kwargs["temp_batchsize"]
-        # if self.temp_batchsize is None:
-        #     self.temp_batchsize = self.batch_size//2
-        # if self.temp_batchsize > self.batch_size:
-        #     self.temp_batchsize = self.batch_size
-        
-        # self.memory_size -= self.temp_batchsize
-
-        # self.gpu_transform = kwargs["gpu_transform"]
-        # self.use_amp = kwargs["use_amp"]
-        # if self.use_amp:
-        #     self.scaler = torch.cuda.amp.GradScaler()
-
-
-        # self.model = L2P_Model(backbone_name='vit_base_patch16_224_l2p', class_num=1).to(self.device)
-        # self.criterion = self.model.loss_fn
-
-        # params = [param for name, param in self.model.named_parameters() if 'head' not in name]
-        # self.optimizer = select_optimizer(self.opt_name, self.lr, self.model, True)
         if 'imagenet' in self.dataset:
             self.lr_gamma = 0.99995
         else:
             self.lr_gamma = 0.9999
-        # # self.optimizer.add_param_group({'params': self.model.backbone.head.parameters()})
-        # self.scheduler = select_scheduler(self.sched_name, self.optimizer, self.lr_gamma)
-        # # self.memory = MemoryDataset(self.train_transform, cls_list=self.exposed_classes,
-        # #                             test_transform=self.test_transform)
-        # self.temp_batch = []
-        # self.temp_label = []
-        # self.num_updates = 0
-        # self.train_count = 0
-        # self.batch_size = kwargs["batchsize"]
-
-        # self.start_time = time.time()
-        # num_samples = {'cifar10': 50000, 'cifar100': 50000, 'tinyimagenet': 100000, 'imagenet': 1281167}
-        # self.total_samples = num_samples[self.dataset]
-        # # if self.dataset=='cifar10':
-        # self.convert_li = ['airplane','automobile','bird','cat','deer','dog','frog','horse','ship','truck']
+        
 
     def online_step(self, sample, samples_cnt):
         image, label = sample

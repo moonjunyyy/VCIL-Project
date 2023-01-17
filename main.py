@@ -27,7 +27,8 @@ import matplotlib.pyplot as plt
 
 from methods.er_baseline import ER
 from methods.clib import CLIB
-from methods.L2P import L2P
+# from methods.L2P import L2P
+from methods.L2P_rebuild import L2P
 
 methods = { "er": ER, "clib":CLIB, 'L2P':L2P }
 os.environ["CUDA_LAUNCH_BLOCKING"]="1"

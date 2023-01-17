@@ -223,6 +223,7 @@ class _Trainer():
             #     p.start()
             # for p in processes:
             #     p.join()
+            os.environ["TORCH_DISTRIBUTED_DEBUG"] = "DETAIL"
             mp.spawn(self.main_worker, nprocs=self.ngpus_per_nodes, join=True)
         else:
             self.main_worker(0)
@@ -245,6 +246,7 @@ class _Trainer():
             time.sleep(self.rank * 0.1) # prevent port collision
             dist.init_process_group(backend=self.dist_backend, init_method=self.dist_url,
                                     world_size=self.world_size, rank=self.rank)
+            torch.distributed.barrier()
             self.setup_for_distributed(self.is_main_process())
         else:
             pass
@@ -282,9 +284,10 @@ class _Trainer():
             if self.mode == "joint" and task_id > 0:
                 return
             #todo ==================================================
-            #!if task_id ==0:
-                #!self.train_data_config(self.n_tasks,self.train_dataset)
-                #!print()
+            if task_id ==0 and not self.debug:
+                print()
+                self.train_data_config(self.n_tasks,self.train_dataset)
+                
             #todo ==================================================
             print("\n" + "#" * 50)
             print(f"# Task {task_id} iteration")
@@ -293,10 +296,10 @@ class _Trainer():
             
             
             self.train_sampler.set_task(task_id)
-            #!self.current_task_data(self.train_dataloader)
+            self.current_task_data(self.train_dataloader)
             self.online_before_task(task_id)
             for i, (image, label) in enumerate(self.train_dataloader):
-                if self.debug and (i*self.batchsize) >= 500 : break
+                if self.debug and (i*self.batchsize) >= 1000 : break
                 samples_cnt += image.size(0) * self.world_size
                 # loss, acc = self.online_step([image,label], samples_cnt)
                 # self.report_training(samples_cnt, loss, acc)
@@ -304,8 +307,8 @@ class _Trainer():
                 # if samples_cnt % args.eval_period == 0:
                 # if True:
                     test_sampler = OnlineTestSampler(self.test_dataset, self.exposed_classes)
-                    #! test_dataloader = DataLoader(self.test_dataset, batch_size=self.batchsize*2, sampler=test_sampler, num_workers=self.n_worker)
-                    test_dataloader = DataLoader(self.test_dataset, batch_size=512, sampler=test_sampler, num_workers=self.n_worker)
+                    test_dataloader = DataLoader(self.test_dataset, batch_size=self.batchsize*2, sampler=test_sampler, num_workers=self.n_worker)
+                    # test_dataloader = DataLoader(self.test_dataset, batch_size=512, sampler=test_sampler, num_workers=self.n_worker)
                     eval_dict = self.online_evaluate(test_dataloader)
                     if self.distributed:
                         eval_dict =  torch.tensor([eval_dict['avg_loss'], eval_dict['avg_acc'], *eval_dict['cls_acc']], device=self.device)
@@ -323,10 +326,10 @@ class _Trainer():
             self.online_after_task(task_id)
             
             test_sampler = OnlineTestSampler(self.test_dataset, self.exposed_classes)
-            #! test_dataloader = DataLoader(self.test_dataset, batch_size=self.batchsize*2, sampler=test_sampler, num_workers=self.n_worker)
-            test_dataloader = DataLoader(self.test_dataset, batch_size=512, sampler=test_sampler, num_workers=self.n_worker)
+            test_dataloader = DataLoader(self.test_dataset, batch_size=self.batchsize*2, sampler=test_sampler, num_workers=self.n_worker)
+            # test_dataloader = DataLoader(self.test_dataset, batch_size=512, sampler=test_sampler, num_workers=self.n_worker)
             eval_dict = self.online_evaluate(test_dataloader)
-            #!self.test_data_config(test_dataloader,task_id)
+            self.test_data_config(test_dataloader,task_id)
             
             if self.distributed:
                 eval_dict =  torch.tensor([eval_dict['avg_loss'], eval_dict['avg_acc'], *eval_dict['cls_acc']], device=self.device)
