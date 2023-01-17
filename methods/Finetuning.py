@@ -33,32 +33,7 @@ def cycle(iterable):
 class FT(_Trainer):
     def __init__(self, *args, **kwargs):
         super(FT, self).__init__(*args, **kwargs)
-    
-    # def setup_distributed_model(self):
-    
-    #     print("Building model...")
-    #     self.model = select_model(self.model_name, self.dataset, 1)
-    #     self.scaler = torch.cuda.amp.GradScaler(enabled=self.use_amp)
-    #     self.writer = SummaryWriter(f"{self.log_path}/tensorboard/{self.dataset}/{self.note}/seed_{self.rnd_seed}")
         
-    #     self.model.to(self.device)
-    #     for name,param in self.model.named_parameters():
-    #         print(name)
-        
-    #     self.model_without_ddp = self.model
-    #     if self.distributed:
-    #         self.model = torch.nn.parallel.DistributedDataParallel(self.model)
-    #         self.model._set_static_graph()
-    #         self.model_without_ddp = self.model.module
-    #     self.criterion = self.model_without_ddp.loss_fn if hasattr(self.model_without_ddp, "loss_fn") else nn.CrossEntropyLoss(reduction="mean")
-    #     self.optimizer = select_optimizer(self.opt_name, self.lr, self.model)
-    #     self.scheduler = select_scheduler(self.sched_name, self.optimizer)
-
-    #     n_params = sum(p.numel() for p in self.model_without_ddp.parameters())
-    #     print(f"Total Parameters :\t{n_params}")
-    #     n_params = sum(p.numel() for p in self.model_without_ddp.parameters() if p.requires_grad)
-    #     print(f"Learnable Parameters :\t{n_params}")
-    #     print("")
     
     def online_step(self, sample, samples_cnt):
         image, label = sample
