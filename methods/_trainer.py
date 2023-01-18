@@ -176,7 +176,10 @@ class _Trainer():
 
         self.train_dataloader    = DataLoader(self.online_iter_dataset, batch_size=self.temp_batchsize, sampler=self.train_sampler, num_workers=self.n_worker, pin_memory=True)
         
-        self.mask = torch.zeros(self.n_classes, device=self.device) - torch.inf
+        if not self.use_amp:
+            self.mask = torch.zeros(self.n_classes, device=self.device) - torch.inf
+        else:
+            self.mask = torch.zeros(self.n_classes, device=self.device) - 1e10
         self.seen = 0
         self.memory = Memory()
 
