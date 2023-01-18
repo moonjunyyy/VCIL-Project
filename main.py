@@ -27,6 +27,7 @@ from methods.rainbow_memory import RM
 from methods.Finetuning import FT
 
 torch.autograd.set_detect_anomaly(True)
+torch.backends.cudnn.enabled = False
 methods = { "er": ER, "clib":CLIB, 'L2P':L2P, 'rm':RM, 'Finetuning':FT}
 os.environ["CUDA_LAUNCH_BLOCKING"]="1"
 def main():

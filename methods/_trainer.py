@@ -110,9 +110,9 @@ class _Trainer():
         os.makedirs(f"{self.log_path}/tensorboard/{self.dataset}/{self.note}", exist_ok=True)
         return
 
-    def setup_dataset_for_distributed(self):
+    def setup_distributed_dataset(self):
 
-        datasets = {
+        self.datasets = {
         "cifar10": CIFAR10,
         "cifar100": CIFAR100,
         "svhn": SVHN,
@@ -166,10 +166,10 @@ class _Trainer():
         _r = dist.get_rank() if self.distributed else None       # means that it is not distributed
         _w = dist.get_world_size() if self.distributed else None # means that it is not distributed
 
-        self.train_dataset   = datasets[self.dataset](root=self.data_dir, train=True,  download=True, 
+        self.train_dataset   = self.datasets[self.dataset](root=self.data_dir, train=True,  download=True, 
                                                       transform=self.train_transform)
         self.online_iter_dataset = OnlineIterDataset(self.train_dataset, self.temp_batchsize * self.online_iter * self.world_size)
-        self.test_dataset    = datasets[self.dataset](root=self.data_dir, train=False, download=True, transform=self.test_transform)
+        self.test_dataset    = self.datasets[self.dataset](root=self.data_dir, train=False, download=True, transform=self.test_transform)
 
         self.train_sampler   = OnlineSampler(self.online_iter_dataset, self.n_tasks, self.m, self.n, self.rnd_seed, 0, self.rnd_NM, _w, _r)
         self.test_sampler    = OnlineTestSampler(self.test_dataset, [], _w, _r)
@@ -245,7 +245,7 @@ class _Trainer():
         else:
             pass
 
-        self.setup_dataset_for_distributed()
+        self.setup_distributed_dataset()
         self.total_samples = len(self.train_dataset)
 
         print(f"[1] Select a CIL method ({self.mode})")
