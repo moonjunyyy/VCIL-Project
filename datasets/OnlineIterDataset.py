@@ -20,7 +20,7 @@ class OnlineIterDataset(Dataset):
         images = []
         labels = []
         for _ in range(self.iteration):
-            image, label = self.dataset.__getitem__(index)
+            image, label = self.dataset[index]
             images.append(image)
             labels.append(label)
         return images, labels, index

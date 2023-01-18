@@ -34,25 +34,10 @@ def select_optimizer(opt_name, lr, model):
 
     if opt_name == "adam":
         # print("opt_name: adam")
-<<<<<<< HEAD
         opt = optim.Adam(model.parameters(), lr=lr, weight_decay=0)
     elif opt_name == "radam":
         opt = torch_optimizer.RAdam(model.parameters(), lr=lr, weight_decay=0.00001)
     elif opt_name == "sgd":
-=======
-        params = [param for name, param in model.named_parameters() if 'fc.' not in name]
-        fc_params = [param for name, param in model.named_parameters() if 'fc.' in name]
-        opt = optim.Adam(params, lr=lr, weight_decay=0)
-        opt.add_param_group({'params': fc_params})
-    elif opt_name == "radam":
-        params = [param for name, param in model.named_parameters() if 'fc.' not in name]
-        fc_params = [param for name, param in model.named_parameters() if 'fc.' in name]
-        opt = torch_optimizer.RAdam(params, lr=lr, weight_decay=0.00001)
-        opt.add_param_group({'params': fc_params})
-    elif opt_name == "sgd":
-        params = [param for name, param in model.named_parameters() if 'fc.' not in name]
-        fc_params = [param for name, param in model.named_parameters() if 'fc.' in name]
->>>>>>> b3e0ed76ceb233b2129bc5677cb838d4bbe6dd12
         opt = optim.SGD(
             model.parameters(), lr=lr, momentum=0.9, nesterov=True, weight_decay=1e-4
         )

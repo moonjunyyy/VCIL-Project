@@ -45,7 +45,8 @@ class CLIB(ER):
 
     def setup_distributed_dataset(self):
         super(CLIB, self).setup_distributed_dataset()
-        self.loss_update_dataset = self.datasets[self.dataset](root=self.data_dir, train=True, download=True, transform=transforms.ToTensor())
+        self.loss_update_dataset = self.datasets[self.dataset](root=self.data_dir, train=True, download=True,
+                                     transform=transforms.Compose([transforms.Resize((self.inp_size,self.inp_size)),transforms.ToTensor()]))
 
     def online_step(self, images, labels, idx):
         self.add_new_class(labels[0])

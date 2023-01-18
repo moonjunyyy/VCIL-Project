@@ -24,6 +24,7 @@ from utils.train_utils import select_model, select_optimizer, select_scheduler
 import copy
 
 from utils.memory import Memory
+from utils.memory import MemorySampler
 
 ########################################################################################################################
 # This is trainer with a DistributedDataParallel                                                                       #
@@ -167,21 +168,24 @@ class _Trainer():
         _w = dist.get_world_size() if self.distributed else None # means that it is not distributed
 
         self.train_dataset   = datasets[self.dataset](root=self.data_dir, train=True,  download=True, 
-                                                      transform=transforms.ToTensor())
+                                                      transform=self.train_transform)
+        self.online_iter_dataset = OnlineIterDataset(self.train_dataset, self.temp_batchsize * self.online_iter * self.world_size)
         self.test_dataset    = datasets[self.dataset](root=self.data_dir, train=False, download=True, transform=self.test_transform)
 
-        self.train_sampler   = OnlineSampler(self.train_dataset, self.n_tasks, self.m, self.n, self.rnd_seed, 0, self.rnd_NM, _w, _r)
+        self.train_sampler   = OnlineSampler(self.online_iter_dataset, self.n_tasks, self.m, self.n, self.rnd_seed, 0, self.rnd_NM, _w, _r)
         self.test_sampler    = OnlineTestSampler(self.test_dataset, [], _w, _r)
 
-        self.train_dataloader    = DataLoader(self.train_dataset, batch_size=self.temp_batchsize, sampler=self.train_sampler, num_workers=self.n_worker)
+        self.train_dataloader    = DataLoader(self.online_iter_dataset, batch_size=self.temp_batchsize, sampler=self.train_sampler, num_workers=self.n_worker)
         
+        self.mask = torch.zeros(self.n_classes, device=self.device) - torch.inf
         self.seen = 0
         self.memory = Memory(self.device)
+        self.memory = MemorySampler(self.train_dataset, self.memory_batchsize, self.online_iter * self.temp_batchsize)
 
     def setup_distributed_model(self):
 
         print("Building model...")
-        self.model = select_model(self.model_name, self.dataset, 1).to(self.device)
+        self.model = select_model(self.model_name, self.dataset, self.n_classes).to(self.device)
         self.scaler = torch.cuda.amp.GradScaler(enabled=self.use_amp)
         self.writer = SummaryWriter(f"{self.log_path}/tensorboard/{self.dataset}/{self.note}/seed_{self.rnd_seed}")
         
@@ -272,41 +276,37 @@ class _Trainer():
         for task_id in range(self.n_tasks):
             if self.mode == "joint" and task_id > 0:
                 return
-            #todo ==================================================
-            if task_id ==0 and not self.debug:
-                print()
-                self.train_data_config(self.n_tasks,self.train_dataset)
+            # #todo ==================================================
+            # if task_id ==0 and not self.debug:
+            #     print()
+            #     self.train_data_config(self.n_tasks,self.train_dataset)
                 
-            #todo ==================================================
+            # #todo ==================================================
             print("\n" + "#" * 50)
             print(f"# Task {task_id} iteration")
             print("#" * 50 + "\n")
             print("[2-1] Prepare a datalist for the current task")
             
-            if task_id ==0:
-                self.train_data_config(self.n_tasks,self.train_dataset,self.train_sampler)
-                print()
-            self.train_sampler.set_task(task_id)
-            self.current_task_data(self.train_dataloader)
+            # if task_id ==0:
+            #     self.train_data_config(self.n_tasks,self.train_dataset,self.train_sampler)
+            #     print()
+            # self.train_sampler.set_task(task_id)
+            # self.current_task_data(self.train_dataloader)
             
             
-            self.train_sampler.set_task(task_id)
-            self.current_task_data(self.train_dataloader)
-            self.online_before_task(task_id)
+            # self.train_sampler.set_task(task_id)
+            # self.current_task_data(self.train_dataloader)
+            # self.online_before_task(task_id)
             
-            if task_id ==0:
-                self.train_data_config(self.n_tasks,self.train_dataset,self.train_sampler)
-            print()
-            self.train_sampler.set_task(task_id)
-            self.current_task_data(self.train_dataloader)
+            # if task_id ==0:
+            #     self.train_data_config(self.n_tasks,self.train_dataset,self.train_sampler)
+            # print()
+            # self.train_sampler.set_task(task_id)
+            # self.current_task_data(self.train_dataloader)
             
-            for i, (image, label) in enumerate(self.train_dataloader):
+            for i, (images, labels, idx) in enumerate(self.train_dataloader):
                 if self.debug and (i+1)*self.batchsize >= 2000:
                     break
-                
-                samples_cnt += image.size(0)
-                loss, acc = self.online_step([image,label], samples_cnt)
-                self.report_training(samples_cnt, loss, acc)
                 if samples_cnt > num_eval:
                 # if samples_cnt % args.eval_period == 0:
                 # if True:
@@ -325,6 +325,10 @@ class _Trainer():
                         eval_results["data_cnt"].append(num_eval)
                         self.report_test(num_eval, eval_dict["avg_loss"], eval_dict['avg_acc'])
                     num_eval += self.eval_period
+                samples_cnt += images[0].size(0) * self.world_size
+                loss, acc = self.online_step(images, labels, idx)
+                self.report_training(samples_cnt, loss, acc)
+                
                 # loss, acc = self.online_step([image,label], samples_cnt)
                 # self.report_training(samples_cnt, loss, acc)
             self.online_after_task(task_id)
@@ -390,24 +394,7 @@ class _Trainer():
                 if cls not in self.exposed_classes:
                     self.exposed_classes.append(cls)
         self.memory.add_new_class(cls_list=self.exposed_classes)
-        with torch.no_grad():
-            prev_weight = copy.deepcopy(self.model_without_ddp.fc.weight.data)
-            prev_bias   = copy.deepcopy(self.model_without_ddp.fc.bias.data)
-            self.num_learned_class = len(self.exposed_classes)
-            self.model_without_ddp.fc = nn.Linear(self.model_without_ddp.fc.in_features, self.num_learned_class).to(self.device)
-
-            if self.num_learned_class > 1:
-                self.model_without_ddp.fc.weight[:len_class] = prev_weight
-                self.model_without_ddp.fc.weight[len_class:] = 0
-
-                self.model_without_ddp.fc.bias[:len_class] = 0
-                self.model_without_ddp.fc.bias[len_class:] = 0
-            for param in self.optimizer.param_groups[1]['params']:
-                if param in self.optimizer.state.keys():
-                    del self.optimizer.state[param]
-            del self.optimizer.param_groups[1]
-            params = [param for name, param in self.model.named_parameters() if 'fc.' in name]
-            self.optimizer.add_param_group({'params': params})
+        self.mask[:len(self.exposed_classes)] = 0
         if 'reset' in self.sched_name:
             self.update_schedule(reset=True)
 
@@ -508,6 +495,10 @@ class _Trainer():
             ret_corrects[cls_idx] = cnt
 
         return ret_num_data, ret_corrects
+
+    def reset_opt(self):
+        self.optimizer = self.select_optimizer(self.opt_name, self.lr, self.model)
+        self.scheduler = self.select_scheduler(self.sched_name, self.optimizer)
 
     def all_gather(self, item):
         local_size = torch.tensor(item.size(0), device=self.device)
