@@ -164,11 +164,11 @@ class L2P(nn.Module):
         x = x.mean(dim=1)
         x = self.backbone.fc_norm(x)
         x = self.backbone.fc(x)
-        return x, simmilarity
+        return x
     
-    # def loss_fn(self, output, target):
-    #     B, C = output.size()
-    #     return F.cross_entropy(output, target) + self.lambd * self.simmilarity
+    def loss_fn(self, output, target):
+        B, C = output.size()
+        return F.cross_entropy(output, target) + self.lambd * self.simmilarity
 
     def convert_train_task(self, task : torch.Tensor, **kwargs):
         self.mask += -torch.inf

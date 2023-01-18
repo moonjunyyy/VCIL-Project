@@ -16,6 +16,7 @@ from methods.er_baseline import ER
 from utils.data_loader import cutmix_data, ImageDataset
 from utils.augment import Cutout, Invert, Solarize, select_autoaugment
 from utils.train_utils import select_model, select_optimizer, select_scheduler
+from utils.memory import MemoryBatchSampler, MemoryOrderedSampler
 logger = logging.getLogger()
 writer = SummaryWriter("tensorboard")
 
@@ -28,26 +29,26 @@ def cycle(iterable):
 
 
 class RM(ER):
-    def __init__(
-        self, criterion, device, train_transform, test_transform, n_classes, **kwargs
-    ):
-        super().__init__(
-            criterion, device, train_transform, test_transform, n_classes, **kwargs
-        )
+    def __init__(self, *args, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
         self.sched_name = "const"
         self.batch_size = kwargs["batchsize"]
         self.memory_epoch = kwargs["memory_epoch"]
         self.n_worker = kwargs["n_worker"]
         self.data_cnt = 0
 
+    def setup_distributed_dataset(self):
+        super(RM, self).setup_distributed_dataset()
+        self.memory_train_dataset = self.datasets[self.dataset](root=self.data_dir, train=True, download=True, transform=transforms.ToTensor())
+
     def online_step(self, images, labels, idx):
         # image, label = sample
         self.add_new_class(labels[0])
-        self.memory_dataloader = iter(DataLoader(self.train_dataset, batch_size=self.memory_batchsize, sampler=self.memory, num_workers=self.n_worker, pin_memory=True))
-        # train with augmented batches
+        self.memory_sampler = MemoryBatchSampler(self.memory, self.memory_batchsize, self.temp_batchsize * self.online_iter * self.world_size)
+        self.memory_dataloader = iter(DataLoader(self.train_dataset, batch_size=self.memory_batchsize, sampler=self.memory_sampler, num_workers=self.n_worker, pin_memory=True))
+         # train with augmented batches
         _loss, _acc, _iter = 0.0, 0.0, 0
         for image, label in zip(images, labels):
-            self.memory_dataloader
             loss, acc = self.online_train([image.clone(), label.clone()])
             _loss += loss
             _acc += acc
@@ -68,14 +69,14 @@ class RM(ER):
             label  = label.cpu()
         
         for x, y in zip(sample, label):
-            if len(self.memory.images) >= self.memory_size:
+            if len(self.memory) >= self.memory_size:
                 label_frequency = copy.deepcopy(self.memory.cls_count)
                 label_frequency[self.exposed_classes.index(y.item())] += 1
                 cls_to_replace = torch.argmax(label_frequency)
                 idx_to_replace = cls_to_replace[torch.randint(0, len(cls_to_replace), (1,))]
-                self.memory.replace_sample(sample, idx_to_replace)
+                self.memory.replace_data([x,y], idx_to_replace)
             else:
-                self.memory.replace_sample(sample)
+                self.memory.replace_data([x,y])
 
     def online_before_task(self, cur_iter):
         self.reset_opt()
@@ -103,18 +104,10 @@ class RM(ER):
             self.scheduler = optim.lr_scheduler.CosineAnnealingWarmRestarts(
                 self.optimizer, T_0=1, T_mult=2, eta_min=self.lr * 0.01
             )
-        mem_dataset = ImageDataset(
-            self.memory.datalist,
-            dataset=self.dataset,
-            transform=self.train_transform,
-            cls_list=self.exposed_classes,
-            data_dir=self.data_dir,
-            preload=True,
-            device=self.device,
-            transform_on_gpu=True
-        )
         for epoch in range(n_epoch):
             self.model.train()
+            self.memory_sampler = MemoryOrderedSampler(self.memory, self.batchsize, self.memory_size, len(self.memory) // self.batchsize)
+            self.memory_dataloader = DataLoader(self.loss_update_dataset, batch_size=self.batchsize, sampler=self.memory_sampler, num_workers=4, pin_memory=True)
             
             if epoch <= 0:  # Warm start of 1 epoch
                 for param_group in self.optimizer.param_groups:
@@ -126,14 +119,10 @@ class RM(ER):
                 self.scheduler.step()
             total_loss, correct, num_data = 0.0, 0.0, 0.0
 
-            idxlist = mem_dataset.generate_idx(batch_size)
-            for idx in idxlist:
-                data = mem_dataset.get_data_gpu(idx)
-                x = data["image"]
-                y = data["label"]
+            for i, (image, label) in enumerate(self.memory_dataloader):
 
-                x = x.to(self.device)
-                y = y.to(self.device)
+                x = image.to(self.device)
+                y = label.to(self.device)
 
                 self.optimizer.zero_grad()
 
@@ -154,7 +143,7 @@ class RM(ER):
                 correct += torch.sum(preds == y.unsqueeze(1)).item()
                 num_data += y.size(0)
                 
-            n_batches = len(idxlist)
+            n_batches = len(DataLoader)
             train_loss, train_acc = total_loss / n_batches, correct / num_data
             logger.info(
                 f"Task {cur_iter} | Epoch {epoch + 1}/{n_epoch} | train_loss {train_loss:.4f} | train_acc {train_acc:.4f} | "

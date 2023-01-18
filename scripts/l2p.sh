@@ -45,29 +45,13 @@ OPT="adam"
 
 if [ "$DATASET" == "cifar10" ]; then
     MEM_SIZE=500 ONLINE_ITER=1
-<<<<<<< HEAD
-<<<<<<< HEAD
-    MODEL_NAME="vit" EVAL_PERIOD=1000
-=======
     MODEL_NAME="L2P" EVAL_PERIOD=1000
->>>>>>> FInally done
-=======
-    MODEL_NAME="L2P" EVAL_PERIOD=1000
->>>>>>> b3e0ed76ceb233b2129bc5677cb838d4bbe6dd12
     BATCHSIZE=32; LR=3e-4 OPT_NAME="adam" SCHED_NAME="default" MEMORY_EPOCH=256
 
 elif [ "$DATASET" == "cifar100" ]; then
     MEM_SIZE=2000 ONLINE_ITER=3
-<<<<<<< HEAD
-<<<<<<< HEAD
-    MODEL_NAME="vit" EVAL_PERIOD=1000
-=======
     MODEL_NAME="L2P" EVAL_PERIOD=100
->>>>>>> FInally done
-=======
-    MODEL_NAME="L2P" EVAL_PERIOD=100
->>>>>>> b3e0ed76ceb233b2129bc5677cb838d4bbe6dd12
-    BATCHSIZE=32; LR=3e-4 OPT_NAME="adam" SCHED_NAME="default" MEMORY_EPOCH=256
+    BATCHSIZE=64; LR=3e-2 OPT_NAME="adam" SCHED_NAME="default" MEMORY_EPOCH=256
 
 elif [ "$DATASET" == "tinyimagenet" ]; then
     MEM_SIZE=4000 ONLINE_ITER=3
@@ -95,5 +79,5 @@ do
     --model_name $MODEL_NAME --opt_name $OPT_NAME --sched_name $SCHED_NAME \
     --lr $LR --batchsize $BATCHSIZE --n_worker 4 \
     --memory_size $MEM_SIZE $GPU_TRANSFORM --online_iter $ONLINE_ITER --data_dir /local_datasets \
-    --note $NOTE --eval_period $EVAL_PERIOD --memory_epoch $MEMORY_EPOCH $USE_AMP 
+    --note $NOTE --eval_period $EVAL_PERIOD --memory_epoch $MEMORY_EPOCH --n_worker 4
 done

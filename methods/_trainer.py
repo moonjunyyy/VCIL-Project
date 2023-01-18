@@ -24,7 +24,6 @@ from utils.train_utils import select_model, select_optimizer, select_scheduler
 import copy
 
 from utils.memory import Memory
-from utils.memory import MemorySampler
 
 ########################################################################################################################
 # This is trainer with a DistributedDataParallel                                                                       #
@@ -175,12 +174,11 @@ class _Trainer():
         self.train_sampler   = OnlineSampler(self.online_iter_dataset, self.n_tasks, self.m, self.n, self.rnd_seed, 0, self.rnd_NM, _w, _r)
         self.test_sampler    = OnlineTestSampler(self.test_dataset, [], _w, _r)
 
-        self.train_dataloader    = DataLoader(self.online_iter_dataset, batch_size=self.temp_batchsize, sampler=self.train_sampler, num_workers=self.n_worker)
+        self.train_dataloader    = DataLoader(self.online_iter_dataset, batch_size=self.temp_batchsize, sampler=self.train_sampler, num_workers=self.n_worker, pin_memory=True)
         
         self.mask = torch.zeros(self.n_classes, device=self.device) - torch.inf
         self.seen = 0
-        self.memory = Memory(self.device)
-        self.memory = MemorySampler(self.train_dataset, self.memory_batchsize, self.online_iter * self.temp_batchsize)
+        self.memory = Memory()
 
     def setup_distributed_model(self):
 
@@ -497,8 +495,8 @@ class _Trainer():
         return ret_num_data, ret_corrects
 
     def reset_opt(self):
-        self.optimizer = self.select_optimizer(self.opt_name, self.lr, self.model)
-        self.scheduler = self.select_scheduler(self.sched_name, self.optimizer)
+        self.optimizer = select_optimizer(self.opt_name, self.lr, self.model)
+        self.scheduler = select_scheduler(self.sched_name, self.optimizer)
 
     def all_gather(self, item):
         local_size = torch.tensor(item.size(0), device=self.device)

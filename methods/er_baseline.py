@@ -20,6 +20,7 @@ import torchvision.transforms as transforms
 from methods._trainer import _Trainer
 
 import torch.distributed as dist
+from utils.memory import MemoryBatchSampler, MemoryOrderedSampler
 
 logger = logging.getLogger()
 writer = SummaryWriter("tensorboard")
@@ -38,11 +39,11 @@ class ER(_Trainer):
     def online_step(self, images, labels, idx):
         # image, label = sample
         self.add_new_class(labels[0])
-        self.memory_dataloader = iter(DataLoader(self.train_dataset, batch_size=self.memory_batchsize, sampler=self.memory, num_workers=self.n_worker, pin_memory=True))
+        self.memory_sampler = MemoryBatchSampler(self.memory, self.memory_batchsize, self.temp_batchsize * self.online_iter * self.world_size)
+        self.memory_dataloader = iter(DataLoader(self.train_dataset, batch_size=self.memory_batchsize, sampler=self.memory_sampler, num_workers=self.n_worker, pin_memory=True))
         # train with augmented batches
         _loss, _acc, _iter = 0.0, 0.0, 0
         for image, label in zip(images, labels):
-            self.memory_dataloader
             loss, acc = self.online_train([image.clone(), label.clone()])
             _loss += loss
             _acc += acc
@@ -61,7 +62,7 @@ class ER(_Trainer):
         if self.is_main_process():
             for lbl in label:
                 self.seen += 1
-                if len(self.memory.memory) < self.memory_size:
+                if len(self.memory) < self.memory_size:
                     idx.append(-1)
                 else:
                     j = torch.randint(0, self.seen, (1,)).item()
@@ -81,7 +82,7 @@ class ER(_Trainer):
             idx = idx.cpu().tolist()
         # idx = torch.cat(self.all_gather(torch.tensor(idx).to(self.device))).cpu().tolist()
         for i, index in enumerate(idx):
-            if len(self.memory.memory) >= self.memory_size:
+            if len(self.memory) >= self.memory_size:
                 if index < self.memory_size:
                     self.memory.replace_data([sample[i], label[i].item()], index)
             else:

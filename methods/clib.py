@@ -16,6 +16,7 @@ import torch.distributed as dist
 
 from methods.er_baseline import ER
 from utils.data_loader import cutmix_data, ImageDataset, StreamDataset, MemoryDataset
+from utils.memory import MemoryBatchSampler, MemoryOrderedSampler
 
 logger = logging.getLogger()
 writer = SummaryWriter("tensorboard")
@@ -51,11 +52,11 @@ class CLIB(ER):
     def online_step(self, images, labels, idx):
         self.add_new_class(labels[0])
         self.update_memory(idx, labels[0])
-        self.memory_dataloader = iter(DataLoader(self.train_dataset, batch_size=self.memory_batchsize, sampler=self.memory, num_workers=self.n_worker, pin_memory=True))
-        # train with augmented batches
+        self.memory_sampler = MemoryBatchSampler(self.memory, self.memory_batchsize, self.temp_batchsize * self.online_iter * self.world_size)
+        self.memory_dataloader = iter(DataLoader(self.train_dataset, batch_size=self.memory_batchsize, sampler=self.memory_sampler, num_workers=self.n_worker, pin_memory=True))
+       # train with augmented batches
         _loss, _acc, _iter = 0.0, 0.0, 0
         for image, label in zip(images, labels):
-            self.memory_dataloader
             loss, acc = self.online_train([image.clone(), label.clone()])
             _loss += loss
             _acc += acc
@@ -255,15 +256,14 @@ class CLIB(ER):
         self.imp_update_counter += 1
         if self.imp_update_counter % self.imp_update_period == 0:
             if len(self.memory) > 0:
-                self.memory.set_mode('ordered')
-                self.memory_dataloader = DataLoader(self.loss_update_dataset, batch_size=batchsize, sampler=self.memory, num_workers=4, pin_memory=True)
+                self.memory_sampler = MemoryOrderedSampler(self.memory, self.batchsize)
+                self.memory_dataloader = DataLoader(self.loss_update_dataset, batch_size=batchsize, sampler=self.memory_sampler, num_workers=4, pin_memory=True)
                 self.model.eval()
                 with torch.no_grad():
                     logit = [self.model(x.to(self.device), y.to(self.device)) + self.mask for (x, y) in self.memory_dataloader]
                     loss = F.cross_entropy(logit, self.memory.labels.to(self.device), reduction='none')
                     if self.distributed:
                         loss = torch.cat(self.all_gather(loss), dim=-1).flatten()
-                self.memory.set_mode('randomized')
                 self.memory.update_loss_history(loss, self.loss, ema_ratio=ema_ratio, dropped_idx=self.memory_dropped_idx)
                 self.memory_dropped_idx = []
                 self.loss = loss
