@@ -260,7 +260,7 @@ class CLIB(ER):
                 self.memory_dataloader = DataLoader(self.loss_update_dataset, batch_size=batchsize, sampler=self.memory_sampler, num_workers=4, pin_memory=True)
                 self.model.eval()
                 with torch.no_grad():
-                    logit = [self.model(x.to(self.device), y.to(self.device)) + self.mask for (x, y) in self.memory_dataloader]
+                    logit = [self.model(x.to(self.device)) + self.mask for (x, y) in self.memory_dataloader]
                     loss = F.cross_entropy(logit, self.memory.labels.to(self.device), reduction='none')
                     if self.distributed:
                         loss = torch.cat(self.all_gather(loss), dim=-1).flatten()
