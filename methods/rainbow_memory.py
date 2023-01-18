@@ -40,46 +40,42 @@ class RM(ER):
         self.n_worker = kwargs["n_worker"]
         self.data_cnt = 0
 
-    
-    def online_step(self, sample, sample_num, n_worker):
-        image, label = sample
-        for l in label:
-            if l.item() not in self.exposed_classes:
-                self.add_new_class(l.item())
-                print(self.exposed_classes)
-
-        self.num_updates += self.online_iter * self.batch_size
-        # if len(self.temp_batch) == self.temp_batchsize:
-        train_loss, train_acc = self.online_train([image, label], self.batch_size * 2, n_worker,
-                                                    iterations=int(self.num_updates), stream_batch_size=self.batch_size)
-        self.report_training(sample_num, train_loss, train_acc)
-        for stored_sample, stored_label in zip(image, label):
-            self.update_memory((stored_sample, stored_label))
-        self.temp_batch = []
-        self.num_updates -= int(self.num_updates)
+    def online_step(self, images, labels, idx):
+        # image, label = sample
+        self.add_new_class(labels[0])
+        self.memory_dataloader = iter(DataLoader(self.train_dataset, batch_size=self.memory_batchsize, sampler=self.memory, num_workers=self.n_worker, pin_memory=True))
+        # train with augmented batches
+        _loss, _acc, _iter = 0.0, 0.0, 0
+        for image, label in zip(images, labels):
+            self.memory_dataloader
+            loss, acc = self.online_train([image.clone(), label.clone()])
+            _loss += loss
+            _acc += acc
+            _iter += 1
+        self.update_memory(idx, labels[0])
+        return _loss / _iter, _acc / _iter
 
     def add_new_class(self, class_name):
-        self.exposed_classes.append(class_name)
-        self.num_learned_class = len(self.exposed_classes)
-        self.model.fc = nn.Linear(self.model.fc.in_features, self.num_learned_class).to(self.device)
-        # for param in self.optimizer.param_groups[1]['params']:
-        #     if param in self.optimizer.state.keys():
-        #         del self.optimizer.state[param]
-        # del self.optimizer.param_groups[1]
-        # self.optimizer.add_param_group({'params':self.model.fc.parameters()})
-        self.memory.add_new_class(cls_list=self.exposed_classes)
+        super(RM,self).add_new_class(class_name)
         self.reset_opt()
 
-    def update_memory(self, sample):
-        x,y = sample
-        if len(self.memory.images) >= self.memory_size:
-            label_frequency = copy.deepcopy(self.memory.cls_count)
-            label_frequency[self.exposed_classes.index(y.item())] += 1
-            cls_to_replace = np.argmax(np.array(label_frequency))
-            idx_to_replace = np.random.choice(self.memory.cls_idx[cls_to_replace])
-            self.memory.replace_sample(sample, idx_to_replace)
-        else:
-            self.memory.replace_sample(sample)
+    def update_memory(self, sample, label):
+        # Update memory
+        if self.distributed:
+            sample = torch.cat(self.all_gather(sample.to(self.device)))
+            label  = torch.cat(self.all_gather(label.to(self.device)))
+            sample = sample.cpu()
+            label  = label.cpu()
+        
+        for x, y in zip(sample, label):
+            if len(self.memory.images) >= self.memory_size:
+                label_frequency = copy.deepcopy(self.memory.cls_count)
+                label_frequency[self.exposed_classes.index(y.item())] += 1
+                cls_to_replace = torch.argmax(label_frequency)
+                idx_to_replace = cls_to_replace[torch.randint(0, len(cls_to_replace), (1,))]
+                self.memory.replace_sample(sample, idx_to_replace)
+            else:
+                self.memory.replace_sample(sample)
 
     def online_before_task(self, cur_iter):
         self.reset_opt()

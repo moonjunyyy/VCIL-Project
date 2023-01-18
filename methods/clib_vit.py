@@ -108,7 +108,7 @@ class CLIB_ViT(ER):
         self.low_lr_loss = []
         self.current_lr = self.lr
         
-        self.convert_li = ['airplane','automobile','bird','cat','deer','dog','frog','horse','ship','truck']
+        # self.convert_li = ['airplane','automobile','bird','cat','deer','dog','frog','horse','ship','truck']
 
     def online_step(self, sample, sample_num, n_worker):
         image, label = sample
@@ -165,6 +165,7 @@ class CLIB_ViT(ER):
             else:
                 loss.backward()
                 self.optimizer.step()
+                
             self.samplewise_loss_update()
 
             total_loss += loss.item()
@@ -412,6 +413,7 @@ class CLIB_ViT(ER):
 
     def train_data_config(self,n_task, train_dataset,train_sampler):
         from torch.utils.data import DataLoader
+        self.convert_li = train_dataset.classes
         for t_i in range(n_task):
             train_sampler.set_task(t_i)
             train_dataloader= DataLoader(train_dataset, batch_size=self.batch_size, sampler=train_sampler, num_workers=4)
@@ -462,18 +464,7 @@ class CLIB_ViT(ER):
         
         
     def convert_class_from_int_to_str(self,data_info):
-        
-        # old_d = {'Class 0': 5000, 'Class 1': 5220, 'Class 2':3000, 'Class 3': 220}
-        # d = {'Class 0': 5000, 'Class 1': 5220, 'Class 2':3000, 'Class 3': 220}
-        # a= ['car','bird','ship','airplane']
-        # for key in list(d.keys()):
-        # n_key = int(key[6:])
-        # d[a[n_key]] = d.pop(key)
-        
-        # print(old_d)
-        # print(d)
-        
-        self.convert_li
+        # self.convert_li = 
         for key in list(data_info.keys()):
             old_key = int(key[6:])
             data_info[self.convert_li[old_key]] = data_info.pop(key)

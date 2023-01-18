@@ -35,24 +35,33 @@ class ER(_Trainer):
     def __init__(self, *args, **kwargs) -> None:
         super(ER, self).__init__(*args, **kwargs)
 
-    def online_step(self, sample, samples_cnt):
-        image, label = sample
-        self.add_new_class(label)
-        self.num_updates += self.online_iter * self.batchsize
-        train_loss, train_acc = self.online_train([image.clone(), label.clone()], iterations=int(self.num_updates))
-        self.update_memory(sample)
-        self.num_updates -= int(self.num_updates)
-        return train_loss, train_acc
+    def online_step(self, images, labels, idx):
+        # image, label = sample
+        self.add_new_class(labels[0])
+        self.memory_dataloader = iter(DataLoader(self.train_dataset, batch_size=self.memory_batchsize, sampler=self.memory, num_workers=self.n_worker, pin_memory=True))
+        # train with augmented batches
+        _loss, _acc, _iter = 0.0, 0.0, 0
+        for image, label in zip(images, labels):
+            self.memory_dataloader
+            loss, acc = self.online_train([image.clone(), label.clone()])
+            _loss += loss
+            _acc += acc
+            _iter += 1
+        self.update_memory(idx, labels[0])
+        return _loss / _iter, _acc / _iter
     
-    def update_memory(self, sample):
-        image, label = sample
-        image = torch.cat(self.all_gather(image.to(self.device)))
-        label = torch.cat(self.all_gather(label.to(self.device)))
+    def update_memory(self, sample, label):
+        # Update memory
+        if self.distributed:
+            sample = torch.cat(self.all_gather(sample.to(self.device)))
+            label  = torch.cat(self.all_gather(label.to(self.device)))
+            sample = sample.cpu()
+            label  = label.cpu()
         idx = []
         if self.is_main_process():
             for lbl in label:
                 self.seen += 1
-                if len(self.memory) < self.memory_size:
+                if len(self.memory.memory) < self.memory_size:
                     idx.append(-1)
                 else:
                     j = torch.randint(0, self.seen, (1,)).item()
@@ -60,16 +69,23 @@ class ER(_Trainer):
                         idx.append(j)
                     else:
                         idx.append(self.memory_size)
+        # Distribute idx to all processes
         if self.distributed:
+            idx = torch.tensor(idx).to(self.device)
+            size = torch.tensor([idx.size(0)]).to(self.device)
+            dist.broadcast(size, 0)
+            if dist.get_rank() != 0:
+                idx = torch.zeros(size.item(), dtype=torch.long).to(self.device)
             dist.barrier() # wait for all processes to reach this point
-            dist.broadcast(torch.tensor(idx).to(self.device), 0)
+            dist.broadcast(idx, 0)
+            idx = idx.cpu().tolist()
         # idx = torch.cat(self.all_gather(torch.tensor(idx).to(self.device))).cpu().tolist()
         for i, index in enumerate(idx):
-            if len(self.memory) >= self.memory_size:
+            if len(self.memory.memory) >= self.memory_size:
                 if index < self.memory_size:
-                    self.memory.replace_data([image[i], label[i]], index)
+                    self.memory.replace_data([sample[i], label[i].item()], index)
             else:
-                self.memory.replace_data([image[i], label[i]])        
+                self.memory.replace_data([sample[i], label[i].item()])
 
     def online_before_task(self, task_id):
         pass
@@ -77,40 +93,38 @@ class ER(_Trainer):
     def online_after_task(self, task_id):
         pass
     
-    def online_train(self, data, iterations):
+    def online_train(self, data):
         self.model.train()
         total_loss, total_correct, total_num_data = 0.0, 0.0, 0.0
-        image, label = data
-        for j in range(len(label)):
-            label[j] = self.exposed_classes.index(label[j].item())
-        for i in range(iterations):
-            x = image.detach().clone()
-            y = label.detach().clone()
-            if len(self.memory) > 0 and self.memory_batchsize > 0:
-                memory_batchsize = min(self.memory_batchsize, len(self.memory))
-                memory_images, memory_labels = self.memory.get_batch(memory_batchsize)
-                x = torch.cat([x, memory_images], dim=0)
-                y = torch.cat([y, memory_labels], dim=0)
-            
-            x = torch.cat([self.train_transform(transforms.ToPILImage()(_x)).unsqueeze(0) for _x in x])
+        x, y = data
+        if len(self.memory) > 0 and self.memory_batchsize > 0:
+            # memory_batchsize = min(self.memory_batchsize, len(self.memory))
+            # memory_images, memory_labels = self.memory.get_batch(memory_batchsize)
+            memory_images, memory_labels = next(self.memory_dataloader)
+            x = torch.cat([x, memory_images], dim=0)
+            y = torch.cat([y, memory_labels], dim=0)
+        for j in range(len(y)):
+            y[j] = self.exposed_classes.index(y[j].item())
+        # x = torch.cat([self.train_transform(transforms.ToPILImage()(_x)).unsqueeze(0) for _x in x])
+        # x = torch.cat([self.train_transform(_x).unsqueeze(0) for _x in x])
 
-            x = x.to(self.device)
-            y = y.to(self.device)
+        x = x.to(self.device)
+        y = y.to(self.device)
 
-            self.optimizer.zero_grad()
-            logit, loss = self.model_forward(x,y)
-            _, preds = logit.topk(self.topk, 1, True, True)
-           
-            self.scaler.scale(loss).backward()
-            self.scaler.step(self.optimizer)
-            self.scaler.update()
-            self.update_schedule()
+        self.optimizer.zero_grad()
+        logit, loss = self.model_forward(x,y)
+        _, preds = logit.topk(self.topk, 1, True, True)
+        
+        self.scaler.scale(loss).backward()
+        self.scaler.step(self.optimizer)
+        self.scaler.update()
+        self.update_schedule()
 
-            total_loss += loss.item()
-            total_correct += torch.sum(preds == y.unsqueeze(1)).item()
-            total_num_data += y.size(0)
+        total_loss += loss.item()
+        total_correct += torch.sum(preds == y.unsqueeze(1)).item()
+        total_num_data += y.size(0)
 
-        return total_loss / iterations, total_correct / total_num_data
+        return total_loss, total_correct/total_num_data
 
     def model_forward(self, x, y):
         do_cutmix = self.cutmix and np.random.rand(1) < 0.5
@@ -118,10 +132,12 @@ class ER(_Trainer):
             x, labels_a, labels_b, lam = cutmix_data(x=x, y=y, alpha=1.0)
             with torch.cuda.amp.autocast(enabled=self.use_amp):
                 logit = self.model(x)
+                logit += self.mask
                 loss = lam * self.criterion(logit, labels_a) + (1 - lam) * self.criterion(logit, labels_b)
         else:
             with torch.cuda.amp.autocast(enabled=self.use_amp):
                 logit = self.model(x)
+                logit += self.mask
                 loss = self.criterion(logit, y)
         return logit, loss
 
@@ -142,6 +158,7 @@ class ER(_Trainer):
                 y = y.to(self.device)
 
                 logit = self.model(x)
+                logit = logit + self.mask
                 loss = self.criterion(logit, y)
                 pred = torch.argmax(logit, dim=-1)
                 _, preds = logit.topk(self.topk, 1, True, True)

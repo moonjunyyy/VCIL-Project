@@ -105,21 +105,9 @@ class _Trainer():
         self.memory_batchsize = self.batchsize - self.temp_batchsize
 
         self.exposed_classes = []
-        # # Set the logger
-        # logging.config.fileConfig("./configuration/logging.conf")
-        # self.logger  = logging.getLogger()
-
         
         os.makedirs(f"{self.log_path}/logs/{self.dataset}/{self.note}", exist_ok=True)
         os.makedirs(f"{self.log_path}/tensorboard/{self.dataset}/{self.note}", exist_ok=True)
-        # fileHandler  = logging.FileHandler(f'{self.log_path}/logs/{self.dataset}/{self.note}/seed_{self.rnd_seed}.log', mode="w")
-
-        # formatter    = logging.Formatter(
-        #     "[%(levelname)s] %(filename)s:%(lineno)d > %(message)s"
-        # )
-        # fileHandler.setFormatter(formatter)
-        # self.logger.addHandler(fileHandler)
-
         return
 
     def setup_dataset_for_distributed(self):
@@ -140,7 +128,7 @@ class _Trainer():
         self.n_classes = n_classes
 
         train_transform = []
-        if self.model_name == 'vit':
+        if self.model_name == 'vit' or self.model_name == 'L2P':
             inp_size = 224
         self.cutmix = "cutmix" in self.transforms 
         if "cutout" in self.transforms:
@@ -181,6 +169,7 @@ class _Trainer():
         self.train_dataset   = datasets[self.dataset](root=self.data_dir, train=True,  download=True, 
                                                       transform=transforms.ToTensor())
         self.test_dataset    = datasets[self.dataset](root=self.data_dir, train=False, download=True, transform=self.test_transform)
+
         self.train_sampler   = OnlineSampler(self.train_dataset, self.n_tasks, self.m, self.n, self.rnd_seed, 0, self.rnd_NM, _w, _r)
         self.test_sampler    = OnlineTestSampler(self.test_dataset, [], _w, _r)
 
@@ -192,7 +181,7 @@ class _Trainer():
     def setup_distributed_model(self):
 
         print("Building model...")
-        self.model = select_model(self.model_name, self.dataset, 1)
+        self.model = select_model(self.model_name, self.dataset, 1).to(self.device)
         self.scaler = torch.cuda.amp.GradScaler(enabled=self.use_amp)
         self.writer = SummaryWriter(f"{self.log_path}/tensorboard/{self.dataset}/{self.note}/seed_{self.rnd_seed}")
         
@@ -223,6 +212,7 @@ class _Trainer():
             #     p.start()
             # for p in processes:
             #     p.join()
+            os.environ["TORCH_DISTRIBUTED_DEBUG"] = "DETAIL"
             mp.spawn(self.main_worker, nprocs=self.ngpus_per_nodes, join=True)
         else:
             self.main_worker(0)
@@ -245,6 +235,7 @@ class _Trainer():
             time.sleep(self.rank * 0.1) # prevent port collision
             dist.init_process_group(backend=self.dist_backend, init_method=self.dist_url,
                                     world_size=self.world_size, rank=self.rank)
+            torch.distributed.barrier()
             self.setup_for_distributed(self.is_main_process())
         else:
             pass
@@ -253,6 +244,9 @@ class _Trainer():
         self.total_samples = len(self.train_dataset)
 
         print(f"[1] Select a CIL method ({self.mode})")
+        # #!-----------------------------------------------
+        # print(self.train_dataset.classes)
+        # #!-----------------------------------------------
         self.setup_distributed_model()
 
         if self.rnd_seed is not None:
@@ -274,23 +268,51 @@ class _Trainer():
         samples_cnt = 0
 
         num_eval = self.eval_period
+        
         for task_id in range(self.n_tasks):
             if self.mode == "joint" and task_id > 0:
                 return
+            #todo ==================================================
+            if task_id ==0 and not self.debug:
+                print()
+                self.train_data_config(self.n_tasks,self.train_dataset)
+                
+            #todo ==================================================
             print("\n" + "#" * 50)
             print(f"# Task {task_id} iteration")
             print("#" * 50 + "\n")
             print("[2-1] Prepare a datalist for the current task")
-            self.train_sampler.set_task(task_id)
             
+            if task_id ==0:
+                self.train_data_config(self.n_tasks,self.train_dataset,self.train_sampler)
+                print()
+            self.train_sampler.set_task(task_id)
+            self.current_task_data(self.train_dataloader)
+            
+            
+            self.train_sampler.set_task(task_id)
+            self.current_task_data(self.train_dataloader)
             self.online_before_task(task_id)
+            
+            if task_id ==0:
+                self.train_data_config(self.n_tasks,self.train_dataset,self.train_sampler)
+            print()
+            self.train_sampler.set_task(task_id)
+            self.current_task_data(self.train_dataloader)
+            
             for i, (image, label) in enumerate(self.train_dataloader):
-                if self.debug and i >= 100 : break
-                samples_cnt += image.size(0) * self.world_size
+                if self.debug and (i+1)*self.batchsize >= 2000:
+                    break
+                
+                samples_cnt += image.size(0)
+                loss, acc = self.online_step([image,label], samples_cnt)
+                self.report_training(samples_cnt, loss, acc)
                 if samples_cnt > num_eval:
                 # if samples_cnt % args.eval_period == 0:
+                # if True:
                     test_sampler = OnlineTestSampler(self.test_dataset, self.exposed_classes)
                     test_dataloader = DataLoader(self.test_dataset, batch_size=self.batchsize*2, sampler=test_sampler, num_workers=self.n_worker)
+                    # test_dataloader = DataLoader(self.test_dataset, batch_size=512, sampler=test_sampler, num_workers=self.n_worker)
                     eval_dict = self.online_evaluate(test_dataloader)
                     if self.distributed:
                         eval_dict =  torch.tensor([eval_dict['avg_loss'], eval_dict['avg_acc'], *eval_dict['cls_acc']], device=self.device)
@@ -303,52 +325,57 @@ class _Trainer():
                         eval_results["data_cnt"].append(num_eval)
                         self.report_test(num_eval, eval_dict["avg_loss"], eval_dict['avg_acc'])
                     num_eval += self.eval_period
-                loss, acc = self.online_step([image,label], samples_cnt)
-                self.report_training(samples_cnt, loss, acc)
+                # loss, acc = self.online_step([image,label], samples_cnt)
+                # self.report_training(samples_cnt, loss, acc)
             self.online_after_task(task_id)
+            
             test_sampler = OnlineTestSampler(self.test_dataset, self.exposed_classes)
             test_dataloader = DataLoader(self.test_dataset, batch_size=self.batchsize*2, sampler=test_sampler, num_workers=self.n_worker)
+            self.test_data_config(test_dataloader,task_id)
             eval_dict = self.online_evaluate(test_dataloader)
+            
             if self.distributed:
                 eval_dict =  torch.tensor([eval_dict['avg_loss'], eval_dict['avg_acc'], *eval_dict['cls_acc']], device=self.device)
                 dist.reduce(eval_dict, dst=0, op=dist.ReduceOp.SUM)
                 # dist.all_reduce(eval_dict, op=dist.ReduceOp.SUM)
                 eval_dict = eval_dict.cpu().numpy()
-                eval_dict = {'avg_loss': eval_dict[0]/self.world_size, 'avg_acc': eval_dict[1]/self.world_size, 'cls_acc': eval_dict[2:]/self.world_size}        
-            if self.is_main_process():
-                task_acc = eval_dict['avg_acc']
-                print("[2-4] Update the information for the current task")
-                task_records["task_acc"].append(task_acc)
-                task_records["cls_acc"].append(eval_dict["cls_acc"])
+                eval_dict = {'avg_loss': eval_dict[0]/self.world_size, 'avg_acc': eval_dict[1]/self.world_size, 'cls_acc': eval_dict[2:]/self.world_size}
+            task_acc = eval_dict['avg_acc']
 
-                print("[2-5] Report task result")
-                self.writer.add_scalar("Metrics/TaskAcc", task_acc, task_id)
+            print("[2-4] Update the information for the current task")
+            task_records["task_acc"].append(task_acc)
+            task_records["cls_acc"].append(eval_dict["cls_acc"])
+            # print(f"Test | Sample # {samples_cnt} | test_loss {avg_loss:.4f} | test_acc {avg_acc:.4f} | ")
+
+            print("[2-5] Report task result")
+            self.writer.add_scalar("Metrics/TaskAcc", task_acc, task_id)
         
         if self.is_main_process():        
             np.save(f"{self.log_path}/logs/{self.dataset}/{self.note}/seed_{self.rnd_seed}.npy", task_records["task_acc"])
 
-        if self.mode == 'gdumb':
-            eval_results, task_records = self.evaluate_all(self.test_dataset, self.memory_epoch, self.batchsize, self.n_worker)
+        # if self.mode == 'gdumb':
+        #     eval_results, task_records = self.evaluate_all(self.test_dataset, self.memory_epoch, self.batchsize, self.n_worker)
         if self.eval_period is not None:
             np.save(f'{self.log_path}/logs/{self.dataset}/{self.note}/seed_{self.rnd_seed}_eval.npy', eval_results['test_acc'])
             np.save(f'{self.log_path}/logs/{self.dataset}/{self.note}/seed_{self.rnd_seed}_eval_time.npy', eval_results['data_cnt'])
 
-        # Accuracy (A)
-        A_auc = np.mean(eval_results["test_acc"])
-        A_avg = np.mean(task_records["task_acc"])
-        A_last = task_records["task_acc"][self.n_tasks - 1]
+        if self.is_main_process():        
+            # Accuracy (A)
+            A_auc = np.mean(eval_results["test_acc"])
+            A_avg = np.mean(task_records["task_acc"])
+            A_last = task_records["task_acc"][self.n_tasks - 1]
 
-        # Forgetting (F)
-        cls_acc = np.array(task_records["cls_acc"])
-        acc_diff = []
-        for j in range(self.n_classes):
-            if np.max(cls_acc[:-1, j]) > 0:
-                acc_diff.append(np.max(cls_acc[:-1, j]) - cls_acc[-1, j])
-        F_last = np.mean(acc_diff)
+            # Forgetting (F)
+            cls_acc = np.array(task_records["cls_acc"])
+            acc_diff = []
+            for j in range(self.n_classes):
+                if np.max(cls_acc[:-1, j]) > 0:
+                    acc_diff.append(np.max(cls_acc[:-1, j]) - cls_acc[-1, j])
+            F_last = np.mean(acc_diff)
 
-        print(f"======== Summary =======")
-        print(f"A_auc {A_auc} | A_avg {A_avg} | A_last {A_last} | F_last {F_last}")
-    
+            print(f"======== Summary =======")
+            print(f"A_auc {A_auc} | A_avg {A_avg} | A_last {A_last} | F_last {F_last}")
+        
     def add_new_class(self, class_name):
         # For DDP, normally go into this function
         len_class = len(self.exposed_classes)
@@ -358,23 +385,29 @@ class _Trainer():
                 self.exposed_classes.append(label.item())
         if self.distributed:
             exposed_classes = torch.cat(self.all_gather(torch.tensor(self.exposed_classes, device=self.device))).cpu().tolist()
+            self.exposed_classes = []
             for cls in exposed_classes:
                 if cls not in self.exposed_classes:
                     self.exposed_classes.append(cls)
         self.memory.add_new_class(cls_list=self.exposed_classes)
-
-        prev_weight = copy.deepcopy(self.model_without_ddp.fc.weight.data)
-        self.num_learned_class = len(self.exposed_classes)
-        self.model_without_ddp.fc = nn.Linear(self.model_without_ddp.fc.in_features, self.num_learned_class).to(self.device)
         with torch.no_grad():
+            prev_weight = copy.deepcopy(self.model_without_ddp.fc.weight.data)
+            prev_bias   = copy.deepcopy(self.model_without_ddp.fc.bias.data)
+            self.num_learned_class = len(self.exposed_classes)
+            self.model_without_ddp.fc = nn.Linear(self.model_without_ddp.fc.in_features, self.num_learned_class).to(self.device)
+
             if self.num_learned_class > 1:
                 self.model_without_ddp.fc.weight[:len_class] = prev_weight
-        for param in self.optimizer.param_groups[1]['params']:
-            if param in self.optimizer.state.keys():
-                del self.optimizer.state[param]
-        del self.optimizer.param_groups[1]
-        params = [param for name, param in self.model.named_parameters() if 'fc' in name]
-        self.optimizer.add_param_group({'params': params})
+                self.model_without_ddp.fc.weight[len_class:] = 0
+
+                self.model_without_ddp.fc.bias[:len_class] = 0
+                self.model_without_ddp.fc.bias[len_class:] = 0
+            for param in self.optimizer.param_groups[1]['params']:
+                if param in self.optimizer.state.keys():
+                    del self.optimizer.state[param]
+            del self.optimizer.param_groups[1]
+            params = [param for name, param in self.model.named_parameters() if 'fc.' in name]
+            self.optimizer.add_param_group({'params': params})
         if 'reset' in self.sched_name:
             self.update_schedule(reset=True)
 
@@ -424,6 +457,11 @@ class _Trainer():
         __builtin__.print = print
 
     def report_training(self, sample_num, train_loss, train_acc):
+        
+        # #todo =======================================================
+        # sample_num,train_loss,train_acc=self.sync_data(sample_num,train_loss,train_acc)
+        # #todo =======================================================
+        
         self.writer.add_scalar(f"train/loss", train_loss, sample_num)
         self.writer.add_scalar(f"train/acc", train_acc, sample_num)
         print(
@@ -434,11 +472,26 @@ class _Trainer():
         )
 
     def report_test(self, sample_num, avg_loss, avg_acc):
+        # #todo =======================================================
+        # sample_num,avg_loss,avg_acc=self.sync_data(sample_num,avg_loss,avg_acc)
+        # #todo =======================================================
         self.writer.add_scalar(f"test/loss", avg_loss, sample_num)
         self.writer.add_scalar(f"test/acc", avg_acc, sample_num)
         print(
             f"Test | Sample # {sample_num} | test_loss {avg_loss:.4f} | test_acc {avg_acc:.4f} | "
         )
+    
+    # def sync_data(self, sample_num, loss, acc):
+        
+    #     torch.cuda.synchronize()
+    #     t = torch.tensor([loss, acc, sample_num], dtype=torch.float64, device='cuda')
+    #     dist.barrier()
+    #     dist.all_reduce(t)
+    #     t = t.tolist()
+    #     loss = t[0] / self.world_size
+    #     acc = t[1] / self.world_size
+    #     sample_num=int(t[2])
+    #     return sample_num,loss,acc
 
     def _interpret_pred(self, y, pred):
         # xlable is batch
@@ -485,3 +538,70 @@ class _Trainer():
         for q, size in zip(all_qs_padded, all_sizes):
             all_qs.append(q[:size])
         return all_qs
+    
+    def train_data_config(self, n_task, train_dataset,train_sampler):
+        for t_i in range(n_task):
+            train_sampler.set_task(t_i)
+            train_dataloader = DataLoader(train_dataset,batch_size=self.batchsize,sampler=train_sampler,num_workers=4)
+            data_info={}
+            for i,data in enumerate(train_dataloader):
+                _,label = data
+                label = label.to(self.device)
+                for b in range(len(label)):
+                    if 'Class_'+str(label[b].item()) in data_info.keys():
+                        data_info['Class_'+str(label[b].item())] += 1
+                    else:
+                        data_info['Class_'+str(label[b].item())] = 1
+            print(f"[Train] Task{t_i} Data Info")
+            convert_data_info = self.convert_class_label(data_info)
+            np.save(f"{self.log_path}/logs/{self.dataset}/{self.note}/seed_{self.rnd_seed}_task{t_i}_train_data.npy", convert_data_info)
+            print(convert_data_info)
+            
+    def test_data_config(self, test_dataloader,task_id):
+        data_info={}
+        for i,data in enumerate(test_dataloader):
+            _,label = data
+            label = label.to(self.device)
+            
+            for b in range(len(label)):
+                if 'Class_'+str(label[b].item()) in data_info.keys():
+                    data_info['Class_'+str(label[b].item())]+=1
+                else:
+                    data_info['Class_'+str(label[b].item())]=1
+        
+        print("<<Exposed Class>>")
+        print(self.exposed_classes)
+        
+        print(f"[Test] Task {task_id} Data Info")
+        print(data_info)
+        print("<<Convert>>")
+        convert_data_info = self.convert_class_label(data_info)
+        print(convert_data_info)
+        print()
+        
+    def convert_class_label(self,data_info):
+        #* self.class_list => original class label
+        self.class_list = self.train_dataset.classes
+        for key in list(data_info.keys()):
+            old_key= int(key[6:])
+            data_info[self.class_list[old_key]] = data_info.pop(key)
+            
+        return data_info
+    
+    def current_task_data(self,train_loader):
+        data_info={}
+        for i,data in enumerate(train_loader):
+            _,label = data
+            
+            for b in range(label.shape[0]):
+                if 'Class_'+str(label[b].item()) in data_info.keys():
+                    data_info['Class_'+str(label[b].item())] +=1
+                else:
+                    data_info['Class_'+str(label[b].item())] =1
+        
+        print("Current Task Data Info")
+        print(data_info)
+        print("<<Convert to str>>")
+        convert_data_info = self.convert_class_label(data_info)
+        print(convert_data_info)
+        print()

@@ -3,12 +3,16 @@ from easydict import EasyDict as edict
 from torch import optim
 
 from models import mnist, cifar, imagenet
+import timm
 from timm.models.registry import register_model
 from timm.models.vision_transformer import _cfg, _create_vision_transformer, default_cfgs
 from timm.models import create_model
 from models.vit import _create_vision_transformer
 from models.L2P import L2P
 
+default_cfgs['vit_base_patch16_224'] = _cfg(
+        url='https://storage.googleapis.com/vit_models/imagenet21k/ViT-B_16.npz',
+        num_classes=21843)
 @register_model
 def vit_base_patch16_224(pretrained=False, **kwargs):
     """ ViT-Base model (ViT-B/32) from original paper (https://arxiv.org/abs/2010.11929).
@@ -30,45 +34,51 @@ def select_optimizer(opt_name, lr, model):
 
     if opt_name == "adam":
         # print("opt_name: adam")
-        params = [param for name, param in model.named_parameters() if 'fc' not in name]
-        fc_params = [param for name, param in model.named_parameters() if 'fc' in name]
+<<<<<<< HEAD
+        opt = optim.Adam(model.parameters(), lr=lr, weight_decay=0)
+    elif opt_name == "radam":
+        opt = torch_optimizer.RAdam(model.parameters(), lr=lr, weight_decay=0.00001)
+    elif opt_name == "sgd":
+=======
+        params = [param for name, param in model.named_parameters() if 'fc.' not in name]
+        fc_params = [param for name, param in model.named_parameters() if 'fc.' in name]
         opt = optim.Adam(params, lr=lr, weight_decay=0)
         opt.add_param_group({'params': fc_params})
     elif opt_name == "radam":
-        params = [param for name, param in model.named_parameters() if 'fc' not in name]
-        fc_params = [param for name, param in model.named_parameters() if 'fc' in name]
+        params = [param for name, param in model.named_parameters() if 'fc.' not in name]
+        fc_params = [param for name, param in model.named_parameters() if 'fc.' in name]
         opt = torch_optimizer.RAdam(params, lr=lr, weight_decay=0.00001)
         opt.add_param_group({'params': fc_params})
     elif opt_name == "sgd":
-        params = [param for name, param in model.named_parameters() if 'fc' not in name]
-        fc_params = [param for name, param in model.named_parameters() if 'fc' in name]
+        params = [param for name, param in model.named_parameters() if 'fc.' not in name]
+        fc_params = [param for name, param in model.named_parameters() if 'fc.' in name]
+>>>>>>> b3e0ed76ceb233b2129bc5677cb838d4bbe6dd12
         opt = optim.SGD(
-            params, lr=lr, momentum=0.9, nesterov=True, weight_decay=1e-4
+            model.parameters(), lr=lr, momentum=0.9, nesterov=True, weight_decay=1e-4
         )
-        opt.add_param_group({'params': fc_params})
     else:
         raise NotImplementedError("Please select the opt_name [adam, sgd]")
     return opt
 
-def select_optimizer_with_extern_params(opt_name, lr, model, extern_param=None):
+# def select_optimizer_with_extern_params(opt_name, lr, model, extern_param=None):
 
-    if opt_name == "adam":
-        params = [param for name, param in extern_param.named_parameters() if 'fc' not in name]
-        opt = optim.Adam(params, lr=lr, weight_decay=0)
-        opt.add_param_group({'params': model.fc.parameters()})
-    elif opt_name == "radam":
-        params = [param for name, param in extern_param.named_parameters() if 'fc' not in name]
-        opt = torch_optimizer.RAdam(params, lr=lr, weight_decay=0.00001)
-        opt.add_param_group({'params': model.fc.parameters()})
-    elif opt_name == "sgd":
-        params = [param for name, param in extern_param.named_parameters() if 'fc' not in name]
-        opt = optim.SGD(
-            params, lr=lr, momentum=0.9, nesterov=True, weight_decay=1e-4
-        )
-        opt.add_param_group({'params': model.fc.parameters()})
-    else:
-        raise NotImplementedError("Please select the opt_name [adam, sgd]")
-    return opt
+    # if opt_name == "adam":
+    #     params = [param for name, param in extern_param.named_parameters() if 'fc.' not in name]
+    #     opt = optim.Adam(params, lr=lr, weight_decay=0)
+    #     opt.add_param_group({'params': model.fc.parameters()})
+    # elif opt_name == "radam":
+    #     params = [param for name, param in extern_param.named_parameters() if 'fc.' not in name]
+    #     opt = torch_optimizer.RAdam(params, lr=lr, weight_decay=0.00001)
+    #     opt.add_param_group({'params': model.fc.parameters()})
+    # elif opt_name == "sgd":
+    #     params = [param for name, param in extern_param.named_parameters() if 'fc.' not in name]
+    #     opt = optim.SGD(
+    #         params, lr=lr, momentum=0.9, nesterov=True, weight_decay=1e-4
+    #     )
+    #     opt.add_param_group({'params': model.fc.parameters()})
+    # else:
+    #     raise NotImplementedError("Please select the opt_name [adam, sgd]")
+    # return opt
 
 def select_scheduler(sched_name, opt, hparam=None):
     if "exp" in sched_name:
@@ -137,11 +147,11 @@ def select_model(model_name, dataset, num_classes=None):
         )
 
     if model_name == "vit":
-        model = create_model(
+        model = timm.create_model(
                             "vit_base_patch16_224",pretrained=True,num_classes=num_classes,
                             drop_rate=0.,drop_path_rate=0.,drop_block_rate=None,)
     elif model_name == "L2P":
-        model = L2P()
+        model = L2P(backbone_name="vit_base_patch16_224", class_num=num_classes)
     else:
         model = model_class(opt)
 

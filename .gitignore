@@ -8,6 +8,7 @@ cifar100_png/
 *.err
 *.out
 data/
+temp/
 *.png
 *.tar
 test.py

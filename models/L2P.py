@@ -39,8 +39,8 @@ class Prompt(nn.Module):
                  selection_size       : int,
                  prompt_len           : int,
                  dimention            : int,
-                 _diversed_selection  : bool = True,
-                 _batchwise_selection : bool = True,
+                 _diversed_selection  : bool = False,
+                 _batchwise_selection : bool = False,
                  **kwargs):
         super().__init__()
 
@@ -126,12 +126,11 @@ class L2P(nn.Module):
         self.add_module('backbone', timm.models.create_model(backbone_name, pretrained=True, num_classes=class_num,
                                                              drop_rate=0.,drop_path_rate=0.,drop_block_rate=None))
         for name, param in self.backbone.named_parameters():
-            if 'head' not in name:
                 param.requires_grad = False
-        self.backbone.head.weight.requires_grad = True
-        self.backbone.head.bias.requires_grad   = True
+        self.backbone.fc.weight.requires_grad = True
+        self.backbone.fc.bias.requires_grad   = True
 
-        self.fc = self.backbone.head
+        # self.fc = self.backbone.fc
         
         self.prompt = Prompt(
             pool_size,
@@ -154,7 +153,7 @@ class L2P(nn.Module):
             query = self.backbone.blocks(x)
             query = self.backbone.norm(query)[:, 0].clone()
         simmilarity, prompts = self.prompt(query)
-        self.simmilarity = simmilarity.mean()
+        simmilarity = simmilarity.mean()
         prompts = prompts.contiguous().view(B, self.selection_size * self.prompt_len, D)
         prompts = prompts + self.backbone.pos_embed[:,0].clone().expand(self.selection_size * self.prompt_len, -1)
         x = self.backbone.pos_drop(token_appended + self.backbone.pos_embed)
@@ -163,12 +162,13 @@ class L2P(nn.Module):
         x = self.backbone.norm(x)
         x = x[:, 1:self.selection_size * self.prompt_len + 1].clone()
         x = x.mean(dim=1)
-        x = self.fc(x)
-        return x
+        x = self.backbone.fc_norm(x)
+        x = self.backbone.fc(x)
+        return x, simmilarity
     
-    def loss_fn(self, output, target):
-        B, C = output.size()
-        return F.cross_entropy(output, target) + self.lambd * self.simmilarity
+    # def loss_fn(self, output, target):
+    #     B, C = output.size()
+    #     return F.cross_entropy(output, target) + self.lambd * self.simmilarity
 
     def convert_train_task(self, task : torch.Tensor, **kwargs):
         self.mask += -torch.inf
@@ -180,6 +180,11 @@ class L2P(nn.Module):
 
     def train(self: T, mode: bool = True, **kwargs):
         ten = super().train(mode)
+        self.backbone.eval()
+        return ten
+    
+    def eval(self: T, mode: bool = True, **kwargs):
+        ten = super().eval(mode)
         self.backbone.eval()
         return ten
     
