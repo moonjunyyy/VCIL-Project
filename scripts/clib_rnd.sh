@@ -2,9 +2,10 @@
 
 #SBATCH -J CLIB_iblurry_CIFAR100_N50_M10_RND
 #SBATCH --nodes=1
-#SBATCH --gres=gpu:2
+#SBATCH --gres=gpu:1
 #SBATCH --cpus-per-gpu=4
 #SBATCH --mem-per-gpu=32G
+#SBATCH -t 3-0
 #SBATCH -o %x_%j.log
 #SBATCH -e %x_%j.err
 
@@ -37,7 +38,7 @@ N=50
 M=10
 GPU_TRANSFORM="--gpu_transform"
 USE_AMP="--use_amp"
-SEEDS="1 2 3"
+SEEDS="1 2 3 4 5"
 
 if [ "$DATASET" == "cifar10" ]; then
     MEM_SIZE=500 ONLINE_ITER=1

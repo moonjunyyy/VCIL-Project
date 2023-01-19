@@ -1,12 +1,12 @@
 #!/bin/bash
 
-#SBATCH -J ER_iblurry_cifar100_N50_M75
+#SBATCH -J ER_iblurry_cifar100_N50_M10
 #SBATCH -p batch
 #SBATCH --nodes=1
 #SBATCH --gres=gpu:4
 #SBATCH --cpus-per-gpu=8
-#SBATCH --mem-per-gpu=16G
-#SBATCH --time=14-0
+#SBATCH --mem-per-gpu=32G
+#SBATCH --time=3-0
 #SBATCH -o %x_%j.log
 #SBATCH -e %x_%j.err
 
@@ -31,7 +31,7 @@ conda --version
 python --version
 
 # CIL CONFIG
-NOTE="ER_iblurry_cifar100_N50_M75" # Short description of the experiment. (WARNING: logs/results with the same note will be overwritten!)
+NOTE="ER_iblurry_cifar100_N50_M10" # Short description of the experiment. (WARNING: logs/results with the same note will be overwritten!)
 
 MODE="er"
 DATASET="cifar100" # cifar10, cifar100, tinyimagenet, imagenet

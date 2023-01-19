@@ -1,11 +1,12 @@
 #!/bin/bash
 
-#SBATCH -J L2P_iblurry_cifar100_N50_M10
+#SBATCH -J ER_iblurry_cifar100_N50_M10_RND
+#SBATCH -p batch
 #SBATCH --nodes=1
-#SBATCH --gres=gpu:1
-#SBATCH --cpus-per-gpu=4
-#SBATCH --mem-per-gpu=40G
-#SBATCH -t 3-0
+#SBATCH --gres=gpu:4
+#SBATCH --cpus-per-gpu=8
+#SBATCH --mem-per-gpu=32G
+#SBATCH --time=3-0
 #SBATCH -o %x_%j.log
 #SBATCH -e %x_%j.err
 
@@ -30,45 +31,43 @@ conda --version
 python --version
 
 # CIL CONFIG
-NOTE="L2P_iblurry_cifar100_N50_M10" # Short description of the experiment. (WARNING: logs/results with the same note will be overwritten!)
-MODE="L2P"
+NOTE="ER_iblurry_cifar100_N50_M10_RND" # Short description of the experiment. (WARNING: logs/results with the same note will be overwritten!)
+
+MODE="er"
 DATASET="cifar100" # cifar10, cifar100, tinyimagenet, imagenet
 N_TASKS=5
 N=50
 M=10
 GPU_TRANSFORM="--gpu_transform"
 USE_AMP="--use_amp"
-SEEDS="1 2 3 4 5"
+SEEDS="1 2 3"
 
-OPT="adam"
 
 if [ "$DATASET" == "cifar10" ]; then
     MEM_SIZE=500 ONLINE_ITER=1
-    MODEL_NAME="L2P" EVAL_PERIOD=1000
-    BATCHSIZE=32; LR=3e-4 OPT_NAME="adam" SCHED_NAME="default" MEMORY_EPOCH=256
+    MODEL_NAME="resnet18" EVAL_PERIOD=100
+    BATCHSIZE=8; LR=3e-4 OPT_NAME="adam" SCHED_NAME="default"
 
 elif [ "$DATASET" == "cifar100" ]; then
     MEM_SIZE=2000 ONLINE_ITER=3
-    MODEL_NAME="L2P" EVAL_PERIOD=1000
-    BATCHSIZE=64; LR=3e-2 OPT_NAME="adam" SCHED_NAME="default" MEMORY_EPOCH=256
+    MODEL_NAME="resnet34" EVAL_PERIOD=1000
+    BATCHSIZE=64; LR=3e-4 OPT_NAME="adam" SCHED_NAME="default"
 
 elif [ "$DATASET" == "tinyimagenet" ]; then
     MEM_SIZE=4000 ONLINE_ITER=3
-    MODEL_NAME="L2P" EVAL_PERIOD=1000
-    BATCHSIZE=32; LR=3e-4 OPT_NAME="adam" SCHED_NAME="default" MEMORY_EPOCH=256
+    MODEL_NAME="resnet34" EVAL_PERIOD=100
+    BATCHSIZE=32; LR=3e-4 OPT_NAME="adam" SCHED_NAME="default"
 
 elif [ "$DATASET" == "imagenet" ]; then
     N_TASKS=10 MEM_SIZE=20000 ONLINE_ITER=0.25
-    MODEL_NAME="L2P" EVAL_PERIOD=1000
-    BATCHSIZE=256; LR=0.03 OPT_NAME="adam" SCHED_NAME="default" MEMORY_EPOCH=100
-    BATCHSIZE=256; LR=0.05 OPT_NAME=$OPT SCHED_NAME="multistep" MEMORY_EPOCH=100
+    MODEL_NAME="resnet34" EVAL_PERIOD=1000
+    BATCHSIZE=256; LR=3e-4 OPT_NAME="adam" SCHED_NAME="default"
 
 else
     echo "Undefined setting"
     exit 1
 fi
 
-echo "Batch size $BATCHSIZE  onlin iter $ONLINE_ITER"
 for RND_SEED in $SEEDS
 do
     python main.py --mode $MODE \
@@ -76,7 +75,7 @@ do
     --n_tasks $N_TASKS --m $M --n $N \
     --rnd_seed $RND_SEED \
     --model_name $MODEL_NAME --opt_name $OPT_NAME --sched_name $SCHED_NAME \
-    --lr $LR --batchsize $BATCHSIZE --n_worker 4 \
+    --lr $LR --batchsize $BATCHSIZE \
     --memory_size $MEM_SIZE $GPU_TRANSFORM --online_iter $ONLINE_ITER --data_dir /local_datasets \
-    --note $NOTE --eval_period $EVAL_PERIOD --memory_epoch $MEMORY_EPOCH --n_worker 4
+    --note $NOTE --eval_period $EVAL_PERIOD  --n_worker 4 --rnd_NM
 done

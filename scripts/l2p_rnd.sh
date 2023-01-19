@@ -2,9 +2,10 @@
 
 #SBATCH -J L2P_iblurry_cifar100_N50_M10_RND
 #SBATCH --nodes=1
-#SBATCH --gres=gpu:2
+#SBATCH --gres=gpu:1
 #SBATCH --cpus-per-gpu=4
-#SBATCH --mem-per-gpu=32G
+#SBATCH --mem-per-gpu=40G
+#SBATCH -t 3-0
 #SBATCH -o %x_%j.log
 #SBATCH -e %x_%j.err
 
