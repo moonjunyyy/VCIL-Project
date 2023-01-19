@@ -192,7 +192,7 @@ class _Trainer():
     def setup_distributed_model(self):
 
         print("Building model...")
-        self.model = select_model(self.model_name, self.dataset, 1)
+        self.model = select_model(self.model_name, self.dataset, self.n_classes)
         self.scaler = torch.cuda.amp.GradScaler(enabled=self.use_amp)
         self.writer = SummaryWriter(f"{self.log_path}/tensorboard/{self.dataset}/{self.note}/seed_{self.rnd_seed}")
         

@@ -2,7 +2,7 @@
 
 #SBATCH --job-name Finetuning_iblurry_cifar100_N50_M10_RANDOM
 #SBATCH -p batch
-#SBATCH -w vll4
+#SBATCH -w agi2
 #SBATCH --nodes=1
 #SBATCH --gres=gpu:2
 #SBATCH --cpus-per-gpu=4
@@ -33,7 +33,7 @@ conda --version
 python --version
 echo "Batch size 32 onlin iter 3"
 # CIL CONFIG
-MODE="Finetuning"
+MODE="FT"
 NOTE="Finetuning_iblurry_cifar100_N50_M10_RANDOM_gpu2" # Short description of the experiment. (WARNING: logs/results with the same note will be overwritten!)
 
 DATASET="cifar100" # cifar10, cifar100, tinyimagenet, imagenet

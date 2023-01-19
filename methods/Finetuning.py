@@ -33,7 +33,7 @@ def cycle(iterable):
 class FT(_Trainer):
     def __init__(self, *args, **kwargs):
         super(FT, self).__init__(*args, **kwargs)
-        
+        self.class_mask=None
     
     def online_step(self, sample, samples_cnt):
         image, label = sample
@@ -59,22 +59,41 @@ class FT(_Trainer):
             for cls in exposed_classes:
                 if cls not in self.exposed_classes:
                     self.exposed_classes.append(cls)
+        
+        #* Class mask
+        #*===========================================================================
+        if self.class_mask is not None:
+            self.class_mask = self.class_mask.cpu().tolist()
+        else:
+            self.class_mask=[]
+
+        new=[]
+        for label in class_name:
+            if self.exposed_classes.index(label.item()) not in self.class_mask and \
+            self.exposed_classes.index(label.item()) not in new:
+                new.append(self.exposed_classes.index(label.item()))
+        self.class_mask += new
+        
+        self.class_mask = torch.tensor(self.class_mask).to(self.device)
+        #*===========================================================================
+        self.num_learned_class = len(self.exposed_classes)
+                    
         # self.memory.add_new_class(cls_list=self.exposed_classes)
 
-        prev_weight = copy.deepcopy(self.model_without_ddp.fc.weight.data)
-        self.num_learned_class = len(self.exposed_classes)
-        self.model_without_ddp.fc = nn.Linear(self.model_without_ddp.fc.in_features, self.num_learned_class).to(self.device)
-        with torch.no_grad():
-            if self.num_learned_class > 1:
-                self.model_without_ddp.fc.weight[:len_class] = prev_weight
-        for param in self.optimizer.param_groups[1]['params']:
-            if param in self.optimizer.state.keys():
-                del self.optimizer.state[param]
-        del self.optimizer.param_groups[1]
-        params = [param for name, param in self.model.named_parameters() if 'fc.' in name]
-        self.optimizer.add_param_group({'params': params})
-        if 'reset' in self.sched_name:
-            self.update_schedule(reset=True)
+        # prev_weight = copy.deepcopy(self.model_without_ddp.fc.weight.data)
+        # self.num_learned_class = len(self.exposed_classes)
+        # self.model_without_ddp.fc = nn.Linear(self.model_without_ddp.fc.in_features, self.num_learned_class).to(self.device)
+        # with torch.no_grad():
+        #     if self.num_learned_class > 1:
+        #         self.model_without_ddp.fc.weight[:len_class] = prev_weight
+        # for param in self.optimizer.param_groups[1]['params']:
+        #     if param in self.optimizer.state.keys():
+        #         del self.optimizer.state[param]
+        # del self.optimizer.param_groups[1]
+        # params = [param for name, param in self.model.named_parameters() if 'fc.' in name]
+        # self.optimizer.add_param_group({'params': params})
+        # if 'reset' in self.sched_name:
+        #     self.update_schedule(reset=True)
 
     def online_after_task(self,task_id):
         # self.test_data_config(test_dataloader,task_id)
@@ -116,10 +135,16 @@ class FT(_Trainer):
             x, labels_a, labels_b, lam = cutmix_data(x=x, y=y, alpha=1.0)
             with torch.cuda.amp.autocast(enabled=self.use_amp):
                 logit = self.model(x)
+                logits_mask = torch.ones_like(logit, device=self.device) * float('-inf')
+                logits_mask = logits_mask.index_fill(1, self.class_mask, 0.0)
+                logit = logit + logits_mask
                 loss = lam * self.criterion(logit, labels_a) + (1 - lam) * self.criterion(logit, labels_b)
         else:
             with torch.cuda.amp.autocast(enabled=self.use_amp):
                 logit = self.model(x)
+                logits_mask = torch.ones_like(logit, device=self.device) * float('-inf')
+                logits_mask = logits_mask.index_fill(1, self.class_mask, 0.0)
+                logit = logit + logits_mask
                 loss = self.criterion(logit, y)
         return logit, loss
 
@@ -140,6 +165,7 @@ class FT(_Trainer):
                 y = y.to(self.device)
 
                 logit = self.model(x)
+                logit = logit[:,:self.num_learned_class]
                 loss = self.criterion(logit, y)
                 pred = torch.argmax(logit, dim=-1)
                 _, preds = logit.topk(self.topk, 1, True, True)

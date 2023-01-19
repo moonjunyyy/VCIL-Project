@@ -32,8 +32,9 @@ def cycle(iterable):
             yield i
 
 class ER(_Trainer):
-    def __init__(self, *args, **kwargs) -> None:
+    def __init__(self, *args, **kwargs):
         super(ER, self).__init__(*args, **kwargs)
+        self.class_mask=None
 
     def online_step(self, sample, samples_cnt):
         image, label = sample
@@ -79,6 +80,36 @@ class ER(_Trainer):
             else:
                 self.memory.replace_data([image[i], label[i]])        
 
+    def add_new_class(self,class_name):
+        len_class = len(self.exposed_classes)
+        exposed_classes = []
+        for label in class_name:
+            if label.item() not in self.exposed_classes:
+                self.exposed_classes.append(label.item())
+        if self.distributed:
+            exposed_classes = torch.cat(self.all_gather(torch.tensor(self.exposed_classes, device=self.device))).cpu().tolist()
+            self.exposed_classes = []
+            for cls in exposed_classes:
+                if cls not in self.exposed_classes:
+                    self.exposed_classes.append(cls)
+        # print('exposed_classes:',self.exposed_classes)
+        #* Class mask
+        #*===========================================================================
+        if self.class_mask is not None:
+            self.class_mask = self.class_mask.cpu().tolist()
+        else:
+            self.class_mask=[]
+        new=[]
+        for label in class_name:
+            if self.exposed_classes.index(label.item()) not in self.class_mask and \
+            self.exposed_classes.index(label.item()) not in new:
+                new.append(self.exposed_classes.index(label.item()))
+        self.class_mask += new
+        
+        self.class_mask = torch.tensor(self.class_mask).to(self.device)
+        #*===========================================================================
+        self.num_learned_class = len(self.exposed_classes)
+    
     def online_before_task(self, task_id):
         pass
 
@@ -126,13 +157,19 @@ class ER(_Trainer):
         if do_cutmix:
             x, labels_a, labels_b, lam = cutmix_data(x=x, y=y, alpha=1.0)
             with torch.cuda.amp.autocast(enabled=self.use_amp):
-                logit = self.model(x)
-                loss = lam * self.criterion(logit, labels_a) + (1 - lam) * self.criterion(logit, labels_b)
+                logits = self.model(x)
+                logits_mask =  torch.ones_like(logits, device=self.device) * float('-inf')
+                logits_mask = logits_mask.index_fill(1, self.class_mask, 0.0)
+                logits = logits + logits_mask
+                loss = lam * self.criterion(logits, labels_a) + (1 - lam) * self.criterion(logits, labels_b)
         else:
             with torch.cuda.amp.autocast(enabled=self.use_amp):
-                logit = self.model(x)
-                loss = self.criterion(logit, y)
-        return logit, loss
+                logits = self.model(x)
+                logits_mask =  torch.ones_like(logits, device=self.device) * float('-inf')
+                logits_mask = logits_mask.index_fill(1, self.class_mask, 0.0)
+                logits = logits + logits_mask
+                loss = self.criterion(logits, y)
+        return logits, loss
 
     def online_evaluate(self, test_loader):
         total_correct, total_num_data, total_loss = 0.0, 0.0, 0.0
@@ -151,6 +188,7 @@ class ER(_Trainer):
                 y = y.to(self.device)
 
                 logit = self.model(x)
+                logit = logit[:,:self.num_learned_class]
                 loss = self.criterion(logit, y)
                 pred = torch.argmax(logit, dim=-1)
                 _, preds = logit.topk(self.topk, 1, True, True)
