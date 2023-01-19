@@ -24,7 +24,7 @@ master_addr=$(scontrol show hostnames "$SLURM_JOB_NODELIST" | head -n 1)
 export MASTER_ADDR=$master_addr
 echo "MASTER_ADDR="$MASTER_ADDR
 
-source /data/junyeong/init.sh
+source /data/moonjunyyy/init.sh
 conda activate iblurry
 
 conda --version
@@ -50,7 +50,7 @@ if [ "$DATASET" == "cifar10" ]; then
 
 elif [ "$DATASET" == "cifar100" ]; then
     MEM_SIZE=2000 ONLINE_ITER=3
-    MODEL_NAME="vit" EVAL_PERIOD=1000
+    MODEL_NAME="resnet34" EVAL_PERIOD=1000
     BATCHSIZE=64; LR=3e-4 OPT_NAME="adam" SCHED_NAME="default"
 
 elif [ "$DATASET" == "tinyimagenet" ]; then

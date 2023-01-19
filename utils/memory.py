@@ -42,13 +42,13 @@ class Memory:
                 indice = (self.labels == label).nonzero().squeeze()
                 self.others_loss_decrease[idx] = torch.mean(self.others_loss_decrease[indice[indice != idx]])
 
-    def update_loss_history(self, idx, loss, prev_loss, ema_ratio=0.90, dropped_idx=None):
+    def update_loss_history(self, loss, prev_loss, ema_ratio=0.90, dropped_idx=None):
         if dropped_idx is None:
             loss_diff = torch.mean(loss - prev_loss)
         elif len(prev_loss) > 0:
             mask = torch.ones(len(loss), dtype=bool)
             mask[torch.tensor(dropped_idx, dtype=torch.int64).squeeze()] = False
-            loss_diff = torch.mean((torch.tensor(loss[:len(prev_loss)] - prev_loss))[mask[:len(prev_loss)]])
+            loss_diff = torch.mean((loss[:len(prev_loss)] - prev_loss)[mask[:len(prev_loss)]])
         else:
             loss_diff = 0
         difference = loss_diff - torch.mean(self.others_loss_decrease[self.previous_idx.to(torch.int64)]) / len(self.previous_idx)
@@ -91,12 +91,17 @@ class MemoryOrderedSampler(torch.utils.data.Sampler):
         self.memory = memory
         self.batch_size = batch_size
         self.iterations = int(iterations)
-        self.indices = torch.cat([torch.arange(len(self.memory), dtype=torch.int64)[:min(self.batch_size, len(self.memory))] for _ in range(self.iterations)]).tolist()
+        self.indices = torch.cat([torch.arange(len(self.memory), dtype=torch.int64) for _ in range(self.iterations)]).tolist()
         for i, idx in enumerate(self.indices):
             self.indices[i] =  int(self.memory.memory[idx])
     
     def __iter__(self):
-        return iter(self.indices[dist.get_rank()::dist.get_world_size()])
-
+        if dist.is_initialized():
+            return iter(self.indices[dist.get_rank()::dist.get_world_size()])
+        else:
+            return iter(self.indices)
     def __len__(self):
-        return len(self.indices[dist.get_rank()::dist.get_world_size()])
+        if dist.is_initialized():
+            return len(self.indices[dist.get_rank()::dist.get_world_size()])
+        else:
+            return len(self.indices)

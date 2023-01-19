@@ -38,9 +38,15 @@ class ER(_Trainer):
 
     def online_step(self, images, labels, idx):
         # image, label = sample
+        s = time.time()
         self.add_new_class(labels[0])
-        self.memory_sampler = MemoryBatchSampler(self.memory, self.memory_batchsize, self.temp_batchsize * self.online_iter * self.world_size)
-        self.memory_dataloader = iter(DataLoader(self.train_dataset, batch_size=self.memory_batchsize, sampler=self.memory_sampler, num_workers=self.n_worker, pin_memory=True))
+        print(time.time() - s)
+        s = time.time()
+        self.memory_sampler  = MemoryBatchSampler(self.memory, self.memory_batchsize, self.temp_batchsize * self.online_iter * self.world_size)
+        self.memory_dataloader   = DataLoader(self.train_dataset, batch_size=self.memory_batchsize, sampler=self.memory_sampler, num_workers=0, pin_memory=True)
+        self.memory_provider     = iter(self.memory_dataloader)
+        print(time.time() - s)
+        s = time.time()
         # train with augmented batches
         _loss, _acc, _iter = 0.0, 0.0, 0
         for image, label in zip(images, labels):
@@ -48,7 +54,11 @@ class ER(_Trainer):
             _loss += loss
             _acc += acc
             _iter += 1
+            print(time.time() - s)
+            s = time.time()
         self.update_memory(idx, labels[0])
+        print(time.time() - s)
+        s = time.time()
         return _loss / _iter, _acc / _iter
     
     def update_memory(self, sample, label):
@@ -101,7 +111,7 @@ class ER(_Trainer):
         if len(self.memory) > 0 and self.memory_batchsize > 0:
             # memory_batchsize = min(self.memory_batchsize, len(self.memory))
             # memory_images, memory_labels = self.memory.get_batch(memory_batchsize)
-            memory_images, memory_labels = next(self.memory_dataloader)
+            memory_images, memory_labels = next(self.memory_provider)
             x = torch.cat([x, memory_images], dim=0)
             y = torch.cat([y, memory_labels], dim=0)
         for j in range(len(y)):
@@ -133,13 +143,13 @@ class ER(_Trainer):
             x, labels_a, labels_b, lam = cutmix_data(x=x, y=y, alpha=1.0)
             with torch.cuda.amp.autocast(enabled=self.use_amp):
                 logit = self.model(x)
-                logit += self.mask
-                loss = lam * self.criterion(logit, labels_a) + (1 - lam) * self.criterion(logit, labels_b)
+                logit = logit + self.mask
+                loss = lam * self.criterion(logit, labels_a.to(torch.int64)) + (1 - lam) * self.criterion(logit, labels_b.to(torch.int64))
         else:
             with torch.cuda.amp.autocast(enabled=self.use_amp):
                 logit = self.model(x)
-                logit += self.mask
-                loss = self.criterion(logit, y)
+                logit = logit + self.mask
+                loss = self.criterion(logit, y.to(torch.int64))
         return logit, loss
 
     def online_evaluate(self, test_loader):

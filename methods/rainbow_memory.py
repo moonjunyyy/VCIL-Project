@@ -39,14 +39,16 @@ class RM(ER):
 
     def setup_distributed_dataset(self):
         super(RM, self).setup_distributed_dataset()
-        self.memory_train_dataset = self.datasets[self.dataset](root=self.data_dir, train=True, download=True, transform=transforms.ToTensor())
+        self.loss_update_dataset = self.datasets[self.dataset](root=self.data_dir, train=True, download=True,
+                                     transform=transforms.Compose([transforms.Resize((self.inp_size,self.inp_size)),transforms.ToTensor()]))
 
     def online_step(self, images, labels, idx):
         # image, label = sample
         self.add_new_class(labels[0])
-        self.memory_sampler = MemoryBatchSampler(self.memory, self.memory_batchsize, self.temp_batchsize * self.online_iter * self.world_size)
-        self.memory_dataloader = iter(DataLoader(self.train_dataset, batch_size=self.memory_batchsize, sampler=self.memory_sampler, num_workers=self.n_worker, pin_memory=True))
-         # train with augmented batches
+        self.memory_sampler  = MemoryBatchSampler(self.memory, self.memory_batchsize, self.temp_batchsize * self.online_iter * self.world_size)
+        self.memory_dataloader   = DataLoader(self.train_dataset, batch_size=self.memory_batchsize, sampler=self.memory_sampler, num_workers=0, pin_memory=True)
+        self.memory_provider     = iter(self.memory_dataloader)
+        # train with augmented batches
         _loss, _acc, _iter = 0.0, 0.0, 0
         for image, label in zip(images, labels):
             loss, acc = self.online_train([image.clone(), label.clone()])

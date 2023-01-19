@@ -73,7 +73,8 @@ class _Trainer():
         self.imp_update_period   = kwargs.get("imp_update_period")
 
         self.dist_backend = 'nccl'
-        self.dist_url = 'tcp://' + os.environ['MASTER_ADDR'] + ':' + os.environ['MASTER_PORT']
+        self.dist_url = 'env://'
+        # self.dist_url = 'tcp://' + os.environ['MASTER_ADDR'] + ':' + os.environ['MASTER_PORT']
 
         self.lr_step     = kwargs.get("lr_step")    # for adaptive LR
         self.lr_length   = kwargs.get("lr_length")  # for adaptive LR
@@ -176,10 +177,7 @@ class _Trainer():
 
         self.train_dataloader    = DataLoader(self.online_iter_dataset, batch_size=self.temp_batchsize, sampler=self.train_sampler, num_workers=self.n_worker, pin_memory=True)
         
-        if not self.use_amp:
-            self.mask = torch.zeros(self.n_classes, device=self.device) - torch.inf
-        else:
-            self.mask = torch.zeros(self.n_classes, device=self.device) - 1e10
+        self.mask = torch.zeros(self.n_classes, device=self.device) - torch.inf
         self.seen = 0
         self.memory = Memory()
 
@@ -188,7 +186,7 @@ class _Trainer():
         print("Building model...")
         self.model = select_model(self.model_name, self.dataset, self.n_classes).to(self.device)
         self.scaler = torch.cuda.amp.GradScaler(enabled=self.use_amp)
-        self.writer = SummaryWriter(f"{self.log_path}/tensorboard/{self.dataset}/{self.note}/seed_{self.rnd_seed}")
+        # self.writer = SummaryWriter(f"{self.log_path}/tensorboard/{self.dataset}/{self.note}/seed_{self.rnd_seed}")
         
         self.model.to(self.device)
         self.model_without_ddp = self.model
@@ -353,7 +351,7 @@ class _Trainer():
             # print(f"Test | Sample # {samples_cnt} | test_loss {avg_loss:.4f} | test_acc {avg_acc:.4f} | ")
 
             print("[2-5] Report task result")
-            self.writer.add_scalar("Metrics/TaskAcc", task_acc, task_id)
+            # self.writer.add_scalar("Metrics/TaskAcc", task_acc, task_id)
         
         if self.is_main_process():        
             np.save(f"{self.log_path}/logs/{self.dataset}/{self.note}/seed_{self.rnd_seed}.npy", task_records["task_acc"])
@@ -450,8 +448,8 @@ class _Trainer():
         # sample_num,train_loss,train_acc=self.sync_data(sample_num,train_loss,train_acc)
         # #todo =======================================================
         
-        self.writer.add_scalar(f"train/loss", train_loss, sample_num)
-        self.writer.add_scalar(f"train/acc", train_acc, sample_num)
+        # self.writer.add_scalar(f"train/loss", train_loss, sample_num)
+        # self.writer.add_scalar(f"train/acc", train_acc, sample_num)
         print(
             f"Train | Sample # {sample_num} | train_loss {train_loss:.4f} | train_acc {train_acc:.4f} | "
             f"lr {self.optimizer.param_groups[0]['lr']:.6f} | "
@@ -463,8 +461,8 @@ class _Trainer():
         # #todo =======================================================
         # sample_num,avg_loss,avg_acc=self.sync_data(sample_num,avg_loss,avg_acc)
         # #todo =======================================================
-        self.writer.add_scalar(f"test/loss", avg_loss, sample_num)
-        self.writer.add_scalar(f"test/acc", avg_acc, sample_num)
+        # self.writer.add_scalar(f"test/loss", avg_loss, sample_num)
+        # self.writer.add_scalar(f"test/acc", avg_acc, sample_num)
         print(
             f"Test | Sample # {sample_num} | test_loss {avg_loss:.4f} | test_acc {avg_acc:.4f} | "
         )

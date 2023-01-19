@@ -26,8 +26,8 @@ master_addr=$(scontrol show hostnames "$SLURM_JOB_NODELIST" | head -n 1)
 export MASTER_ADDR=$master_addr
 echo "MASTER_ADDR="$MASTER_ADDR
 
-source /data/keonhee/init.sh
-conda activate torch38gpu
+source /data/moonjunyyy/init.sh
+conda activate iblurry
 
 conda --version
 python --version
