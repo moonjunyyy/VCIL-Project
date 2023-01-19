@@ -75,7 +75,8 @@ class RM(ER):
                 label_frequency = copy.deepcopy(self.memory.cls_count)
                 label_frequency[self.exposed_classes.index(y.item())] += 1
                 cls_to_replace = torch.argmax(label_frequency)
-                idx_to_replace = cls_to_replace[torch.randint(0, len(cls_to_replace), (1,))]
+                cand_idx = (self.memory.labels == self.memory.cls_list[cls_to_replace]).nonzero().squeeze()
+                idx_to_replace = cand_idx[torch.randint(0, len(cand_idx), (1,))]
                 self.memory.replace_data([x,y], idx_to_replace)
             else:
                 self.memory.replace_data([x,y])

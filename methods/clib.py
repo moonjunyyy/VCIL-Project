@@ -51,20 +51,29 @@ class CLIB(ER):
                                      transform=transforms.Compose([transforms.Resize((self.inp_size,self.inp_size)),transforms.ToTensor()]))
 
     def online_step(self, images, labels, idx):
+        time_start = time.time()
         self.add_new_class(labels[0])
+        print("Adding new class takes {} seconds".format(time.time() - time_start))
+        time_start = time.time()
         self.update_memory(idx, labels[0])
+        print("Updating memory takes {} seconds".format(time.time() - time_start))
+        time_start = time.time()
         self.memory_sampler  = MemoryBatchSampler(self.memory, self.memory_batchsize, self.temp_batchsize * self.online_iter * self.world_size)
-        self.memory_dataloader   = DataLoader(self.train_dataset, batch_size=self.memory_batchsize, sampler=self.memory_sampler, num_workers=0, pin_memory=True)
+        self.memory_dataloader   = DataLoader(self.train_dataset, batch_size=self.memory_batchsize, sampler=self.memory_sampler, num_workers=self.n_worker, pin_memory=True)
         self.memory_provider     = iter(self.memory_dataloader)
-       # train with augmented batches
-        _loss, _acc, _iter = 0.0, 0.0, 0
+        print("Creating memory dataloader takes {} seconds".format(time.time() - time_start))
+        time_start = time.time()
+        # train with augmented batches
+        _loss, _acc, self.iter = 0.0, 0.0, 0
         for image, label in zip(images, labels):
             loss, acc = self.online_train([torch.empty(0), torch.empty(0)])
             _loss += loss
             _acc += acc
-            _iter += 1
+            self.iter += 1
+            print("Training takes {} seconds".format(time.time() - time_start))
+            time_start = time.time()
         self.num_updates -= int(self.num_updates)
-        return _loss / _iter, _acc / _iter
+        return _loss / self.iter, _acc / self.iter
 
     def update_memory(self, sample, label):
         # Update memory
@@ -201,13 +210,14 @@ class CLIB(ER):
         self.imp_update_counter += 1
         if self.imp_update_counter % self.imp_update_period == 0:
             if len(self.memory) > 0:
-                self.memory_sampler = MemoryOrderedSampler(self.memory, self.batchsize)
-                self.memory_dataloader = DataLoader(self.loss_update_dataset, batch_size=batchsize, sampler=self.memory_sampler, num_workers=0, pin_memory=True)
+                if self.iter == 0:
+                    self.loss_update_sampler = MemoryOrderedSampler(self.memory, batchsize*2)
+                    self.loss_update_dataloader = DataLoader(self.loss_update_dataset, batch_size=batchsize*2, sampler=self.loss_update_sampler, num_workers=0, pin_memory=True)
                 self.model.eval()
                 with torch.no_grad():
                     logit = []
                     label = []
-                    for (x, y) in self.memory_dataloader:
+                    for (x, y) in self.loss_update_dataloader:
                         logit.append(self.model(x.to(self.device)) + self.mask)
                         label.append(y.to(self.device))
                     loss = F.cross_entropy(torch.cat(logit), torch.cat(label), reduction='none')
