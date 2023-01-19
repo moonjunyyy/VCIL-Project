@@ -1,14 +1,12 @@
 #!/bin/bash
 
 #SBATCH -J L2P_iblurry_cifar100_N50_M10
-#SBATCH -p batch
-#SBATCH -w augi1
 #SBATCH --nodes=1
 #SBATCH --gres=gpu:2
 #SBATCH --cpus-per-gpu=4
-#SBATCH --mem-per-gpu=20G
-#SBATCH --time=14-0
+#SBATCH --mem-per-gpu=32G
 #SBATCH -o %x_%j.log
+#SBATCH -e %x_%j.err
 
 date
 ulimit -n 65536
@@ -39,7 +37,7 @@ N=50
 M=10
 GPU_TRANSFORM="--gpu_transform"
 USE_AMP="--use_amp"
-SEEDS="1 2 3"
+SEEDS="1 2 3 4 5"
 
 OPT="adam"
 
@@ -50,7 +48,7 @@ if [ "$DATASET" == "cifar10" ]; then
 
 elif [ "$DATASET" == "cifar100" ]; then
     MEM_SIZE=2000 ONLINE_ITER=3
-    MODEL_NAME="L2P" EVAL_PERIOD=100
+    MODEL_NAME="L2P" EVAL_PERIOD=1000
     BATCHSIZE=64; LR=3e-2 OPT_NAME="adam" SCHED_NAME="default" MEMORY_EPOCH=256
 
 elif [ "$DATASET" == "tinyimagenet" ]; then

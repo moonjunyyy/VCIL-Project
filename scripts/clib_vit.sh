@@ -1,12 +1,10 @@
 #!/bin/bash
 
-#SBATCH -J CLIB_iblurry_CIFAR100_N50_M10
-#SBATCH -p batch
+#SBATCH -J CLIB_ViT_iblurry_CIFAR100_N50_M10
 #SBATCH --nodes=1
-#SBATCH --gres=gpu:4
-#SBATCH --cpus-per-gpu=8
-#SBATCH --mem-per-gpu=16G
-#SBATCH --time=14-0
+#SBATCH --gres=gpu:2
+#SBATCH --cpus-per-gpu=4
+#SBATCH --mem-per-gpu=32G
 #SBATCH -o %x_%j.log
 #SBATCH -e %x_%j.err
 
@@ -31,7 +29,7 @@ conda --version
 python --version
 
 # CIL CONFIG
-NOTE="CLIB_iblurry_CIFAR100_N50_M10" # Short description of the experiment. (WARNING: logs/results with the same note will be overwritten!)
+NOTE="CLIB_ViT_iblurry_CIFAR100_N50_M10" # Short description of the experiment. (WARNING: logs/results with the same note will be overwritten!)
 MODE="clib"
 DATASET="cifar100" # cifar10, cifar100, tinyimagenet, imagenet
 N_TASKS=5
@@ -39,7 +37,7 @@ N=50
 M=10
 GPU_TRANSFORM="--gpu_transform"
 USE_AMP="--use_amp"
-SEEDS="1 2 3"
+SEEDS="1 2 3 4 5"
 
 if [ "$DATASET" == "cifar10" ]; then
     MEM_SIZE=500 ONLINE_ITER=1
@@ -47,9 +45,9 @@ if [ "$DATASET" == "cifar10" ]; then
     BATCHSIZE=16; LR=3e-4 OPT_NAME="adam" SCHED_NAME="default" IMP_UPDATE_PERIOD=1
 
 elif [ "$DATASET" == "cifar100" ]; then
-    MEM_SIZE=2000 ONLINE_ITER=3
+    MEM_SIZE=2000 ONLINE_ITER=5
     MODEL_NAME="vit" EVAL_PERIOD=1000
-    BATCHSIZE=64; LR=3e-4 OPT_NAME="adam" SCHED_NAME="default" IMP_UPDATE_PERIOD=1
+    BATCHSIZE=32; LR=3e-4 OPT_NAME="adam" SCHED_NAME="default" IMP_UPDATE_PERIOD=1
 
 elif [ "$DATASET" == "tinyimagenet" ]; then
     MEM_SIZE=4000 ONLINE_ITER=3

@@ -51,18 +51,11 @@ class CLIB(ER):
                                      transform=transforms.Compose([transforms.Resize((self.inp_size,self.inp_size)),transforms.ToTensor()]))
 
     def online_step(self, images, labels, idx):
-        s = time.time()
         self.add_new_class(labels[0])
-        print(time.time() - s)
-        s = time.time()
         self.update_memory(idx, labels[0])
-        print(time.time() - s)
-        s = time.time()
         self.memory_sampler  = MemoryBatchSampler(self.memory, self.memory_batchsize, self.temp_batchsize * self.online_iter * self.world_size)
         self.memory_dataloader   = DataLoader(self.train_dataset, batch_size=self.memory_batchsize, sampler=self.memory_sampler, num_workers=0, pin_memory=True)
         self.memory_provider     = iter(self.memory_dataloader)
-        print(time.time() - s)
-        s = time.time()
        # train with augmented batches
         _loss, _acc, _iter = 0.0, 0.0, 0
         for image, label in zip(images, labels):
@@ -70,11 +63,7 @@ class CLIB(ER):
             _loss += loss
             _acc += acc
             _iter += 1
-            print(time.time() - s)
-            s = time.time()
         self.num_updates -= int(self.num_updates)
-        print(time.time() - s)
-        s = time.time()
         return _loss / _iter, _acc / _iter
 
     def update_memory(self, sample, label):

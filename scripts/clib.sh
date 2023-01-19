@@ -1,12 +1,10 @@
 #!/bin/bash
 
 #SBATCH -J CLIB_iblurry_CIFAR100_N50_M10
-#SBATCH -p batch
 #SBATCH --nodes=1
-#SBATCH --gres=gpu:4
-#SBATCH --cpus-per-gpu=8
-#SBATCH --mem-per-gpu=16G
-#SBATCH --time=14-0
+#SBATCH --gres=gpu:2
+#SBATCH --cpus-per-gpu=4
+#SBATCH --mem-per-gpu=32G
 #SBATCH -o %x_%j.log
 #SBATCH -e %x_%j.err
 
@@ -39,7 +37,7 @@ N=50
 M=10
 GPU_TRANSFORM="--gpu_transform"
 USE_AMP="--use_amp"
-SEEDS="1 2 3"
+SEEDS="1 2 3 4 5"
 
 if [ "$DATASET" == "cifar10" ]; then
     MEM_SIZE=500 ONLINE_ITER=1
@@ -49,7 +47,7 @@ if [ "$DATASET" == "cifar10" ]; then
 elif [ "$DATASET" == "cifar100" ]; then
     MEM_SIZE=2000 ONLINE_ITER=3
     MODEL_NAME="resnet34" EVAL_PERIOD=1000
-    BATCHSIZE=64; LR=3e-4 OPT_NAME="adam" SCHED_NAME="default" IMP_UPDATE_PERIOD=1
+    BATCHSIZE=32; LR=3e-4 OPT_NAME="adam" SCHED_NAME="default" IMP_UPDATE_PERIOD=1
 
 elif [ "$DATASET" == "tinyimagenet" ]; then
     MEM_SIZE=4000 ONLINE_ITER=3
