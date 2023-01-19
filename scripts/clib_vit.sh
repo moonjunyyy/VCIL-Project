@@ -3,7 +3,7 @@
 #SBATCH -J CLIB_ViT_iblurry_CIFAR100_N50_M10
 #SBATCH --nodes=1
 #SBATCH --gres=gpu:2
-#SBATCH --cpus-per-gpu=4
+#SBATCH --cpus-per-gpu=8
 #SBATCH --mem-per-gpu=32G
 #SBATCH -o %x_%j.log
 #SBATCH -e %x_%j.err
@@ -22,7 +22,7 @@ master_addr=$(scontrol show hostnames "$SLURM_JOB_NODELIST" | head -n 1)
 export MASTER_ADDR=$master_addr
 echo "MASTER_ADDR="$MASTER_ADDR
 
-source /data/junyeong/init.sh
+source /data/moonjunyyy/init.sh
 conda activate iblurry
 
 conda --version
@@ -45,7 +45,7 @@ if [ "$DATASET" == "cifar10" ]; then
     BATCHSIZE=16; LR=3e-4 OPT_NAME="adam" SCHED_NAME="default" IMP_UPDATE_PERIOD=1
 
 elif [ "$DATASET" == "cifar100" ]; then
-    MEM_SIZE=2000 ONLINE_ITER=5
+    MEM_SIZE=2000 ONLINE_ITER=3
     MODEL_NAME="vit" EVAL_PERIOD=1000
     BATCHSIZE=32; LR=3e-4 OPT_NAME="adam" SCHED_NAME="default" IMP_UPDATE_PERIOD=1
 
