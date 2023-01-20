@@ -1,10 +1,8 @@
 import logging
 import copy
 
-import numpy as np
 import pandas as pd
 import torch
-import torch.nn as nn
 from torch import optim
 from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
@@ -13,9 +11,8 @@ from torchvision import transforms
 from randaugment.randaugment import RandAugment
 
 from methods.er_baseline import ER
-from utils.data_loader import cutmix_data, ImageDataset
+from utils.data_loader import ImageDataset
 from utils.augment import Cutout, Invert, Solarize, select_autoaugment
-from utils.train_utils import select_model, select_optimizer, select_scheduler
 from utils.memory import MemoryBatchSampler, MemoryOrderedSampler
 logger = logging.getLogger()
 writer = SummaryWriter("tensorboard")
@@ -62,15 +59,15 @@ class RM(ER):
         super(RM,self).add_new_class(class_name)
         self.reset_opt()
 
-    def update_memory(self, sample, label):
+    def update_memory(self, index, label):
         # Update memory
         if self.distributed:
-            sample = torch.cat(self.all_gather(sample.to(self.device)))
-            label  = torch.cat(self.all_gather(label.to(self.device)))
-            sample = sample.cpu()
-            label  = label.cpu()
+            index = torch.cat(self.all_gather(index.to(self.device)))
+            label = torch.cat(self.all_gather(label.to(self.device)))
+            index = index.cpu()
+            label = label.cpu()
         
-        for x, y in zip(sample, label):
+        for x, y in zip(index, label):
             if len(self.memory) >= self.memory_size:
                 label_frequency = copy.deepcopy(self.memory.cls_count)
                 label_frequency[self.exposed_classes.index(y.item())] += 1

@@ -1,26 +1,20 @@
 # When we make a new one, we should inherit the Finetune class.
 import logging
-import copy
 import time
-import datetime
 
 import numpy as np
-import pandas as pd
 import torch
-import torch.nn as nn
 from torch.utils.data import DataLoader
-import torchvision.transforms as transforms
 from torch.utils.tensorboard import SummaryWriter
-from torch import optim
 
-from utils.data_loader import ImageDataset, StreamDataset, MemoryDataset, cutmix_data, get_statistics
-from utils.train_utils import select_model, select_optimizer, select_scheduler
+from utils.data_loader import cutmix_data
+from utils.train_utils import select_scheduler
 
 import torchvision.transforms as transforms
 from methods._trainer import _Trainer
 
 import torch.distributed as dist
-from utils.memory import MemoryBatchSampler, MemoryOrderedSampler
+from utils.memory import MemoryBatchSampler
 
 logger = logging.getLogger()
 writer = SummaryWriter("tensorboard")
@@ -61,13 +55,13 @@ class ER(_Trainer):
         s = time.time()
         return _loss / _iter, _acc / _iter
     
-    def update_memory(self, sample, label):
+    def update_memory(self, index, label):
         # Update memory
         if self.distributed:
-            sample = torch.cat(self.all_gather(sample.to(self.device)))
-            label  = torch.cat(self.all_gather(label.to(self.device)))
-            sample = sample.cpu()
-            label  = label.cpu()
+            index = torch.cat(self.all_gather(index.to(self.device)))
+            label = torch.cat(self.all_gather(label.to(self.device)))
+            index = index.cpu()
+            label = label.cpu()
         idx = []
         if self.is_main_process():
             for lbl in label:
@@ -94,9 +88,9 @@ class ER(_Trainer):
         for i, index in enumerate(idx):
             if len(self.memory) >= self.memory_size:
                 if index < self.memory_size:
-                    self.memory.replace_data([sample[i], label[i].item()], index)
+                    self.memory.replace_data([index[i], label[i].item()], index)
             else:
-                self.memory.replace_data([sample[i], label[i].item()])
+                self.memory.replace_data([index[i], label[i].item()])
 
     def online_before_task(self, task_id):
         pass

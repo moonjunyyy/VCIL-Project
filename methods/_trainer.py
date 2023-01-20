@@ -292,16 +292,15 @@ class _Trainer():
             # self.train_sampler.set_task(task_id)
             # self.current_task_data(self.train_dataloader)
             
-            
-            # self.train_sampler.set_task(task_id)
-            # self.current_task_data(self.train_dataloader)
-            # self.online_before_task(task_id)
-            
             # if task_id ==0:
             #     self.train_data_config(self.n_tasks,self.train_dataset,self.train_sampler)
             # print()
             # self.train_sampler.set_task(task_id)
             # self.current_task_data(self.train_dataloader)
+            
+            self.train_sampler.set_task(task_id)
+            # self.current_task_data(self.train_dataloader)
+            self.online_before_task(task_id)
             
             for i, (images, labels, idx) in enumerate(self.train_dataloader):
                 if self.debug and (i+1)*self.batchsize >= 2000:
@@ -334,7 +333,7 @@ class _Trainer():
             
             test_sampler = OnlineTestSampler(self.test_dataset, self.exposed_classes)
             test_dataloader = DataLoader(self.test_dataset, batch_size=self.batchsize*2, sampler=test_sampler, num_workers=self.n_worker)
-            self.test_data_config(test_dataloader,task_id)
+            # self.test_data_config(test_dataloader,task_id)
             eval_dict = self.online_evaluate(test_dataloader)
             
             if self.distributed:

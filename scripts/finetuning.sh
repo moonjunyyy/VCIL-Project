@@ -1,14 +1,13 @@
 #!/bin/bash
 
 #SBATCH --job-name Finetuning_iblurry_cifar100_N50_M10
-#SBATCH -p batch
-#SBATCH -w vll4
 #SBATCH --nodes=1
-#SBATCH --gres=gpu:2
+#SBATCH --gres=gpu:1
 #SBATCH --cpus-per-gpu=4
-#SBATCH --mem-per-gpu=20G
-#SBATCH --time=4-0
+#SBATCH --mem-per-gpu=48G
+#SBATCH --time=7-0
 #SBATCH -o %x_%j.log
+#SBATCH -e %x_%j.err
 
 
 date
@@ -31,10 +30,9 @@ conda activate iblurry
 
 conda --version
 python --version
-echo "Batch size 32 onlin iter 3"
 # CIL CONFIG
 MODE="Finetuning"
-NOTE="Finetuning_iblurry_cifar100_N50_M10_gpu2" # Short description of the experiment. (WARNING: logs/results with the same note will be overwritten!)
+NOTE="Finetuning_iblurry_cifar100_N50_M10" # Short description of the experiment. (WARNING: logs/results with the same note will be overwritten!)
 
 DATASET="cifar100" # cifar10, cifar100, tinyimagenet, imagenet
 N_TASKS=5
@@ -54,7 +52,7 @@ if [ "$DATASET" == "cifar10" ]; then
 elif [ "$DATASET" == "cifar100" ]; then
     MEM_SIZE=2000 ONLINE_ITER=3
     MODEL_NAME="vit" EVAL_PERIOD=1000
-    BATCHSIZE=32; LR=3e-4 OPT_NAME=$OPT SCHED_NAME="default" MEMORY_EPOCH=256
+    BATCHSIZE=64; LR=3e-4 OPT_NAME=$OPT SCHED_NAME="default" MEMORY_EPOCH=256
 
 elif [ "$DATASET" == "tinyimagenet" ]; then
     MEM_SIZE=4000 ONLINE_ITER=3

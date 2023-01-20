@@ -137,12 +137,12 @@ def select_model(model_name, dataset, num_classes=None):
                             drop_rate=0.,drop_path_rate=0.,drop_block_rate=None,)
     elif model_name == "L2P":
         model = L2P(backbone_name="vit_base_patch16_224", class_num=num_classes)
-    elif model_name == "resnet18":
-        model = timm.create_model('resnet18', num_classes=num_classes)
-    elif model_name == "resnet32":
-        model = timm.create_model('resnet32', num_classes=num_classes)
-    elif model_name == "resnet34":
-        model = timm.create_model('resnet34', num_classes=num_classes)
+    # elif model_name == "resnet18":
+    #     model = timm.create_model('resnet18', num_classes=num_classes)
+    # elif model_name == "resnet32":
+    #     model = timm.create_model('resnet32', num_classes=num_classes)
+    # elif model_name == "resnet34":
+    #     model = timm.create_model('resnet34', num_classes=num_classes)
     else:
         model = model_class(opt)
 

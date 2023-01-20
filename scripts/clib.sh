@@ -5,7 +5,7 @@
 #SBATCH --gres=gpu:1
 #SBATCH --cpus-per-gpu=4
 #SBATCH --mem-per-gpu=32G
-#SBATCH -t 3-0
+#SBATCH -t 7-0
 #SBATCH -o %x_%j.log
 #SBATCH -e %x_%j.err
 

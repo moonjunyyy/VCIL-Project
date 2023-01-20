@@ -1,23 +1,16 @@
 import logging
-import random
 import copy
-import time
 
-import numpy as np
 import torch
-import torch.nn as nn
 import torch.nn.functional as F
-import pandas as pd
 from torch.utils.data import DataLoader
 import torchvision.transforms as transforms
 from torch.utils.tensorboard import SummaryWriter
 from scipy.stats import ttest_ind
 
-import torch.distributed as dist
-
 from methods.er_baseline import ER
-from utils.data_loader import cutmix_data, ImageDataset, StreamDataset, MemoryDataset
 from utils.memory import MemoryBatchSampler, MemoryOrderedSampler
+from utils.memory import Memory
 
 logger = logging.getLogger()
 writer = SummaryWriter("tensorboard")
@@ -49,6 +42,7 @@ class CLIB(ER):
         super(CLIB, self).setup_distributed_dataset()
         self.loss_update_dataset = self.datasets[self.dataset](root=self.data_dir, train=True, download=True,
                                      transform=transforms.Compose([transforms.Resize((self.inp_size,self.inp_size)),transforms.ToTensor()]))
+        self.memory = Memory()
 
     def online_step(self, images, labels, idx):
         self.add_new_class(labels[0])
@@ -56,6 +50,8 @@ class CLIB(ER):
         self.memory_sampler  = MemoryBatchSampler(self.memory, self.memory_batchsize, self.temp_batchsize * self.online_iter * self.world_size)
         self.memory_dataloader   = DataLoader(self.train_dataset, batch_size=self.memory_batchsize, sampler=self.memory_sampler, num_workers=self.n_worker, pin_memory=True)
         self.memory_provider     = iter(self.memory_dataloader)
+        self.loss_update_sampler = MemoryOrderedSampler(self.memory, 512)
+        self.loss_update_dataloader = DataLoader(self.loss_update_dataset, batch_size=512, sampler=self.loss_update_sampler, num_workers=self.n_worker)
         # train with augmented batches
         _loss, _acc, self.iter = 0.0, 0.0, 0
         for image, label in zip(images, labels):
@@ -66,15 +62,15 @@ class CLIB(ER):
         self.num_updates -= int(self.num_updates)
         return _loss / self.iter, _acc / self.iter
 
-    def update_memory(self, sample, label):
+    def update_memory(self, index, label):
         # Update memory
         if self.distributed:
-            sample = torch.cat(self.all_gather(sample.to(self.device)))
-            label  = torch.cat(self.all_gather(label.to(self.device)))
-            sample = sample.cpu()
-            label  = label.cpu()
+            index = torch.cat(self.all_gather(index.to(self.device)))
+            label = torch.cat(self.all_gather(label.to(self.device)))
+            index = index.cpu()
+            label = label.cpu()
         
-        for x, y in zip(sample, label):
+        for x, y in zip(index, label):
             if len(self.memory) >= self.memory_size:
                 label_frequency = copy.deepcopy(self.memory.cls_count)
                 label_frequency[self.exposed_classes.index(y.item())] += 1
@@ -201,9 +197,6 @@ class CLIB(ER):
         self.imp_update_counter += 1
         if self.imp_update_counter % self.imp_update_period == 0:
             if len(self.memory) > 0:
-                if self.iter == 0:
-                    self.loss_update_sampler = MemoryOrderedSampler(self.memory, batchsize*2)
-                    self.loss_update_dataloader = DataLoader(self.loss_update_dataset, batch_size=batchsize*2, sampler=self.loss_update_sampler, num_workers=0, pin_memory=True)
                 self.model.eval()
                 with torch.no_grad():
                     logit = []

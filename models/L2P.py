@@ -178,13 +178,13 @@ class L2P(nn.Module):
     def get_count(self):
         return self.prompt.update()
 
-    def train(self: T, mode: bool = True, **kwargs):
-        ten = super().train(mode)
+    def train(self: T, mode : bool = True, **kwargs):
+        ten = super().train()
         self.backbone.eval()
         return ten
     
-    def eval(self: T, mode: bool = True, **kwargs):
-        ten = super().eval(mode)
+    def eval(self: T, mode : bool = True, **kwargs):
+        ten = super().eval()
         self.backbone.eval()
         return ten
     
