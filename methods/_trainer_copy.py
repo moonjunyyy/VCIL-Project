@@ -307,7 +307,7 @@ class _Trainer():
             self.online_before_task(task_id)
             for i, (images, labels, idx) in enumerate(self.train_dataloader):
                 # if self.debug and (i+1)*self.batchsize >= 2000:
-                if self.debug and (i+1)*self.batchsize >= 150:
+                if self.debug and (i+1)*self.batchsize >= 100:
                     break
                 if samples_cnt > num_eval:
                 # if samples_cnt % args.eval_period == 0:
@@ -387,10 +387,6 @@ class _Trainer():
 
             print(f"======== Summary =======")
             print(f"A_auc {A_auc} | A_avg {A_avg} | A_last {A_last} | F_last {F_last}")
-            for i in range(len(cls_acc)):
-                print(f"Task {i}")
-                print(cls_acc[i])
-            print(f"="*24)
         
     def add_new_class(self, class_name):
         # For DDP, normally go into this function

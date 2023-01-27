@@ -54,9 +54,7 @@ class EWCpp(ER):
                 p.clone().detach().fill_(0).to(self.device)
             )  # zero initialized
 
-    def regularization_loss(
-        self,
-    ):
+    def regularization_loss(self,):
         reg_loss = 0
         if len(self.regularization_terms) > 0:
             # Calculate the reg_loss only when the regularization_terms exists

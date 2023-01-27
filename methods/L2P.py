@@ -76,8 +76,8 @@ class L2P(_Trainer):
         else:
             self.lr_gamma = 0.9999
         
-        self.class_mask = None
-        self.class_mask_dict={}
+        # self.class_mask = None
+        # self.class_mask_dict={}
     
     def online_step(self, images, labels, idx):
         self.add_new_class(labels[0])

@@ -179,12 +179,12 @@ class L2P(nn.Module):
         return self.prompt.update()
 
     def train(self: T, mode: bool = True, **kwargs):
-        ten = super().train(mode)
+        ten = super().train()
         self.backbone.eval()
         return ten
     
     def eval(self: T, mode: bool = True, **kwargs):
-        ten = super().eval(mode)
+        ten = super().eval()
         self.backbone.eval()
         return ten
     

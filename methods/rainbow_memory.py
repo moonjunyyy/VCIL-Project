@@ -1,10 +1,8 @@
 import logging
 import copy
 
-import numpy as np
 import pandas as pd
 import torch
-import torch.nn as nn
 from torch import optim
 from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
@@ -13,9 +11,8 @@ from torchvision import transforms
 from randaugment.randaugment import RandAugment
 
 from methods.er_baseline import ER
-from utils.data_loader import cutmix_data, ImageDataset
+from utils.data_loader import ImageDataset
 from utils.augment import Cutout, Invert, Solarize, select_autoaugment
-from utils.train_utils import select_model, select_optimizer, select_scheduler
 from utils.memory import MemoryBatchSampler, MemoryOrderedSampler
 logger = logging.getLogger()
 writer = SummaryWriter("tensorboard")
@@ -45,9 +42,9 @@ class RM(ER):
     def online_step(self, images, labels, idx):
         # image, label = sample
         self.add_new_class(labels[0])
-        self.memory_sampler  = MemoryBatchSampler(self.memory, self.memory_batchsize, self.temp_batchsize * self.online_iter * self.world_size)
-        self.memory_dataloader   = DataLoader(self.train_dataset, batch_size=self.memory_batchsize, sampler=self.memory_sampler, num_workers=0, pin_memory=True)
-        self.memory_provider     = iter(self.memory_dataloader)
+        # self.memory_sampler  = MemoryBatchSampler(self.memory, self.memory_batchsize, self.temp_batchsize * self.online_iter * self.world_size)
+        # self.memory_dataloader   = DataLoader(self.train_dataset, batch_size=self.memory_batchsize, sampler=self.memory_sampler, num_workers=0, pin_memory=True)
+        # self.memory_provider     = iter(self.memory_dataloader)
         # train with augmented batches
         _loss, _acc, _iter = 0.0, 0.0, 0
         for image, label in zip(images, labels):
@@ -58,35 +55,67 @@ class RM(ER):
         self.update_memory(idx, labels[0])
         return _loss / _iter, _acc / _iter
 
+    def online_train(self, data):
+        self.model.train()
+        total_loss, total_correct, total_num_data = 0.0, 0.0, 0.0
+        x, y = data
+        # if len(self.memory) > 0 and self.memory_batchsize > 0:
+        #     memory_images, memory_labels = next(self.memory_provider)
+        #     x = torch.cat([x, memory_images], dim=0)
+        #     y = torch.cat([y, memory_labels], dim=0)
+        for j in range(len(y)):
+            y[j] = self.exposed_classes.index(y[j].item())
+        # x = torch.cat([self.train_transform(transforms.ToPILImage()(_x)).unsqueeze(0) for _x in x])
+        # x = torch.cat([self.train_transform(_x).unsqueeze(0) for _x in x])
+
+        x = x.to(self.device)
+        y = y.to(self.device)
+
+        self.optimizer.zero_grad()
+        logit, loss = self.model_forward(x,y)
+        _, preds = logit.topk(self.topk, 1, True, True)
+        
+        self.scaler.scale(loss).backward()
+        self.scaler.step(self.optimizer)
+        self.scaler.update()
+        self.update_schedule()
+
+        total_loss += loss.item()
+        total_correct += torch.sum(preds == y.unsqueeze(1)).item()
+        total_num_data += y.size(0)
+
+        return total_loss, total_correct/total_num_data
+    
+    
     def add_new_class(self, class_name):
         super(RM,self).add_new_class(class_name)
-        self.reset_opt()
+        # self.reset_opt()
 
-    def update_memory(self, sample, label):
+    def update_memory(self, index, label):
         # Update memory
         if self.distributed:
-            sample = torch.cat(self.all_gather(sample.to(self.device)))
-            label  = torch.cat(self.all_gather(label.to(self.device)))
-            sample = sample.cpu()
-            label  = label.cpu()
+            index = torch.cat(self.all_gather(index.to(self.device)))
+            label = torch.cat(self.all_gather(label.to(self.device)))
+            index = index.cpu()
+            label = label.cpu()
         
-        for x, y in zip(sample, label):
+        for x, y in zip(index, label):
             if len(self.memory) >= self.memory_size:
                 label_frequency = copy.deepcopy(self.memory.cls_count)
                 label_frequency[self.exposed_classes.index(y.item())] += 1
                 cls_to_replace = torch.argmax(label_frequency)
-                idx_to_replace = cls_to_replace[torch.randint(0, len(cls_to_replace), (1,))]
-                self.memory.replace_data([x,y], idx_to_replace)
+                cand_idx = (self.memory.labels == self.memory.cls_list[cls_to_replace]).nonzero().squeeze()
+                idx_to_replace = cand_idx[torch.randint(0, len(cand_idx), (1,))]
+                self.memory.replace_data([x.float(),y.float()], idx_to_replace)
             else:
                 self.memory.replace_data([x,y])
 
     def online_before_task(self, cur_iter):
-        self.reset_opt()
+        # self.reset_opt()
         self.scheduler = optim.lr_scheduler.LambdaLR(self.optimizer, lambda iter: 1)
 
     def online_after_task(self, cur_iter):
         self.model.train()
-        self.reset_opt()
         # self.optimizer = select_optimizer(self.opt_name,self.lr,self.model)
         # self.scheduler = optim.lr_scheduler.CosineAnnealingWarmRestarts(
         #         self.optimizer, T_0=1, T_mult=2, eta_min=self.lr * 0.01
@@ -106,10 +135,12 @@ class RM(ER):
             self.scheduler = optim.lr_scheduler.CosineAnnealingWarmRestarts(
                 self.optimizer, T_0=1, T_mult=2, eta_min=self.lr * 0.01
             )
+        self.memory_sampler = MemoryOrderedSampler(self.memory, self.batchsize, 1)
+        self.memory_dataloader = DataLoader(self.train_dataset, batch_size=self.batchsize, sampler=self.memory_sampler, num_workers=4, pin_memory=True)
         for epoch in range(n_epoch):
             self.model.train()
-            self.memory_sampler = MemoryOrderedSampler(self.memory, self.batchsize, self.memory_size, len(self.memory) // self.batchsize)
-            self.memory_dataloader = DataLoader(self.loss_update_dataset, batch_size=self.batchsize, sampler=self.memory_sampler, num_workers=4, pin_memory=True)
+            # self.memory_sampler = MemoryOrderedSampler(self.memory, self.batchsize, len(self.memory) // self.batchsize)
+            # self.memory_dataloader = DataLoader(self.train_dataset, batch_size=self.batchsize, sampler=self.memory_sampler, num_workers=4, pin_memory=True)
             
             if epoch <= 0:  # Warm start of 1 epoch
                 for param_group in self.optimizer.param_groups:
@@ -121,40 +152,43 @@ class RM(ER):
                 self.scheduler.step()
             total_loss, correct, num_data = 0.0, 0.0, 0.0
 
-            for i, (image, label) in enumerate(self.memory_dataloader):
+            for n_batches, (image, label) in enumerate(self.memory_dataloader):
 
                 x = image.to(self.device)
                 y = label.to(self.device)
+                for j in range(len(y)):
+                    y[j] = self.exposed_classes.index(y[j].item())
 
                 self.optimizer.zero_grad()
 
                 logit, loss = self.model_forward(x, y)
                 _, preds = logit.topk(self.topk, 1, True, True)
 
-                if self.use_amp:
-                    self.scaler.scale(loss).backward()
-                    self.scaler.unscale_(self.optimizer)
-                    torch.nn.utils.clip_grad_norm_(self.model.parameters(), 10)
-                    self.scaler.step(self.optimizer)
-                    self.scaler.update()
-                else:
-                    loss.backward()
-                    torch.nn.utils.clip_grad_norm_(self.model.parameters(), 10)
-                    self.optimizer.step()
+                self.scaler.scale(loss).backward()
+                # self.scaler.unscale_(self.optimizer)
+                # torch.nn.utils.clip_grad_norm_(self.model.parameters(), 10)
+                self.scaler.step(self.optimizer)
+                self.scaler.update()
+                # if self.use_amp:
+                #     self.scaler.scale(loss).backward()
+                #     self.scaler.unscale_(self.optimizer)
+                #     torch.nn.utils.clip_grad_norm_(self.model.parameters(), 10)
+                #     self.scaler.step(self.optimizer)
+                #     self.scaler.update()
+                # else:
+                #     loss.backward()
+                #     torch.nn.utils.clip_grad_norm_(self.model.parameters(), 10)
+                #     self.optimizer.step()
                 total_loss += loss.item()
                 correct += torch.sum(preds == y.unsqueeze(1)).item()
                 num_data += y.size(0)
                 
-            n_batches = len(DataLoader)
+            # n_batches = len(DataLoader)
             train_loss, train_acc = total_loss / n_batches, correct / num_data
-            logger.info(
-                f"Task {cur_iter} | Epoch {epoch + 1}/{n_epoch} | train_loss {train_loss:.4f} | train_acc {train_acc:.4f} | "
-                f"lr {self.optimizer.param_groups[0]['lr']:.4f}"
-            )
+            print(f"Task {cur_iter} | Epoch {epoch + 1}/{n_epoch} | train_loss {train_loss:.4f} | train_acc {train_acc:.4f} | lr {self.optimizer.param_groups[0]['lr']:.4f}")
 
     def uncertainty_sampling(self, samples, num_class):
         """uncertainty based sampling
-
         Args:
             samples ([list]): [training_list + memory_list]
         """

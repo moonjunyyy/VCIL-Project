@@ -23,7 +23,7 @@ logger = logging.getLogger()
 writer = SummaryWriter("tensorboard")
 
 class CLIB(ER):
-    def __init__(self, *args, **kwargs) -> None:
+    def __init__(self, *args, **kwargs):
         super(CLIB, self).__init__(*args, **kwargs)
         self.loss = torch.empty((0,))
         self.dropped_idx = []
@@ -51,6 +51,9 @@ class CLIB(ER):
                                      transform=transforms.Compose([transforms.Resize((self.inp_size,self.inp_size)),transforms.ToTensor()]))
 
     def online_step(self, images, labels, idx):
+        #* images: data sample
+        #* labels: data ground truth
+        #* idx: index of an image
         s = time.time()
         self.add_new_class(labels[0])
         print(time.time() - s)
@@ -78,6 +81,7 @@ class CLIB(ER):
         return _loss / _iter, _acc / _iter
 
     def update_memory(self, sample, label):
+        #* sample: index of images
         # Update memory
         if self.distributed:
             sample = torch.cat(self.all_gather(sample.to(self.device)))

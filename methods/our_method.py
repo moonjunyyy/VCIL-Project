@@ -19,8 +19,6 @@ from utils.train_utils import select_model, select_optimizer, select_scheduler
 import torchvision.transforms as transforms
 from methods._trainer import _Trainer
 
-import torch.distributed as dist
-from utils.memory import MemoryBatchSampler, MemoryOrderedSampler
 
 logger = logging.getLogger()
 writer = SummaryWriter("tensorboard")
@@ -32,21 +30,14 @@ def cycle(iterable):
         for i in iterable:
             yield i
 
-class ER(_Trainer):
-    def __init__(self, *args, **kwargs) -> None:
-        super(ER, self).__init__(*args, **kwargs)
-
+class Ours(_Trainer):
+    def __init__(self, *args, **kwargs):
+        super(Ours, self).__init__(*args, **kwargs)
+        self.task_id = None
+        self.seq_criterion = nn.CrossEntropyLoss(reduction='none')
+    
     def online_step(self, images, labels, idx):
-        # image, label = sample
-        # s = time.time()
         self.add_new_class(labels[0])
-        # print(time.time() - s)
-        # s = time.time()
-        self.memory_sampler  = MemoryBatchSampler(self.memory, self.memory_batchsize, self.temp_batchsize * self.online_iter * self.world_size)
-        self.memory_dataloader   = DataLoader(self.train_dataset, batch_size=self.memory_batchsize, sampler=self.memory_sampler, num_workers=0, pin_memory=True)
-        self.memory_provider     = iter(self.memory_dataloader)
-        # print(time.time() - s)
-        # s = time.time()
         # train with augmented batches
         _loss, _acc, _iter = 0.0, 0.0, 0
         for image, label in zip(images, labels):
@@ -54,76 +45,36 @@ class ER(_Trainer):
             _loss += loss
             _acc += acc
             _iter += 1
-            # print(time.time() - s)
-            # s = time.time()
-        self.update_memory(idx, labels[0])
-        # print(time.time() - s)
-        # s = time.time()
         return _loss / _iter, _acc / _iter
-    
-    def update_memory(self, sample, label):
-        # Update memory
-        if self.distributed:
-            sample = torch.cat(self.all_gather(sample.to(self.device)))
-            label  = torch.cat(self.all_gather(label.to(self.device)))
-            sample = sample.cpu()
-            label  = label.cpu()
-        idx = []
-        if self.is_main_process():
-            for lbl in label:
-                self.seen += 1
-                if len(self.memory) < self.memory_size:
-                    idx.append(-1)
-                else:
-                    j = torch.randint(0, self.seen, (1,)).item()
-                    if j < self.memory_size:
-                        idx.append(j)
-                    else:
-                        idx.append(self.memory_size)
-        # Distribute idx to all processes
-        if self.distributed:
-            idx = torch.tensor(idx).to(self.device)
-            size = torch.tensor([idx.size(0)]).to(self.device)
-            dist.broadcast(size, 0)
-            if dist.get_rank() != 0:
-                idx = torch.zeros(size.item(), dtype=torch.long).to(self.device)
-            dist.barrier() # wait for all processes to reach this point
-            dist.broadcast(idx, 0)
-            idx = idx.cpu().tolist()
-        # idx = torch.cat(self.all_gather(torch.tensor(idx).to(self.device))).cpu().tolist()
-        for i, index in enumerate(idx):
-            if len(self.memory) >= self.memory_size:
-                if index < self.memory_size:
-                    self.memory.replace_data([sample[i], label[i].item()], index)
-            else:
-                self.memory.replace_data([sample[i], label[i].item()])
 
     def online_before_task(self, task_id):
+        self.task_id = task_id
+        if self.task_id != 0:
+            #* classifier weight 저장!
+            self.prev_wts = self.model.fc.weight.data.clone().detach()
+            # print("[before task]prev_wts",self.prev_wts.shape)
+            
         pass
-
-    def online_after_task(self, task_id):
+    
+    def online_after_task(self,task_id):
+        # self.test_data_config(test_dataloader,task_id)
         pass
     
     def online_train(self, data):
         self.model.train()
         total_loss, total_correct, total_num_data = 0.0, 0.0, 0.0
         x, y = data
-        if len(self.memory) > 0 and self.memory_batchsize > 0:
-            # memory_batchsize = min(self.memory_batchsize, len(self.memory))
-            # memory_images, memory_labels = self.memory.get_batch(memory_batchsize)
-            memory_images, memory_labels = next(self.memory_provider)
-            x = torch.cat([x, memory_images], dim=0)
-            y = torch.cat([y, memory_labels], dim=0)
         for j in range(len(y)):
             y[j] = self.exposed_classes.index(y[j].item())
-        # x = torch.cat([self.train_transform(transforms.ToPILImage()(_x)).unsqueeze(0) for _x in x])
-        # x = torch.cat([self.train_transform(_x).unsqueeze(0) for _x in x])
 
         x = x.to(self.device)
         y = y.to(self.device)
 
         self.optimizer.zero_grad()
-        logit, loss = self.model_forward(x,y)
+        if self.task_id==0:
+            logit, loss = self.model_forward(x,y)
+        else:
+            logit, loss = self.model_seq_forward(x,y)
         _, preds = logit.topk(self.topk, 1, True, True)
         
         self.scaler.scale(loss).backward()
@@ -143,15 +94,92 @@ class ER(_Trainer):
             x, labels_a, labels_b, lam = cutmix_data(x=x, y=y, alpha=1.0)
             with torch.cuda.amp.autocast(enabled=self.use_amp):
                 logit = self.model(x)
-                logit = logit + self.mask
-                loss = lam * self.criterion(logit, labels_a.to(torch.int64)) + (1 - lam) * self.criterion(logit, labels_b.to(torch.int64))
+                logit += self.mask
+                loss = lam * self.criterion(logit, labels_a) + (1 - lam) * self.criterion(logit, labels_b)
         else:
             with torch.cuda.amp.autocast(enabled=self.use_amp):
                 logit = self.model(x)
-                logit = logit + self.mask
-                loss = self.criterion(logit, y.to(torch.int64))
+                logit += self.mask
+                loss = self.criterion(logit, y)
         return logit, loss
-
+    
+    def model_seq_forward(self, x, y):
+        do_cutmix = self.cutmix and np.random.rand(1) < 0.5
+        if do_cutmix:
+            x, labels_a, labels_b, lam = cutmix_data(x=x, y=y, alpha=1.0)
+            with torch.cuda.amp.autocast(enabled=self.use_amp):
+                logit = self.model(x)
+                logit += self.mask
+                
+                uncertain = self._compute_uncertainty(logit,y)
+                cos_dist = self._compute_cosine_dist(y)
+                score = cos_dist - uncertain
+                neg_idx= score<0
+                #* score negative => cos_dist ==0 -> update X 
+                #* Naive Learning
+                score[neg_idx] =1.
+                    
+                #* score normalization using l2_norm
+                score_norm = torch.nn.functional.normalize(score,dim=0)
+                # logit = logit*score_norm
+                loss_a = score_norm * self.seq_criterion(logit, labels_a)
+                loss_b = score_norm * self.seq_criterion(logit, labels_b)
+                loss = lam * loss_a.mean() + (1 - lam) * loss_b.mean()
+        else:
+            with torch.cuda.amp.autocast(enabled=self.use_amp):
+                logit = self.model(x)
+                logit += self.mask
+                
+                uncertain = self._compute_uncertainty(logit,y)
+                cos_dist = self._compute_cosine_dist(y)
+                score = cos_dist - uncertain
+                neg_idx= score<0
+                #* score negative => cos_dist ==0 -> update X 
+                #* Naive Learning
+                score[neg_idx] =1.
+                    
+                #* score normalization using l2_norm
+                score_norm = torch.nn.functional.normalize(score,dim=0)
+                # logit = logit*score_norm
+                
+                loss = score_norm * self.seq_criterion(logit, y)
+                loss = loss.mean()
+        return logit, loss
+    
+    def _compute_uncertainty(self,logit,labels):
+        logit = logit[:,:len(self.exposed_classes)]
+        s_logit = torch.softmax(logit,dim=1)
+        # unc = 1 - s_logit
+        uncertain=[]
+        for idx, label in enumerate(labels):
+            uncertain.append(1.-s_logit[idx,label])
+            
+        return torch.tensor(uncertain).to(self.device)
+    
+    def _compute_cosine_dist(self,label):
+        # self.prev_wts = self.model.fc.weight.data.clone().detach()
+        #? Task 0 학습이후 Task 1 첫 Iter에서는 Parameter 동일!
+        #? Cosine distance 동일한 경우 -> Parameter 변화 X
+        #todo cosine_dist ==0 -> consider only uncertainty
+        #todo Unseen Class의 경우: 동일하게 처리
+        
+        # prev_wts = self.prev_wts[:len(self.exposed_classes)]
+        
+        # cur_wts = self.model.fc.weight.data[:len(self.exposed_classes)].clone().detach()
+        prev_wts = self.prev_wts[label]
+        
+        cur_wts = self.model.fc.weight.data[label].clone().detach()
+        
+        # print("prev_wts",prev_wts.shape)
+        # print("cur_wts",cur_wts.shape)
+        cos_dist = 1- torch.cosine_similarity(prev_wts,cur_wts,dim=1)
+        
+        return cos_dist
+        
+        
+    
+        
+        
     def online_evaluate(self, test_loader):
         total_correct, total_num_data, total_loss = 0.0, 0.0, 0.0
         correct_l = torch.zeros(self.n_classes)

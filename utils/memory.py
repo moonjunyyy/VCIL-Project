@@ -25,6 +25,9 @@ class Memory:
             self.memory = torch.cat([self.memory, torch.tensor([index])])
             self.labels = torch.cat([self.labels, torch.tensor([label])])
             self.cls_count[(self.cls_list == label).nonzero().squeeze()] += 1
+            # print("[Memory-Replace_data:idx is None]")
+            # print(self.cls_list == label)
+            # print(self.cls_count[(self.cls_list == label)])
             if self.cls_count[(self.cls_list == label).nonzero().squeeze()] == 1:
                 self.others_loss_decrease = torch.cat([self.others_loss_decrease, torch.tensor([0])])
             else:
@@ -35,6 +38,9 @@ class Memory:
             self.cls_count[(self.cls_list == _label).nonzero().squeeze()] -= 1
             self.memory[idx] = index
             self.labels[idx] = label
+            # print("[Memory-Replace_data]")
+            # print(self.cls_list == label)
+            # print(self.cls_count[(self.cls_list == label).nonzero().squeeze()])
             self.cls_count[(self.cls_list == label).nonzero().squeeze()] += 1
             if self.cls_count[(self.cls_list == label).nonzero().squeeze()] == 1:
                 self.others_loss_decrease[idx] = torch.mean(self.others_loss_decrease)
@@ -79,6 +85,22 @@ class MemoryBatchSampler(torch.utils.data.Sampler):
         self.indices = torch.cat([torch.randperm(len(self.memory), dtype=torch.int64)[:min(self.batch_size, len(self.memory))] for _ in range(self.iterations)]).tolist()
         for i, idx in enumerate(self.indices):
             self.indices[i] = int(self.memory.memory[idx])
+    
+    def __iter__(self):
+        return iter(self.indices)
+
+    def __len__(self):
+        return len(self.indices)
+    
+
+class BatchSampler(torch.utils.data.Sampler):
+    def __init__(self, samples_idx, batch_size: int, iterations: int = 1) -> None:
+        self.samples_idx = samples_idx
+        self.batch_size = batch_size
+        self.iterations = int(iterations)
+        self.indices = torch.cat([torch.randperm(len(self.samples_idx), dtype=torch.int64)[:min(self.batch_size, len(self.samples_idx))] for _ in range(self.iterations)]).tolist()
+        for i, idx in enumerate(self.indices):
+            self.indices[i] = int(self.samples_idx[idx])
     
     def __iter__(self):
         return iter(self.indices)
