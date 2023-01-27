@@ -1,6 +1,9 @@
 import logging
 import copy
+import time
+import math
 
+import torch.distributed as dist
 import torch
 import torch.nn.functional as F
 from torch.utils.data import DataLoader
@@ -11,6 +14,8 @@ from scipy.stats import ttest_ind
 from methods.er_baseline import ER
 from utils.memory import MemoryBatchSampler, MemoryOrderedSampler
 from utils.memory import Memory
+from datasets import *
+from utils.onlinesampler import OnlineSampler, OnlineTestSampler
 
 logger = logging.getLogger()
 writer = SummaryWriter("tensorboard")
@@ -40,9 +45,17 @@ class CLIB(ER):
 
     def setup_distributed_dataset(self):
         super(CLIB, self).setup_distributed_dataset()
+        # _r = dist.get_rank() if self.distributed else None       # means that it is not distributed
+        # _w = dist.get_world_size() if self.distributed else None # means that it is not distributed
+        # self.train_dataset   = self.datasets[self.dataset](root=self.data_dir, train=True,  download=True, 
+        #                                               transform=self.train_transform)
+        # self.online_iter_dataset = OnlineIterDataset(self.train_dataset, 1)
+        # self.train_sampler   = OnlineSampler(self.online_iter_dataset, self.n_tasks, self.m, self.n, self.rnd_seed, 0, self.rnd_NM, _w, _r)
+        # self.train_dataloader    = DataLoader(self.online_iter_dataset, batch_size=self.temp_batchsize, sampler=self.train_sampler, num_workers=self.n_worker, pin_memory=True)
+        
         self.loss_update_dataset = self.datasets[self.dataset](root=self.data_dir, train=True, download=True,
                                      transform=transforms.Compose([transforms.Resize((self.inp_size,self.inp_size)),transforms.ToTensor()]))
-        self.memory = Memory()
+        self.memory = Memory(data_source=self.loss_update_dataset)
 
     def online_step(self, images, labels, idx):
         self.add_new_class(labels[0])
@@ -50,8 +63,6 @@ class CLIB(ER):
         self.memory_sampler  = MemoryBatchSampler(self.memory, self.memory_batchsize, self.temp_batchsize * self.online_iter * self.world_size)
         self.memory_dataloader   = DataLoader(self.train_dataset, batch_size=self.memory_batchsize, sampler=self.memory_sampler, num_workers=self.n_worker, pin_memory=True)
         self.memory_provider     = iter(self.memory_dataloader)
-        self.loss_update_sampler = MemoryOrderedSampler(self.memory, 512)
-        self.loss_update_dataloader = DataLoader(self.loss_update_dataset, batch_size=512, sampler=self.loss_update_sampler, num_workers=self.n_worker)
         # train with augmented batches
         _loss, _acc, self.iter = 0.0, 0.0, 0
         for image, label in zip(images, labels):
@@ -209,5 +220,27 @@ class CLIB(ER):
                         loss = torch.cat(self.all_gather(loss), dim=-1).flatten()
                     loss = loss.cpu()
                     self.memory.update_loss_history(loss, self.loss, ema_ratio=ema_ratio, dropped_idx=self.memory_dropped_idx)
+                    self.memory_dropped_idx = []
+                self.loss = loss
+
+    def samplewise_loss_update(self, ema_ratio=0.90, batchsize=512):
+        self.imp_update_counter += 1
+        if self.imp_update_counter % self.imp_update_period == 0:
+            if len(self.memory) > 0:
+                self.model.eval()
+                with torch.no_grad():
+                    logit = []
+                    label = []
+                    with torch.cuda.amp.autocast(enabled=self.use_amp):
+                        for i in range(0, math.ceil(len(self.memory) / batchsize)):
+                            logit.append(self.model(torch.cat(self.memory.images[i*batchsize:min((i+1)*batchsize, len(self.memory)):self.world_size]).to(self.device)) + self.mask)
+                            label.append(self.memory.labels[i*batchsize:min((i+1)*batchsize, len(self.memory)):self.world_size].to(self.device))
+                        logits = torch.cat(logit)
+                        labels = torch.cat(label)
+                        loss = F.cross_entropy(logits, labels.to(torch.int64), reduction='none')
+                    if self.distributed:
+                        loss = torch.cat(self.all_gather(loss), dim=-1).flatten()
+                    loss = loss.cpu()
+                    self.memory.update_loss_history(loss, self.loss[i:i+batchsize], ema_ratio=ema_ratio, dropped_idx=self.memory_dropped_idx)
                     self.memory_dropped_idx = []
                 self.loss = loss

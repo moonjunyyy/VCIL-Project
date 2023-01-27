@@ -129,7 +129,7 @@ class _Trainer():
         self.n_classes = n_classes
 
         train_transform = []
-        if self.model_name == 'vit' or self.model_name == 'L2P':
+        if self.model_name == 'vit' or self.model_name == 'L2P' or self.model_name == 'ours':
             inp_size = 224
         self.cutmix = "cutmix" in self.transforms 
         if "cutout" in self.transforms:
@@ -305,6 +305,7 @@ class _Trainer():
             for i, (images, labels, idx) in enumerate(self.train_dataloader):
                 if self.debug and (i+1)*self.batchsize >= 2000:
                     break
+                samples_cnt += images[0].size(0) * self.world_size
                 if samples_cnt > num_eval:
                 # if samples_cnt % args.eval_period == 0:
                 # if True:
@@ -323,7 +324,6 @@ class _Trainer():
                         eval_results["data_cnt"].append(num_eval)
                         self.report_test(num_eval, eval_dict["avg_loss"], eval_dict['avg_acc'])
                     num_eval += self.eval_period
-                samples_cnt += images[0].size(0) * self.world_size
                 loss, acc = self.online_step(images, labels, idx)
                 self.report_training(samples_cnt, loss, acc)
                 
