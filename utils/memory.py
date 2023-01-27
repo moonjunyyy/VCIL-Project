@@ -29,7 +29,7 @@ class Memory:
             image, label = self.data_source.__getitem__(index)
         if idx is None:
             if self.data_source is not None:
-                self.images.append(image)
+                self.images.append(image.unsqueeze(0))
             self.memory = torch.cat([self.memory, torch.tensor([index])])
             self.labels = torch.cat([self.labels, torch.tensor([label])])
             self.cls_count[(self.cls_list == label).nonzero().squeeze()] += 1
@@ -40,7 +40,7 @@ class Memory:
                 self.others_loss_decrease = torch.cat([self.others_loss_decrease, torch.mean(self.others_loss_decrease[indice[:-1]]).unsqueeze(0)])
         else:
             if self.data_source is not None:
-                self.images[idx] = image
+                self.images[idx] = image.unsqueeze(0)
             _label = self.labels[idx]
             self.cls_count[(self.cls_list == _label).nonzero().squeeze()] -= 1
             self.memory[idx] = index

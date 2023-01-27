@@ -74,7 +74,7 @@ class RM(ER):
                 cls_to_replace = torch.argmax(label_frequency)
                 cand_idx = (self.memory.labels == self.memory.cls_list[cls_to_replace]).nonzero().squeeze()
                 idx_to_replace = cand_idx[torch.randint(0, len(cand_idx), (1,))]
-                self.memory.replace_data([x,y], idx_to_replace)
+                self.memory.replace_data([x,y], int(idx_to_replace))
             else:
                 self.memory.replace_data([x,y])
 
@@ -106,7 +106,7 @@ class RM(ER):
             )
         for epoch in range(n_epoch):
             self.model.train()
-            self.memory_sampler = MemoryOrderedSampler(self.memory, self.batchsize, self.memory_size, len(self.memory) // self.batchsize)
+            self.memory_sampler = MemoryOrderedSampler(self.memory, self.batchsize, len(self.memory) // self.batchsize)
             self.memory_dataloader = DataLoader(self.loss_update_dataset, batch_size=self.batchsize, sampler=self.memory_sampler, num_workers=4, pin_memory=True)
             
             if epoch <= 0:  # Warm start of 1 epoch
@@ -143,7 +143,7 @@ class RM(ER):
                 correct += torch.sum(preds == y.unsqueeze(1)).item()
                 num_data += y.size(0)
                 
-            n_batches = len(DataLoader)
+            n_batches = len(self.memory_dataloader)
             train_loss, train_acc = total_loss / n_batches, correct / num_data
             logger.info(
                 f"Task {cur_iter} | Epoch {epoch + 1}/{n_epoch} | train_loss {train_loss:.4f} | train_acc {train_acc:.4f} | "

@@ -40,7 +40,7 @@ N=50
 M=10
 GPU_TRANSFORM="--gpu_transform"
 USE_AMP="--use_amp"
-SEEDS="1 2 3"
+SEEDS="4 5"
 VIT="True"
 OPT="adam"
 
