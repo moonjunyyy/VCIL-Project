@@ -3,7 +3,7 @@
 #SBATCH -J ER_iblurry_cifar100_N50_M10_RND
 #SBATCH -p batch
 #SBATCH --nodes=1
-#SBATCH --gres=gpu:4
+#SBATCH --gres=gpu:1
 #SBATCH --cpus-per-gpu=8
 #SBATCH --mem-per-gpu=32G
 #SBATCH --time=3-0
@@ -24,7 +24,7 @@ master_addr=$(scontrol show hostnames "$SLURM_JOB_NODELIST" | head -n 1)
 export MASTER_ADDR=$master_addr
 echo "MASTER_ADDR="$MASTER_ADDR
 
-source /data/moonjunyyy/init.sh
+source /data/junyeong/init.sh
 conda activate iblurry
 
 conda --version
@@ -40,7 +40,7 @@ N=50
 M=10
 GPU_TRANSFORM="--gpu_transform"
 USE_AMP="--use_amp"
-SEEDS="1 2 3"
+SEEDS="1 2 3 4 5"
 
 
 if [ "$DATASET" == "cifar10" ]; then
