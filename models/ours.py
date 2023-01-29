@@ -37,7 +37,7 @@ class Ours(nn.Module):
     def __init__(self,
                  pool_size      : int   = 10,
                  selection_size : int   = 1,
-                 prompt_len     : int   = 5,
+                 prompt_len     : int   = 20,
                  class_num      : int   = 100,
                  backbone_name  : str   = None,
                  lambd          : float = 0.5,
@@ -73,7 +73,8 @@ class Ours(nn.Module):
         
         self.key     = nn.Parameter(torch.randn(pool_size, self.backbone.embed_dim))
         self.prompts = nn.Parameter(torch.randn(pool_size, self.prompt_len, self.backbone.embed_dim))
-        self.mask    = nn.Parameter(torch.zeros(pool_size, self.class_num))
+        self.mask    = nn.Parameter((torch.zeros(pool_size, self.class_num)))
+        # self.register_buffer('mask', torch.zeros(pool_size, self.class_num, requires_grad=True))
 
         self.register_buffer('simmilarity', torch.zeros(1), persistent=False)
         self.register_buffer('unsimmilarity', torch.zeros(1), persistent=False)
@@ -109,12 +110,21 @@ class Ours(nn.Module):
         x = x.mean(dim=1).squeeze()
         x = self.backbone.fc_norm(x)
         x = self.backbone.fc(x)
-        x = x * F.softmax(mask, dim=1)
+
+        # if self.training:
+        # mask =  F.softmax(mask * 1, dim=1)
+        mask = torch.sigmoid(mask)
+        # mask = mask / mask.max(dim=1, keepdim=True)[0]
+        # x_min = x.min(dim=1, keepdim=True)[0]
+        # x_max = x.max(dim=1, keepdim=True)[0]i/
+        # x = (x - x_min) * mask + x_min
+        # if self.training:
+        x = x * mask
         return x
     
     def loss_fn(self, output, target):
         # B, C = output.size()
-        return F.cross_entropy(output, target) + self.lambd * self.simmilarity
+        return F.cross_entropy(output, target) - self.lambd * self.simmilarity
 
     def convert_train_task(self, task : torch.Tensor, **kwargs):
         self.mask += -torch.inf

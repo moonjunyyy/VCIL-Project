@@ -26,8 +26,37 @@ class Ours(_Trainer):
             _loss += loss
             _acc += acc
             _iter += 1
+        # mask = torch.sigmoid(self.model_without_ddp.mask).tolist()
+        # mask = self.model_without_ddp.mask.tolist()
+        # for m in mask:
+        #     print(m)
+        # m = F.softmax(self.model_without_ddp.mask)
+        # print(m)
         return _loss / _iter, _acc / _iter
     
+    def add_new_class(self, class_name):
+        # For DDP, normally go into this function
+        len_class = len(self.exposed_classes)
+        exposed_classes = []
+        for label in class_name:
+            if label.item() not in self.exposed_classes:
+                self.exposed_classes.append(label.item())
+        if self.distributed:
+            exposed_classes = torch.cat(self.all_gather(torch.tensor(self.exposed_classes, device=self.device))).cpu().tolist()
+            self.exposed_classes = []
+            for cls in exposed_classes:
+                if cls not in self.exposed_classes:
+                    self.exposed_classes.append(cls)
+        self.memory.add_new_class(cls_list=self.exposed_classes)
+        self.mask[:len(self.exposed_classes)] = 0
+        if 'reset' in self.sched_name:
+            self.update_schedule(reset=True)
+        with torch.no_grad():
+            for name, param in self.model_without_ddp.named_parameters():
+                if name == 'mask':
+                    param.data[:len(self.exposed_classes)] = 0
+                    param.data[len(self.exposed_classes):] = -torch.inf
+
     def online_before_task(self, task_id):
         pass
 
