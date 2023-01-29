@@ -7,7 +7,7 @@
 #SBATCH --cpus-per-gpu=4
 #SBATCH --mem-per-gpu=48G
 #SBATCH --time=7-0
-#SBATCH -o %x_%j.out
+#SBATCH -o %x_%j.log
 #SBATCH -e %x_%j.err
 
 date
@@ -51,7 +51,7 @@ if [ "$DATASET" == "cifar10" ]; then
 elif [ "$DATASET" == "cifar100" ]; then
     MEM_SIZE=2000 ONLINE_ITER=3
     MODEL_NAME="ours" EVAL_PERIOD=1000
-    BATCHSIZE=64; LR=3e-2 OPT_NAME="adam" SCHED_NAME="default"
+    BATCHSIZE=16; LR=3e-2 OPT_NAME="adam" SCHED_NAME="default"
 
 elif [ "$DATASET" == "tinyimagenet" ]; then
     MEM_SIZE=4000 ONLINE_ITER=3
