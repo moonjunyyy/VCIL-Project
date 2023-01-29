@@ -1,41 +1,24 @@
-# When we make a new one, we should inherit the Finetune class.
-import logging
-import time
-
-import numpy as np
-import torch
-from torch.utils.data import DataLoader
-from torch.utils.tensorboard import SummaryWriter
-
-from utils.data_loader import cutmix_data
-from utils.train_utils import select_scheduler
-
-import torchvision.transforms as transforms
 from methods._trainer import _Trainer
-
-import torch.distributed as dist
+from methods.er_baseline import ER
+import time
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+from torch.utils.data import DataLoader
 from utils.memory import MemoryBatchSampler
+from utils.data_loader import cutmix_data
+from utils.train_utils import select_optimizer, select_scheduler
+import numpy as np
+import torch.distributed as dist
 
-logger = logging.getLogger()
-writer = SummaryWriter("tensorboard")
+class Ours(_Trainer):
 
-
-def cycle(iterable):
-    # iterate with shuffling
-    while True:
-        for i in iterable:
-            yield i
-
-class ER(_Trainer):
-    def __init__(self, *args, **kwargs) -> None:
-        super(ER, self).__init__(*args, **kwargs)
-
+    def __init__(self, **kwargs):
+        super(Ours, self).__init__(**kwargs)
+    
     def online_step(self, images, labels, idx):
         # image, label = sample
         self.add_new_class(labels[0])
-        self.memory_sampler  = MemoryBatchSampler(self.memory, self.memory_batchsize, self.temp_batchsize * self.online_iter * self.world_size)
-        self.memory_dataloader   = DataLoader(self.train_dataset, batch_size=self.memory_batchsize, sampler=self.memory_sampler, num_workers=0, pin_memory=True)
-        self.memory_provider     = iter(self.memory_dataloader)
         # train with augmented batches
         _loss, _acc, _iter = 0.0, 0.0, 0
         for image, label in zip(images, labels):
@@ -43,46 +26,8 @@ class ER(_Trainer):
             _loss += loss
             _acc += acc
             _iter += 1
-        self.update_memory(idx, labels[0])
         return _loss / _iter, _acc / _iter
     
-    def update_memory(self, sample, label):
-        # Update memory
-        if self.distributed:
-            sample = torch.cat(self.all_gather(sample.to(self.device)))
-            label = torch.cat(self.all_gather(label.to(self.device)))
-            sample = sample.cpu()
-            label = label.cpu()
-        idx = []
-        if self.is_main_process():
-            for lbl in label:
-                self.seen += 1
-                if len(self.memory) < self.memory_size:
-                    idx.append(-1)
-                else:
-                    j = torch.randint(0, self.seen, (1,)).item()
-                    if j < self.memory_size:
-                        idx.append(j)
-                    else:
-                        idx.append(self.memory_size)
-        # Distribute idx to all processes
-        if self.distributed:
-            idx = torch.tensor(idx).to(self.device)
-            size = torch.tensor([idx.size(0)]).to(self.device)
-            dist.broadcast(size, 0)
-            if dist.get_rank() != 0:
-                idx = torch.zeros(size.item(), dtype=torch.long).to(self.device)
-            dist.barrier() # wait for all processes to reach this point
-            dist.broadcast(idx, 0)
-            idx = idx.cpu().tolist()
-        # idx = torch.cat(self.all_gather(torch.tensor(idx).to(self.device))).cpu().tolist()
-        for i, index in enumerate(idx):
-            if len(self.memory) >= self.memory_size:
-                if index < self.memory_size:
-                    self.memory.replace_data([sample[i], label[i].item()], index)
-            else:
-                self.memory.replace_data([sample[i], label[i].item()])
-
     def online_before_task(self, task_id):
         pass
 
@@ -93,12 +38,6 @@ class ER(_Trainer):
         self.model.train()
         total_loss, total_correct, total_num_data = 0.0, 0.0, 0.0
         x, y = data
-        if len(self.memory) > 0 and self.memory_batchsize > 0:
-            # memory_batchsize = min(self.memory_batchsize, len(self.memory))
-            # memory_images, memory_labels = self.memory.get_batch(memory_batchsize)
-            memory_images, memory_labels = next(self.memory_provider)
-            x = torch.cat([x, memory_images], dim=0)
-            y = torch.cat([y, memory_labels], dim=0)
         for j in range(len(y)):
             y[j] = self.exposed_classes.index(y[j].item())
         # x = torch.cat([self.train_transform(transforms.ToPILImage()(_x)).unsqueeze(0) for _x in x])

@@ -33,71 +33,10 @@ def vit_base_patch16_224_l2p(pretrained=False, **kwargs):
     model = _create_vision_transformer('vit_base_patch16_224_l2p', pretrained=pretrained, **model_kwargs)
     return model
 
-class Prompt(nn.Module):
-    def __init__(self,
-                 pool_size            : int,
-                 selection_size       : int,
-                 prompt_len           : int,
-                 dimention            : int,
-                 _diversed_selection  : bool = False,
-                 _batchwise_selection : bool = False,
-                 **kwargs):
-        super().__init__()
-
-        self.pool_size      = pool_size
-        self.selection_size = selection_size
-        self.prompt_len     = prompt_len
-        self.dimention      = dimention
-        self._diversed_selection  = _diversed_selection
-        self._batchwise_selection = _batchwise_selection
-
-        self.key     = nn.Parameter(torch.randn(pool_size, dimention, requires_grad= True))
-        self.prompts = nn.Parameter(torch.randn(pool_size, prompt_len, dimention, requires_grad= True))
-        
-        torch.nn.init.uniform_(self.key,     -1, 1)
-        torch.nn.init.uniform_(self.prompts, -1, 1)
-
-        self.register_buffer('frequency', torch.ones (pool_size))
-        self.register_buffer('counter',   torch.zeros(pool_size))
-    
-    def forward(self, query : torch.Tensor, **kwargs):
-
-        B, D = query.shape
-        assert D == self.dimention, f'Query dimention {D} does not match prompt dimention {self.dimention}'
-        # Select prompts
-        match = 1 - F.cosine_similarity(query.unsqueeze(1), self.key, dim=-1)
-        if self.training and self._diversed_selection:
-            topk = match * F.normalize(self.frequency, p=1, dim=-1)
-        else:
-            topk = match
-        _ ,topk = topk.topk(self.selection_size, dim=-1, largest=False, sorted=True)
-        # Batch-wise prompt selection
-        if self._batchwise_selection:
-            idx, counts = topk.unique(sorted=True, return_counts=True)
-            _,  mosts  = counts.topk(self.selection_size, largest=True, sorted=True)
-            topk = idx[mosts].clone().expand(B, -1)
-        # Frequency counter
-        self.counter += torch.bincount(topk.reshape(-1).clone(), minlength = self.pool_size)
-        # selected prompts
-        selection = self.prompts.repeat(B, 1, 1, 1).gather(1, topk.unsqueeze(-1).unsqueeze(-1).expand(-1, -1, self.prompt_len, self.dimention).clone())
-        simmilarity = match.gather(1, topk)
-        # get unsimilar prompts also 
-        return simmilarity, selection
-
-    def update(self):
-        if self.training:
-            self.frequency += self.counter
-        counter = self.counter.clone()
-        self.counter *= 0
-        if self.training:
-            return self.frequency - 1
-        else:
-            return counter
-
-class L2P(nn.Module):
+class Ours(nn.Module):
     def __init__(self,
                  pool_size      : int   = 10,
-                 selection_size : int   = 5,
+                 selection_size : int   = 1,
                  prompt_len     : int   = 5,
                  class_num      : int   = 100,
                  backbone_name  : str   = None,
@@ -132,18 +71,15 @@ class L2P(nn.Module):
 
         # self.fc = self.backbone.fc
         
-        self.prompt = Prompt(
-            pool_size,
-            selection_size,
-            prompt_len,
-            self.backbone.num_features,
-            _diversed_selection  = _diversed_selection,
-            _batchwise_selection = _batchwise_selection)
+        self.key     = nn.Parameter(torch.randn(pool_size, self.backbone.embed_dim))
+        self.prompts = nn.Parameter(torch.randn(pool_size, self.prompt_len, self.backbone.embed_dim))
+        self.mask    = nn.Parameter(torch.zeros(pool_size, self.class_num))
 
         self.register_buffer('simmilarity', torch.zeros(1), persistent=False)
         self.register_buffer('unsimmilarity', torch.zeros(1), persistent=False)
     
     def forward(self, inputs : torch.Tensor, **kwargs) -> torch.Tensor:
+
         x = self.backbone.patch_embed(inputs)
         B, N, D = x.size()
         cls_token = self.backbone.cls_token.expand(B, -1, -1)
@@ -152,22 +88,32 @@ class L2P(nn.Module):
             x = self.backbone.pos_drop(token_appended + self.backbone.pos_embed)
             query = self.backbone.blocks(x)
             query = self.backbone.norm(query)[:, 0].clone()
-        simmilarity, prompts = self.prompt(query)
-        simmilarity = simmilarity.mean()
+
+        simmilarity = F.cosine_similarity(query.unsqueeze(1), self.key, dim=-1)
+        topk = simmilarity.topk(self.selection_size, dim=1)[1]
+        simmilarity = simmilarity.gather(1, topk)
+        prompts = self.prompts[topk]
+        mask = self.mask[topk].squeeze()
+
+        self.simmilarity = simmilarity.mean()
+        self.unsimmilarity = (1 - simmilarity).mean()
+
         prompts = prompts.contiguous().view(B, self.selection_size * self.prompt_len, D)
         prompts = prompts + self.backbone.pos_embed[:,0].clone().expand(self.selection_size * self.prompt_len, -1)
+        
         x = self.backbone.pos_drop(token_appended + self.backbone.pos_embed)
         x = torch.cat((x[:,0].unsqueeze(1), prompts, x[:,1:]), dim=1)
         x = self.backbone.blocks(x)
         x = self.backbone.norm(x)
         x = x[:, 1:self.selection_size * self.prompt_len + 1].clone()
-        x = x.mean(dim=1)
+        x = x.mean(dim=1).squeeze()
         x = self.backbone.fc_norm(x)
         x = self.backbone.fc(x)
+        x = x * F.softmax(mask, dim=1)
         return x
     
     def loss_fn(self, output, target):
-        B, C = output.size()
+        # B, C = output.size()
         return F.cross_entropy(output, target) + self.lambd * self.simmilarity
 
     def convert_train_task(self, task : torch.Tensor, **kwargs):

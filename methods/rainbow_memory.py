@@ -1,10 +1,8 @@
 import logging
 import copy
 
-import numpy as np
 import pandas as pd
 import torch
-import torch.nn as nn
 from torch import optim
 from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
@@ -13,9 +11,8 @@ from torchvision import transforms
 from randaugment.randaugment import RandAugment
 
 from methods.er_baseline import ER
-from utils.data_loader import cutmix_data, ImageDataset
+from utils.data_loader import ImageDataset
 from utils.augment import Cutout, Invert, Solarize, select_autoaugment
-from utils.train_utils import select_model, select_optimizer, select_scheduler
 from utils.memory import MemoryBatchSampler, MemoryOrderedSampler
 logger = logging.getLogger()
 writer = SummaryWriter("tensorboard")
@@ -62,22 +59,22 @@ class RM(ER):
         super(RM,self).add_new_class(class_name)
         self.reset_opt()
 
-    def update_memory(self, sample, label):
+    def update_memory(self, index, label):
         # Update memory
         if self.distributed:
-            sample = torch.cat(self.all_gather(sample.to(self.device)))
-            label  = torch.cat(self.all_gather(label.to(self.device)))
-            sample = sample.cpu()
-            label  = label.cpu()
+            index = torch.cat(self.all_gather(index.to(self.device)))
+            label = torch.cat(self.all_gather(label.to(self.device)))
+            index = index.cpu()
+            label = label.cpu()
         
-        for x, y in zip(sample, label):
+        for x, y in zip(index, label):
             if len(self.memory) >= self.memory_size:
                 label_frequency = copy.deepcopy(self.memory.cls_count)
                 label_frequency[self.exposed_classes.index(y.item())] += 1
                 cls_to_replace = torch.argmax(label_frequency)
                 cand_idx = (self.memory.labels == self.memory.cls_list[cls_to_replace]).nonzero().squeeze()
                 idx_to_replace = cand_idx[torch.randint(0, len(cand_idx), (1,))]
-                self.memory.replace_data([x,y], idx_to_replace)
+                self.memory.replace_data([x,y], int(idx_to_replace))
             else:
                 self.memory.replace_data([x,y])
 
@@ -109,7 +106,7 @@ class RM(ER):
             )
         for epoch in range(n_epoch):
             self.model.train()
-            self.memory_sampler = MemoryOrderedSampler(self.memory, self.batchsize, self.memory_size, len(self.memory) // self.batchsize)
+            self.memory_sampler = MemoryOrderedSampler(self.memory, self.batchsize, len(self.memory) // self.batchsize)
             self.memory_dataloader = DataLoader(self.loss_update_dataset, batch_size=self.batchsize, sampler=self.memory_sampler, num_workers=4, pin_memory=True)
             
             if epoch <= 0:  # Warm start of 1 epoch
@@ -146,7 +143,7 @@ class RM(ER):
                 correct += torch.sum(preds == y.unsqueeze(1)).item()
                 num_data += y.size(0)
                 
-            n_batches = len(DataLoader)
+            n_batches = len(self.memory_dataloader)
             train_loss, train_acc = total_loss / n_batches, correct / num_data
             logger.info(
                 f"Task {cur_iter} | Epoch {epoch + 1}/{n_epoch} | train_loss {train_loss:.4f} | train_acc {train_acc:.4f} | "

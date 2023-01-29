@@ -4,7 +4,12 @@ import numpy as np
 from typing import Optional, Sized
 
 class Memory:
-    def __init__(self) -> None:
+    def __init__(self, data_source=None) -> None:
+        
+        self.data_source = data_source
+        if self.data_source is not None:
+            self.images = []
+
         self.memory = torch.empty(0)
         self.labels = torch.empty(0)
         self.cls_list = torch.empty(0)
@@ -20,8 +25,11 @@ class Memory:
 
     def replace_data(self, data, idx=None):
         index, label = data
-        # image, label = self.data_source.__getitem__(index)
+        if self.data_source is not None:
+            image, label = self.data_source.__getitem__(index)
         if idx is None:
+            if self.data_source is not None:
+                self.images.append(image.unsqueeze(0))
             self.memory = torch.cat([self.memory, torch.tensor([index])])
             self.labels = torch.cat([self.labels, torch.tensor([label])])
             self.cls_count[(self.cls_list == label).nonzero().squeeze()] += 1
@@ -31,6 +39,8 @@ class Memory:
                 indice = (self.labels == label).nonzero().squeeze()
                 self.others_loss_decrease = torch.cat([self.others_loss_decrease, torch.mean(self.others_loss_decrease[indice[:-1]]).unsqueeze(0)])
         else:
+            if self.data_source is not None:
+                self.images[idx] = image.unsqueeze(0)
             _label = self.labels[idx]
             self.cls_count[(self.cls_list == _label).nonzero().squeeze()] -= 1
             self.memory[idx] = index

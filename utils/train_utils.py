@@ -9,6 +9,7 @@ from timm.models.vision_transformer import _cfg, _create_vision_transformer, def
 from timm.models import create_model
 from models.vit import _create_vision_transformer
 from models.L2P import L2P
+from models.ours import Ours
 
 default_cfgs['vit_base_patch16_224'] = _cfg(
         url='https://storage.googleapis.com/vit_models/imagenet21k/ViT-B_16.npz',
@@ -126,6 +127,8 @@ def select_model(model_name, dataset, num_classes=None):
         opt["depth"] = 12
     elif model_name == "L2P":
         opt["depth"] = 12
+    elif model_name == "ours":
+        opt["depth"] = 12
     else:
         raise NotImplementedError(
             "Please choose the model name in [resnet18, resnet32, resnet34]"
@@ -137,12 +140,14 @@ def select_model(model_name, dataset, num_classes=None):
                             drop_rate=0.,drop_path_rate=0.,drop_block_rate=None,)
     elif model_name == "L2P":
         model = L2P(backbone_name="vit_base_patch16_224", class_num=num_classes)
-    elif model_name == "resnet18":
-        model = timm.create_model('resnet18', num_classes=num_classes)
-    elif model_name == "resnet32":
-        model = timm.create_model('resnet32', num_classes=num_classes)
-    elif model_name == "resnet34":
-        model = timm.create_model('resnet34', num_classes=num_classes)
+    elif model_name == "ours":
+        model = Ours(backbone_name="vit_base_patch16_224", class_num=num_classes)
+    # elif model_name == "resnet18":
+    #     model = timm.create_model('resnet18', num_classes=num_classes)
+    # elif model_name == "resnet32":
+    #     model = timm.create_model('resnet32', num_classes=num_classes)
+    # elif model_name == "resnet34":
+    #     model = timm.create_model('resnet34', num_classes=num_classes)
     else:
         model = model_class(opt)
 

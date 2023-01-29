@@ -17,6 +17,7 @@ from methods.er_baseline import ER
 from utils.data_loader import cutmix_data, ImageDataset, StreamDataset
 from utils.train_utils import cycle
 
+from utils.memory import MemoryBatchSampler
 logger = logging.getLogger()
 writer = SummaryWriter("tensorboard")
 
@@ -24,20 +25,23 @@ writer = SummaryWriter("tensorboard")
 class EWCpp(ER):
 
     def __init__(
-        self, criterion, device, train_transform, test_transform, n_classes, **kwargs
+        self, **kwargs
     ):
         super().__init__(
-            criterion, device, train_transform, test_transform, n_classes, **kwargs
+         **kwargs
         )
+        self.reg_coef = kwargs["reg_coef"]
+        self.online_reg = True
 
+    def setup_distributed_model(self):
+        super().setup_distributed_model()
+        
         # except for last layers.
         self.params = {
             n: p for n, p in list(self.model.named_parameters())[:-2] if p.requires_grad
         }  # For convenience
         self.regularization_terms = {}
         self.task_count = 0
-        self.reg_coef = kwargs["reg_coef"]
-        self.online_reg = True
 
         self.score = []
         self.fisher = []
@@ -53,7 +57,7 @@ class EWCpp(ER):
             self.epoch_fisher[n] = (
                 p.clone().detach().fill_(0).to(self.device)
             )  # zero initialized
-
+    
     def regularization_loss(
         self,
     ):
@@ -84,68 +88,60 @@ class EWCpp(ER):
 
         return reg_loss
 
-    def online_train(self, sample, batch_size, n_worker, iterations=1, stream_batch_size=1):
+    def online_train(self, data):
         self.model.train()
-        total_loss, correct, num_data = 0.0, 0.0, 0.0
-        if stream_batch_size > 0:
-            sample_dataset = StreamDataset(sample, dataset=self.dataset, transform=self.train_transform,
-                                           cls_list=self.exposed_classes, data_dir=self.data_dir, device=self.device,
-                                           transform_on_gpu=self.gpu_transform)
-        if len(self.memory) > 0 and batch_size - stream_batch_size > 0:
-            memory_batch_size = min(len(self.memory), batch_size - stream_batch_size)
+        total_loss, total_correct, total_num_data = 0.0, 0.0, 0.0
+        x, y = data
+        if len(self.memory) > 0 and self.memory_batchsize > 0:
+            memory_images, memory_labels = next(self.memory_provider)
+            x = torch.cat([x, memory_images], dim=0)
+            y = torch.cat([y, memory_labels], dim=0)
+        for j in range(len(y)):
+            y[j] = self.exposed_classes.index(y[j].item())
 
-        for i in range(iterations):
-            self.model.train()
-            x = []
-            y = []
-            if stream_batch_size > 0:
-                stream_data = sample_dataset.get_data()
-                x.append(stream_data['image'])
-                y.append(stream_data['label'])
-            if len(self.memory) > 0 and batch_size - stream_batch_size > 0:
-                memory_data = self.memory.get_batch(memory_batch_size)
-                x.append(memory_data['image'])
-                y.append(memory_data['label'])
-            x = torch.cat(x)
-            y = torch.cat(y)
+        x = x.to(self.device)
+        y = y.to(self.device)
 
-            x = x.to(self.device)
-            y = y.to(self.device)
+        self.optimizer.zero_grad()
+        logit, loss = self.model_forward(x,y)
+        _, preds = logit.topk(self.topk, 1, True, True)
+        
+        self.scaler.scale(loss).backward()
+        self.scaler.step(self.optimizer)
+        self.scaler.update()
+    
+        old_params = {n: p.clone().detach() for n, p in self.params.items()}
+        old_grads = {n: p.grad.clone().detach() for n, p in self.params.items() if p.grad is not None}
 
-            self.optimizer.zero_grad()
+        logit, loss = self.model_forward(x, y)
+        _, preds = logit.topk(self.topk, 1, True, True)
 
-            old_params = {n: p.clone().detach() for n, p in self.params.items()}
-            old_grads = {n: p.grad.clone().detach() for n, p in self.params.items() if p.grad is not None}
-
-            logit, loss = self.model_forward(x, y)
-            _, preds = logit.topk(self.topk, 1, True, True)
-
-            if self.use_amp:
-                with torch.cuda.amp.autocast():
-                    reg_loss = self.regularization_loss()
-                    loss += reg_loss
-            else:
+        if self.use_amp:
+            with torch.cuda.amp.autocast():
                 reg_loss = self.regularization_loss()
                 loss += reg_loss
-            if self.use_amp:
-                self.scaler.scale(loss).backward()
-                self.scaler.step(self.optimizer)
-                self.scaler.update()
-            else:
-                loss.backward()
-                self.optimizer.step()
-            self.update_schedule()
-            new_params = {n: p.clone().detach() for n, p in self.params.items()}
-            new_grads = {
-                n: p.grad.clone().detach() for n, p in self.params.items() if p.grad is not None
-            }
-            self.update_fisher_and_score(new_params, old_params, new_grads, old_grads)
-            _, preds = logit.topk(self.topk, 1, True, True)
-            total_loss += loss.item()
-            correct += torch.sum(preds == y.unsqueeze(1)).item()
-            num_data += y.size(0)
+        else:
+            reg_loss = self.regularization_loss()
+            loss += reg_loss
+        if self.use_amp:
+            self.scaler.scale(loss).backward()
+            self.scaler.step(self.optimizer)
+            self.scaler.update()
+        else:
+            loss.backward()
+            self.optimizer.step()
+        self.update_schedule()
+        new_params = {n: p.clone().detach() for n, p in self.params.items()}
+        new_grads = {
+            n: p.grad.clone().detach() for n, p in self.params.items() if p.grad is not None
+        }
+        self.update_fisher_and_score(new_params, old_params, new_grads, old_grads)
+        _, preds = logit.topk(self.topk, 1, True, True)
+        total_loss += loss.item()
+        total_correct += torch.sum(preds == y.unsqueeze(1)).item()
+        total_num_data += y.size(0)
 
-        return total_loss / iterations, correct / num_data
+        return total_loss, total_correct / total_num_data
 
     def online_after_task(self, cur_iter):
         # 2.Backup the weight of current task
