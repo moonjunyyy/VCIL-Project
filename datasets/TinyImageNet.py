@@ -1,7 +1,13 @@
 from typing import Callable, Optional
+import os
 
 from torchvision.datasets import ImageFolder
+from torchvision.datasets.utils import download_url
 import torchvision.transforms as transforms
+
+# TinyImageNet dataset class
+# Download code from https://github.com/JH-LEE-KR/ContinualDatasets/blob/main/continual_datasets/continual_datasets.py
+# by JH-LEE-KR
 
 class TinyImageNet(ImageFolder):
     def __init__(self, 
@@ -11,8 +17,26 @@ class TinyImageNet(ImageFolder):
                  target_transform : Optional[Callable] = None, 
                  download         : bool = False
                  ) -> None:
-        self.path = root + '/tiny-imagenet-200/'
+        
+        self.root = os.path.expanduser(root)
+        self.url = 'http://cs231n.stanford.edu/tiny-imagenet-200.zip'
+        self.filename = 'tiny-imagenet-200.zip'
 
+        fpath = os.path.join(self.root, self.filename)
+        if not os.path.isfile(fpath):
+            if not download:
+               raise RuntimeError('Dataset not found. You can use download=True to download it')
+            else:
+                print('Downloading from '+ self.url)
+                download_url(self.url, self.root, filename=self.filename)
+        if not os.path.exists(os.path.join(self.root, 'tiny-imagenet-200')):
+            import zipfile
+            zip_ref = zipfile.ZipFile(fpath, 'r')
+            zip_ref.extractall(os.path.join(self.root))
+            zip_ref.close()
+            self.split()
+
+        self.path = self.root + '/tiny-imagenet-200/'
         if train:
             super().__init__(self.path + "train", transform=transforms.ToTensor() if transform is None else transform, target_transform=target_transform)
             self.classes = []

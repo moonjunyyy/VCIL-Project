@@ -9,6 +9,7 @@ from timm.models.vision_transformer import _cfg, _create_vision_transformer, def
 from timm.models import create_model
 from models.vit import _create_vision_transformer
 from models.L2P import L2P
+from models.dualprompt import DualPrompt
 from models.ours import Ours
 
 default_cfgs['vit_base_patch16_224'] = _cfg(
@@ -127,6 +128,8 @@ def select_model(model_name, dataset, num_classes=None):
         opt["depth"] = 12
     elif model_name == "L2P":
         opt["depth"] = 12
+    elif model_name == "DualPrompt":
+        opt["depth"] = 12
     elif model_name == "ours":
         opt["depth"] = 12
     else:
@@ -140,6 +143,8 @@ def select_model(model_name, dataset, num_classes=None):
                             drop_rate=0.,drop_path_rate=0.,drop_block_rate=None,)
     elif model_name == "L2P":
         model = L2P(backbone_name="vit_base_patch16_224", class_num=num_classes)
+    elif model_name == "DualPrompt":
+        model = DualPrompt(backbone_name="vit_base_patch16_224", class_num=num_classes)
     elif model_name == "ours":
         model = Ours(backbone_name="vit_base_patch16_224", class_num=num_classes)
     # elif model_name == "resnet18":
