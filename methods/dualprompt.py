@@ -70,7 +70,7 @@ def vit_base_patch16_224(pretrained=False, **kwargs):
 
 class DualPrompt(_Trainer):
     def __init__(self, *args, **kwargs):
-        super(L2P, self).__init__(*args, **kwargs)
+        super(DualPrompt, self).__init__(*args, **kwargs)
         
         if 'imagenet' in self.dataset:
             self.lr_gamma = 0.99995

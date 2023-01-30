@@ -5,7 +5,6 @@ import torch.nn as nn
 import torch.nn.functional as F
 import logging
 from torch.utils.tensorboard import SummaryWriter
-
 import timm
 from timm.models.registry import register_model
 from timm.models.vision_transformer import _cfg, default_cfgs
