@@ -1,4 +1,4 @@
-from typing import TypeVar
+from typing import TypeVar, Iterable
 import timm
 import torch
 import torch.nn as nn
@@ -35,28 +35,23 @@ def vit_base_patch16_224_l2p(pretrained=False, **kwargs):
 
 class Ours(nn.Module):
     def __init__(self,
-                 pool_size      : int   = 10,
-                 selection_size : int   = 1,
-                 prompt_len     : int   = 20,
+                 pos_g_prompt   : Iterable[int] = (0, 1),
+                 len_g_prompt   : int   = 5,
+                 pos_e_prompt   : Iterable[int] = (2, 3, 4),
+                 len_e_prompt   : int   = 20,
+                 prompt_func    : str   = None,
+                 task_num       : int   = 10,
                  class_num      : int   = 100,
+                 lambd          : float = 1.0,
                  backbone_name  : str   = None,
-                 lambd          : float = 0.5,
-                 _batchwise_selection  : bool = False,
-                 _diversed_selection   : bool = True,
                  **kwargs):
 
         super().__init__()
         
         if backbone_name is None:
             raise ValueError('backbone_name must be specified')
-        if pool_size < selection_size:
-            raise ValueError('pool_size must be larger than selection_size')
-
-        self.prompt_len     = prompt_len
-        self.selection_size = selection_size
-        self.lambd          = lambd
-        self._batchwise_selection = _batchwise_selection
-        self.class_num            = class_num
+        self.lambd       = lambd
+        self.class_num   = class_num
 
         # model_kwargs = dict(
         # patch_size=16, embed_dim=768, depth=12, num_heads=12, **kwargs)
@@ -71,14 +66,113 @@ class Ours(nn.Module):
 
         # self.fc = self.backbone.fc
         
-        self.key     = nn.Parameter(torch.randn(pool_size, self.backbone.embed_dim))
-        self.prompts = nn.Parameter(torch.randn(pool_size, self.prompt_len, self.backbone.embed_dim))
-        self.mask    = nn.Parameter((torch.zeros(pool_size, self.class_num)))
+        # self.key     = nn.Parameter(torch.randn(pool_size, self.backbone.embed_dim))
+        # self.prompts = nn.Parameter(torch.randn(pool_size, self.prompt_len, self.backbone.embed_dim))
+        # self.mask    = nn.Parameter((torch.zeros(pool_size, self.class_num)))
+
+        self.register_buffer('pos_g_prompt', torch.tensor(pos_g_prompt, dtype=torch.int64))
+        self.register_buffer('pos_e_prompt', torch.tensor(pos_e_prompt, dtype=torch.int64))
+        self.register_buffer('similarity', torch.zeros(1))
+        self.register_buffer('mask', torch.zeros(class_num))
+        
+        self.len_g_prompt = len_g_prompt
+        self.len_e_prompt = len_e_prompt
+        self.g_length = len(pos_g_prompt) if pos_g_prompt else 0
+        self.e_length = len(pos_e_prompt) if pos_e_prompt else 0
+        g_pool = 1
+        e_pool = task_num
+
+        self.key     = nn.Parameter(torch.randn(e_pool, self.backbone.embed_dim))
+        self.mask    = nn.Parameter((torch.zeros(e_pool, self.class_num)))
+
+        if prompt_func == 'prompt_tuning':
+            self.prompt_func = self.prompt_tuning
+            self.g_prompts = nn.Parameter(torch.randn(g_pool, 1 * self.g_length * self.len_g_prompt, self.backbone.embed_dim))
+            self.e_prompts = nn.Parameter(torch.randn(e_pool, 1 * self.e_length * self.len_e_prompt, self.backbone.embed_dim))
+
+        elif prompt_func == 'prefix_tuning':
+            self.prompt_func = self.prefix_tuning
+            self.g_prompts = nn.Parameter(torch.randn(g_pool, 2 * self.g_length * self.len_g_prompt, self.backbone.embed_dim))
+            self.e_prompts = nn.Parameter(torch.randn(e_pool, 2 * self.e_length * self.len_e_prompt, self.backbone.embed_dim))
         # self.register_buffer('mask', torch.zeros(pool_size, self.class_num, requires_grad=True))
 
         self.register_buffer('simmilarity', torch.zeros(1), persistent=False)
-        self.register_buffer('unsimmilarity', torch.zeros(1), persistent=False)
+        # self.register_buffer('unsimmilarity', torch.zeros(1), persistent=False)
     
+    
+    def prompt_tuning(self,
+                      x        : torch.Tensor,
+                      g_prompt : torch.Tensor,
+                      e_prompt : torch.Tensor,
+                      **kwargs):
+
+        B, N, C = x.size()
+        g_prompt = g_prompt.contiguous().view(B, self.g_length, self.len_g_prompt, C)
+        e_prompt = e_prompt.contiguous().view(B, self.e_length, self.len_e_prompt, C)
+        g_prompt = g_prompt + self.backbone.pos_embed[:,:1,:].unsqueeze(1).expand(B, self.g_length, self.len_g_prompt, C)
+        e_prompt = e_prompt + self.backbone.pos_embed[:,:1,:].unsqueeze(1).expand(B, self.e_length, self.len_e_prompt, C)
+
+        for n, block in enumerate(self.backbone.blocks):
+            pos_g = ((self.pos_g_prompt.eq(n)).nonzero()).squeeze()
+            if pos_g.numel() != 0:
+                x = torch.cat((x, g_prompt[:, pos_g].unsqueeze(0).expand(B,-1,-1)), dim = 1)
+
+            pos_e = ((self.pos_e_prompt.eq(n)).nonzero()).squeeze()
+            if pos_e.numel() != 0:
+                x = torch.cat((x, e_prompt[:, pos_e].unsqueeze(0).expand(B,-1,-1)), dim = 1)
+            x = block(x)
+        return x
+    
+    def prefix_tuning(self,
+                      x        : torch.Tensor,
+                      g_prompt : torch.Tensor,
+                      e_prompt : torch.Tensor,
+                      **kwargs):
+
+        B, N, C = x.size()
+        g_prompt = g_prompt.contiguous().view(B, 2 * self.g_length, self.len_g_prompt, C)
+        e_prompt = e_prompt.contiguous().view(B, 2 * self.e_length, self.len_e_prompt, C)
+
+        for n, block in enumerate(self.backbone.blocks):
+
+            xq = block.norm1(x)
+            xk = xq.clone()
+            xv = xq.clone()
+
+            pos_g = ((self.pos_g_prompt.eq(n)).nonzero()).squeeze()
+            if pos_g.numel() != 0:
+                xk = torch.cat((xk, g_prompt[:, pos_g * 2 + 0]), dim = 1)
+                xv = torch.cat((xv, g_prompt[:, pos_g * 2 + 1]), dim = 1)
+
+            pos_e = ((self.pos_e_prompt.eq(n)).nonzero()).squeeze()
+            if pos_e.numel() != 0:
+                xk = torch.cat((xk, e_prompt[:, pos_e * 2 + 0]), dim = 1)
+                xv = torch.cat((xv, e_prompt[:, pos_e * 2 + 1]), dim = 1)
+            
+            attn   = block.attn
+            weight = attn.qkv.weight
+            bias   = attn.qkv.bias
+            
+            B, N, C = xq.shape
+            xq = F.linear(xq, weight[:C   ,:], bias[:C   ]).reshape(B,  N, attn.num_heads, C // attn.num_heads).permute(0, 2, 1, 3)
+            _B, _N, _C = xk.shape
+            xk = F.linear(xk, weight[C:2*C,:], bias[C:2*C]).reshape(B, _N, attn.num_heads, C // attn.num_heads).permute(0, 2, 1, 3)
+            _B, _N, _C = xv.shape
+            xv = F.linear(xv, weight[2*C: ,:], bias[2*C: ]).reshape(B, _N, attn.num_heads, C // attn.num_heads).permute(0, 2, 1, 3)
+
+            attention = (xq @ xk.transpose(-2, -1)) * attn.scale
+            attention = attention.softmax(dim=-1)
+            attention = attn.attn_drop(attention)
+
+            attention = (attention @ xv).transpose(1, 2).reshape(B, N, C)
+            attention = attn.proj(attention)
+            attention = attn.proj_drop(attention)
+
+            x = x + block.drop_path1(block.ls1(attention))
+            x = x + block.drop_path2(block.ls2(block.mlp(block.norm2(x))))
+
+        return x
+
     def forward(self, inputs : torch.Tensor, **kwargs) -> torch.Tensor:
 
         x = self.backbone.patch_embed(inputs)
@@ -93,18 +187,12 @@ class Ours(nn.Module):
         simmilarity = F.cosine_similarity(query.unsqueeze(1), self.key, dim=-1)
         topk = simmilarity.topk(self.selection_size, dim=1)[1]
         simmilarity = simmilarity.gather(1, topk)
-        prompts = self.prompts[topk]
+        e_prompts = self.e_prompts[topk]
+        g_prompts = self.g_prompts[0]
         mask = self.mask[topk].squeeze()
-
         self.simmilarity = simmilarity.mean()
-        self.unsimmilarity = (1 - simmilarity).mean()
 
-        prompts = prompts.contiguous().view(B, self.selection_size * self.prompt_len, D)
-        prompts = prompts + self.backbone.pos_embed[:,0].clone().expand(self.selection_size * self.prompt_len, -1)
-        
-        x = self.backbone.pos_drop(token_appended + self.backbone.pos_embed)
-        x = torch.cat((x[:,0].unsqueeze(1), prompts, x[:,1:]), dim=1)
-        x = self.backbone.blocks(x)
+        x = self.prompt_func(x, g_prompts, e_prompts)
         x = self.backbone.norm(x)
         x = x[:, 1:self.selection_size * self.prompt_len + 1].clone()
         x = x.mean(dim=1).squeeze()
