@@ -129,7 +129,8 @@ class _Trainer():
         self.n_classes = n_classes
 
         train_transform = []
-        if self.model_name == 'vit' or self.model_name == 'L2P':
+        # if self.model_name == 'vit' or self.model_name == 'L2P':
+        if self.model_name == 'vit' or self.model_name == 'L2P' or self.model_name == 'ours':
             inp_size = 224
         self.cutmix = "cutmix" in self.transforms 
         if "cutout" in self.transforms:
@@ -307,7 +308,7 @@ class _Trainer():
             self.online_before_task(task_id)
             for i, (images, labels, idx) in enumerate(self.train_dataloader):
                 # if self.debug and (i+1)*self.batchsize >= 2000:
-                if self.debug and (i+1)*self.batchsize >= 150:
+                if self.debug and (i+1)*self.batchsize >= 1000:
                     break
                 if samples_cnt > num_eval:
                 # if samples_cnt % args.eval_period == 0:
@@ -556,9 +557,12 @@ class _Trainer():
                     else:
                         data_info['Class_'+str(label[b].item())] = 1
             print(f"[Train] Task{t_i} Data Info")
+            print(data_info);print()
             convert_data_info = self.convert_class_label(data_info)
             np.save(f"{self.log_path}/logs/{self.dataset}/{self.note}/seed_{self.rnd_seed}_task{t_i}_train_data.npy", convert_data_info)
             print(convert_data_info)
+            
+            print()
             
     def test_data_config(self, test_dataloader,task_id):
         data_info={}

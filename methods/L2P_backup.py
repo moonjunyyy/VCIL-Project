@@ -40,8 +40,6 @@ from methods._trainer import _Trainer
 from utils.data_loader import ImageDataset, StreamDataset, MemoryDataset, cutmix_data, get_statistics
 from utils.train_utils import select_model, select_optimizer, select_scheduler
 
-from utils.memory import MemoryBatchSampler, MemoryOrderedSampler
-
 import timm
 from timm.models import create_model
 from timm.models.registry import register_model
@@ -69,7 +67,7 @@ def vit_base_patch16_224(pretrained=False, **kwargs):
     model = _create_vision_transformer('vit_base_patch16_224', pretrained=pretrained, **model_kwargs)
     return model
 
-class L2P(ER):
+class L2P(_Trainer):
     def __init__(self, *args, **kwargs):
         super(L2P, self).__init__(*args, **kwargs)
         
@@ -83,9 +81,6 @@ class L2P(ER):
     
     def online_step(self, images, labels, idx):
         self.add_new_class(labels[0])
-        self.memory_sampler  = MemoryBatchSampler(self.memory, self.memory_batchsize, self.temp_batchsize * self.online_iter * self.world_size)
-        self.memory_dataloader   = DataLoader(self.train_dataset, batch_size=self.memory_batchsize, sampler=self.memory_sampler, num_workers=0, pin_memory=True)
-        self.memory_provider     = iter(self.memory_dataloader)
         # train with augmented batches
         _loss, _acc, _iter = 0.0, 0.0, 0
         for image, label in zip(images, labels):
@@ -93,20 +88,15 @@ class L2P(ER):
             _loss += loss
             _acc += acc
             _iter += 1
-        self.update_memory(idx, labels[0])
         return _loss / _iter, _acc / _iter
 
     def online_train(self, data):
         self.model.train()
         total_loss, total_correct, total_num_data = 0.0, 0.0, 0.0
         x, y = data
-            
-        if len(self.memory) > 0 and self.memory_batchsize > 0:
-            memory_images, memory_labels = next(self.memory_provider)
-            x = torch.cat([x, memory_images], dim=0)
-            y = torch.cat([y, memory_labels], dim=0)
         for j in range(len(y)):
             y[j] = self.exposed_classes.index(y[j].item())
+
         x = x.to(self.device)
         y = y.to(self.device)
 

@@ -1,7 +1,7 @@
 #!/bin/bash
 
-#SBATCH --job-name lwf_iblurry_cifar100_N50_M10_rnd_kd_10
-#SBATCH -p batch
+#SBATCH --job-name lwf_cifar100_N50_M10_rnd_kd_0.02
+#SBATCH -p batch_agi
 #SBATCH -w agi2
 #SBATCH --nodes=1
 #SBATCH --gres=gpu:1
@@ -32,8 +32,8 @@ conda activate torch38gpu
 conda --version
 python --version
 # CIL CONFIG
-MODE="lwf"
-NOTE="lwf_Siblurry_cifar100_N50_M10_rnd_new_kd10" # Short description of the experiment. (WARNING: logs/results with the same note will be overwritten!)
+MODE="lwf++"
+NOTE="lwf_Siblurry_cifar100_N50_M10_rnd_kd0.02" # Short description of the experiment. (WARNING: logs/results with the same note will be overwritten!)
 
 DATASET="cifar100" # cifar10, cifar100, tinyimagenet, imagenet
 N_TASKS=5
@@ -41,7 +41,7 @@ N=50
 M=10
 GPU_TRANSFORM="--gpu_transform"
 USE_AMP="--use_amp"
-SEEDS="1"
+SEEDS="1 2 3 4 5"
 VIT="True"
 OPT="adam"
 
@@ -52,8 +52,8 @@ if [ "$DATASET" == "cifar10" ]; then
 
 elif [ "$DATASET" == "cifar100" ]; then
     MEM_SIZE=2000 ONLINE_ITER=3
-    MODEL_NAME="vit" EVAL_PERIOD=100
-    BATCHSIZE=32; LR=3e-4 OPT_NAME=$OPT SCHED_NAME="default" MEMORY_EPOCH=256
+    MODEL_NAME="resnet34" EVAL_PERIOD=100
+    BATCHSIZE=64; LR=3e-4 OPT_NAME=$OPT SCHED_NAME="default" MEMORY_EPOCH=256
 
 elif [ "$DATASET" == "tinyimagenet" ]; then
     MEM_SIZE=4000 ONLINE_ITER=3

@@ -1,14 +1,14 @@
 #!/bin/bash
 
-#SBATCH -J RM_iblurry_cifar100_N50_M10_rnd_Mem_worker
-#SBATCH -p batch
+#SBATCH -J RM_cifar100_N50_M10_rnd_Mem500
+#SBATCH -p batch_agi
 #SBATCH -w agi2
 #SBATCH --nodes=1
 #SBATCH --gres=gpu:1
 #SBATCH --cpus-per-gpu=4
 #SBATCH --mem-per-gpu=20G
-#SBATCH --time=4-0
-#SBATCH -o %x_%j.out
+#SBATCH --time=14-0
+#SBATCH -o %x_%j.log
 
 date
 # seeds=(1 21 42 3473 10741 32450 93462 85015 64648 71950 87557 99668 55552 4811 10741)
@@ -32,7 +32,7 @@ conda --version
 python --version
 
 # CIL CONFIG
-NOTE="RM_iblurry_cifar100_N50_M10_RND_Mem_worker" # Short description of the experiment. (WARNING: logs/results with the same note will be overwritten!)
+NOTE="RM_Siblurry_cifar100_N50_M10_RND_Mem_500" # Short description of the experiment. (WARNING: logs/results with the same note will be overwritten!)
 
 MODE="rm"
 DATASET="cifar100" # cifar10, cifar100, tinyimagenet, imagenet
@@ -41,7 +41,7 @@ N=50
 M=10
 GPU_TRANSFORM="--gpu_transform"
 # USE_AMP="--use_amp"
-SEEDS="1 2 3"
+SEEDS="1 2 3 4 5"
 OPT="adam"
 
 if [ "$DATASET" == "cifar10" ]; then
@@ -51,9 +51,9 @@ if [ "$DATASET" == "cifar10" ]; then
 
 elif [ "$DATASET" == "cifar100" ]; then
     # MEM_SIZE=2000 ONLINE_ITER=1
-    MEM_SIZE=2000 ONLINE_ITER=3
+    MEM_SIZE=500 ONLINE_ITER=3
     MODEL_NAME="resnet34" EVAL_PERIOD=100
-    BATCHSIZE=32; LR=0.05 OPT_NAME=$OPT SCHED_NAME="cos" MEMORY_EPOCH=256
+    BATCHSIZE=64; LR=3e-4 OPT_NAME=$OPT SCHED_NAME="cos" MEMORY_EPOCH=256
 
 elif [ "$DATASET" == "tinyimagenet" ]; then
     MEM_SIZE=4000 ONLINE_ITER=1

@@ -30,11 +30,15 @@ from methods.L2P import L2P
 from methods.rainbow_memory import RM
 from methods.Finetuning import FT
 from methods.lwf import LwF
-from methods.our_method import Ours
+from methods.FT_CNN import FT_CNN
 
-torch.autograd.set_detect_anomaly(True)
+from methods.ours import Ours
+
+
+# torch.autograd.set_detect_anomaly(True)
 torch.backends.cudnn.enabled = False
-methods = { "er": ER, "clib":CLIB, 'L2P':L2P, 'rm':RM, 'Finetuning':FT, 'lwf':LwF,'Ours':Ours}
+methods = { "er": ER, "clib":CLIB, 'L2P':L2P, 'rm':RM, 'Finetuning':FT, 'lwf++':LwF,'ours':Ours,
+           "FT_CNN": FT_CNN}
 os.environ["CUDA_LAUNCH_BLOCKING"]="1"
 def main():
     # Get Configurations

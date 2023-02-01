@@ -30,11 +30,15 @@ def cycle(iterable):
         for i in iterable:
             yield i
 
-class Ours(_Trainer):
+class FT_CNN(_Trainer):
     def __init__(self, *args, **kwargs):
-        super(Ours, self).__init__(*args, **kwargs)
-        self.task_id = None
-        self.seq_criterion = nn.CrossEntropyLoss(reduction='none')
+        super(FT_CNN, self).__init__(*args, **kwargs)
+        # self.prev_fc=None
+        # self.kd_hp =0.02
+        # self.task_id=None
+        self.old_model =None
+        # self.old_mask = None
+        
     
     def online_step(self, images, labels, idx):
         self.add_new_class(labels[0])
@@ -47,18 +51,47 @@ class Ours(_Trainer):
             _iter += 1
         return _loss / _iter, _acc / _iter
 
+    def add_new_class(self, class_name):
+        # For DDP, normally go into this function
+        len_class = len(self.exposed_classes)
+        exposed_classes = []
+        for label in class_name:
+            if label.item() not in self.exposed_classes:
+                self.exposed_classes.append(label.item())
+        if self.distributed:
+            exposed_classes = torch.cat(self.all_gather(torch.tensor(self.exposed_classes, device=self.device))).cpu().tolist()
+            self.exposed_classes = []
+            for cls in exposed_classes:
+                if cls not in self.exposed_classes:
+                    self.exposed_classes.append(cls)
+        # self.memory.add_new_class(cls_list=self.exposed_classes)
+        self.mask[:len(self.exposed_classes)] = 0
+        if 'reset' in self.sched_name:
+            self.update_schedule(reset=True)
+    
+    
     def online_before_task(self, task_id):
         self.task_id = task_id
-        if self.task_id != 0:
-            #* classifier weight 저장!
-            self.prev_wts = self.model.fc.weight.data.clone().detach()
-            # print("[before task]prev_wts",self.prev_wts.shape)
-            
+        self.reset_opt()
         pass
     
+    def freeze(self,model):
+        for p in model.parameters():
+            p.requires_grad = False
+        model.eval()
+
+        return model
+    
     def online_after_task(self,task_id):
-        # self.test_data_config(test_dataloader,task_id)
+        # self.old_model = self.freeze(copy.deepcopy(self.model))
+        # self.old_mask = copy.deepcopy(self.mask)
         pass
+    
+        
+    def _KD_loss(self,pred, soft, T):
+        pred = torch.log_softmax(pred / T, dim=1)
+        soft = torch.softmax(soft / T, dim=1)
+        return -1 * torch.mul(soft, pred).sum() / pred.shape[0]
     
     def online_train(self, data):
         self.model.train()
@@ -71,10 +104,12 @@ class Ours(_Trainer):
         y = y.to(self.device)
 
         self.optimizer.zero_grad()
-        if self.task_id==0:
-            logit, loss = self.model_forward(x,y)
-        else:
-            logit, loss = self.model_seq_forward(x,y)
+        logit, loss = self.model_forward(x,y)
+        # if self.task_id==0:
+        #     logit, loss = self.model_forward(x,y)
+        # else:
+        #     logit, loss = self.lwf_forward(x,y)
+            
         _, preds = logit.topk(self.topk, 1, True, True)
         
         self.scaler.scale(loss).backward()
@@ -88,97 +123,53 @@ class Ours(_Trainer):
 
         return total_loss, total_correct/total_num_data
 
+    #* Ori code
+    # def model_forward(self, x, y):
+    #     do_cutmix = self.cutmix and np.random.rand(1) < 0.5
+    #     if do_cutmix:
+    #         x, labels_a, labels_b, lam = cutmix_data(x=x, y=y, alpha=1.0)
+    #         with torch.cuda.amp.autocast(enabled=self.use_amp):
+    #             logit = self.model(x)
+    #             logit += self.mask
+    #             loss = lam * self.criterion(logit, labels_a) + (1 - lam) * self.criterion(logit, labels_b)
+    #     else:
+    #         with torch.cuda.amp.autocast(enabled=self.use_amp):
+    #             logit = self.model(x)
+    #             logit += self.mask
+    #             loss = self.criterion(logit, y)
+    #     return logit, loss
+    
     def model_forward(self, x, y):
+        # kd_loss =0.
         do_cutmix = self.cutmix and np.random.rand(1) < 0.5
         if do_cutmix:
             x, labels_a, labels_b, lam = cutmix_data(x=x, y=y, alpha=1.0)
             with torch.cuda.amp.autocast(enabled=self.use_amp):
-                logit = self.model(x)
-                logit += self.mask
+                ori_logit = self.model(x)
+                logit = ori_logit+self.mask
                 loss = lam * self.criterion(logit, labels_a) + (1 - lam) * self.criterion(logit, labels_b)
+                # if self.old_model is not None:
+                #     old_logit = self.old_model(x)
+                #     # old_logit = old_logit + self.old_mask
+                #     # new_logit = ori_logit + self.old_mask
+                #     kd_loss = self._KD_loss(ori_logit[:,:len(self.old_mask)],
+                #                             old_logit[:,:len(self.old_mask)],T=2.)
+                #     loss += self.kd_hp * kd_loss
         else:
             with torch.cuda.amp.autocast(enabled=self.use_amp):
-                logit = self.model(x)
-                logit += self.mask
+                ori_logit = self.model(x)
+                logit = ori_logit+self.mask
                 loss = self.criterion(logit, y)
-        return logit, loss
-    
-    def model_seq_forward(self, x, y):
-        do_cutmix = self.cutmix and np.random.rand(1) < 0.5
-        if do_cutmix:
-            x, labels_a, labels_b, lam = cutmix_data(x=x, y=y, alpha=1.0)
-            with torch.cuda.amp.autocast(enabled=self.use_amp):
-                logit = self.model(x)
-                logit += self.mask
-                
-                uncertain = self._compute_uncertainty(logit,y)
-                cos_dist = self._compute_cosine_dist(y)
-                score = cos_dist - uncertain
-                neg_idx= score<0
-                #* score negative => cos_dist ==0 -> update X 
-                #* Naive Learning
-                score[neg_idx] =1.
-                    
-                #* score normalization using l2_norm
-                score_norm = torch.nn.functional.normalize(score,dim=0)
-                # logit = logit*score_norm
-                loss_a = score_norm * self.seq_criterion(logit, labels_a)
-                loss_b = score_norm * self.seq_criterion(logit, labels_b)
-                loss = lam * loss_a.mean() + (1 - lam) * loss_b.mean()
-        else:
-            with torch.cuda.amp.autocast(enabled=self.use_amp):
-                logit = self.model(x)
-                logit += self.mask
-                
-                uncertain = self._compute_uncertainty(logit,y)
-                cos_dist = self._compute_cosine_dist(y)
-                score = cos_dist - uncertain
-                neg_idx= score<0
-                #* score negative => cos_dist ==0 -> update X 
-                #* Naive Learning
-                score[neg_idx] =1.
-                    
-                #* score normalization using l2_norm
-                score_norm = torch.nn.functional.normalize(score,dim=0)
-                # logit = logit*score_norm
-                
-                loss = score_norm * self.seq_criterion(logit, y)
-                loss = loss.mean()
-        return logit, loss
-    
-    def _compute_uncertainty(self,logit,labels):
-        logit = logit[:,:len(self.exposed_classes)]
-        s_logit = torch.softmax(logit,dim=1)
-        # unc = 1 - s_logit
-        uncertain=[]
-        for idx, label in enumerate(labels):
-            uncertain.append(1.-s_logit[idx,label])
+                # if self.old_model is not None:
+                #     old_logit = self.old_model(x)
+                #     # old_logit = old_logit + self.old_mask
+                #     # new_logit = ori_logit + self.old_mask
+                #     kd_loss = self._KD_loss(ori_logit[:,:len(self.old_mask)],
+                #                             old_logit[:,:len(self.old_mask)],T=2.)
+                #     loss += self.kd_hp * kd_loss
             
-        return torch.tensor(uncertain).to(self.device)
-    
-    def _compute_cosine_dist(self,label):
-        # self.prev_wts = self.model.fc.weight.data.clone().detach()
-        #? Task 0 학습이후 Task 1 첫 Iter에서는 Parameter 동일!
-        #? Cosine distance 동일한 경우 -> Parameter 변화 X
-        #todo cosine_dist ==0 -> consider only uncertainty
-        #todo Unseen Class의 경우: 동일하게 처리
-        
-        # prev_wts = self.prev_wts[:len(self.exposed_classes)]
-        
-        # cur_wts = self.model.fc.weight.data[:len(self.exposed_classes)].clone().detach()
-        prev_wts = self.prev_wts[label]
-        
-        cur_wts = self.model.fc.weight.data[label].clone().detach()
-        
-        # print("prev_wts",prev_wts.shape)
-        # print("cur_wts",cur_wts.shape)
-        cos_dist = 1- torch.cosine_similarity(prev_wts,cur_wts,dim=1)
-        
-        return cos_dist
-        
-        
-    
-        
+        # loss = ce_loss + self.kd_hp * kd_loss
+        return logit, loss
         
     def online_evaluate(self, test_loader):
         total_correct, total_num_data, total_loss = 0.0, 0.0, 0.0

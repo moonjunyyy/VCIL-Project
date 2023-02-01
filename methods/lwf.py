@@ -16,6 +16,9 @@ from torch import optim
 from utils.data_loader import ImageDataset, StreamDataset, MemoryDataset, cutmix_data, get_statistics
 from utils.train_utils import select_model, select_optimizer, select_scheduler
 
+from utils.memory import MemoryBatchSampler, MemoryOrderedSampler
+from methods.er_baseline import ER
+
 import torchvision.transforms as transforms
 from methods._trainer import _Trainer
 
@@ -30,15 +33,21 @@ def cycle(iterable):
         for i in iterable:
             yield i
 
-class LwF(_Trainer):
+class LwF(ER):
     def __init__(self, *args, **kwargs):
         super(LwF, self).__init__(*args, **kwargs)
-        self.prev_fc=None
-        self.kd_hp =10
+        # self.prev_fc=None
+        self.kd_hp =0.02
         self.task_id=None
+        self.old_model =None
+        self.old_mask = None
+        
     
     def online_step(self, images, labels, idx):
         self.add_new_class(labels[0])
+        self.memory_sampler  = MemoryBatchSampler(self.memory, self.memory_batchsize, self.temp_batchsize * self.online_iter * self.world_size)
+        self.memory_dataloader   = DataLoader(self.train_dataset, batch_size=self.memory_batchsize, sampler=self.memory_sampler, num_workers=0, pin_memory=True)
+        self.memory_provider     = iter(self.memory_dataloader)
         # train with augmented batches
         _loss, _acc, _iter = 0.0, 0.0, 0
         for image, label in zip(images, labels):
@@ -46,6 +55,7 @@ class LwF(_Trainer):
             _loss += loss
             _acc += acc
             _iter += 1
+        self.update_memory(idx, labels[0])
         return _loss / _iter, _acc / _iter
 
     def add_new_class(self, class_name):
@@ -62,6 +72,7 @@ class LwF(_Trainer):
                 if cls not in self.exposed_classes:
                     self.exposed_classes.append(cls)
         # self.memory.add_new_class(cls_list=self.exposed_classes)
+        self.memory.add_new_class(cls_list=self.exposed_classes)
         self.mask[:len(self.exposed_classes)] = 0
         if 'reset' in self.sched_name:
             self.update_schedule(reset=True)
@@ -69,86 +80,38 @@ class LwF(_Trainer):
     
     def online_before_task(self, task_id):
         self.task_id = task_id
-        if task_id != 0:
-            # self.prev_fc = copy.deepcopy(self.model_without_ddp.fc)
-            self.prev_num_class = len(self.exposed_classes)
-            self.prev_fc = nn.Linear(self.model.fc.in_features, self.prev_num_class)
-            # self.prev_fc.weight = copy.deepcopy(self.model.fc.weight[:self.prev_num_class])
-            # self.prev_fc.bias = copy.deepcopy(self.model.fc.bias[:self.prev_num_class])
-            self.prev_fc.weight.data = self.model.fc.weight[:self.prev_num_class].clone().detach()
-            self.prev_fc.bias.data = self.model.fc.bias[:self.prev_num_class].clone().detach()
-            
-            for p in self.prev_fc.parameters():
-                p.requires_grad=False
-                
-        else:
-            pass
-    
-    def online_after_task(self,task_id):
+        self.reset_opt()
         pass
     
-    def lwf_forward(self,x,y):
-        do_cutmix = self.cutmix and np.random.rand(1) < 0.5
-        self.prev_fc.eval()
-        if do_cutmix:
-            x, labels_a, labels_b, lam = cutmix_data(x=x, y=y, alpha=1.0)
-            with torch.cuda.amp.autocast(enabled=self.use_amp):
-                feats = self.model.forward_features(x)
-                cur_logits = self.model.forward_head(feats)
-                cur_logits = cur_logits + self.mask
-                with torch.no_grad():
-                    feats=feats[:,0]
-                    feat_norm  = self.model.fc_norm(feats)
-                    prev_logits = self.prev_fc(feat_norm)
-                    # prev_logits = prev_logits + self.mask
-                # cur_loss = self.criterion(cur_logits,y)
-                cur_loss = lam * self.criterion(cur_logits, labels_a) + (1 - lam) * self.criterion(cur_logits, labels_b)
-                kd_loss = self._KD_loss(cur_logits[:,:self.prev_num_class],prev_logits,2.)
-                # logit = self.model(x)
-                # logit += self.mask
-                # loss = lam * self.criterion(logit, labels_a) + (1 - lam) * self.criterion(logit, labels_b)
-        else:
-            # loss_kd = torch.dist(feature, feature_old, 2)
-            
-            with torch.cuda.amp.autocast(enabled=self.use_amp):
-                feats = self.model.forward_features(x)
-                cur_logits = self.model.forward_head(feats)
-                cur_logits = cur_logits + self.mask
-                with torch.no_grad():
-                    feats=feats[:,0]
-                    feat_norm  = self.model.fc_norm(feats)
-                    prev_logits = self.prev_fc(feat_norm)
-                    # prev_logits = prev_logits + self.mask
-                cur_loss = self.criterion(cur_logits,y)
-                # kd_loss = self._KD_loss(cur_logits[:,:len(self.exposed_classes)],prev_logits[:,:len(self.exposed_classes)],2.)
-                kd_loss = self._KD_loss(cur_logits[:,:self.prev_num_class],prev_logits,2.)
-        # print('cur_loss:',cur_loss)
-        # print('kd_loss:',kd_loss)
-        return cur_logits, cur_loss +self.kd_hp*kd_loss
-        
+    def freeze(self,model):
+        for p in model.parameters():
+            p.requires_grad = False
+        model.eval()
+
+        return model
+    
+    def online_after_task(self,task_id):
+        self.old_model = self.freeze(copy.deepcopy(self.model))
+        self.old_mask = copy.deepcopy(self.mask)
+        pass
         
     def _KD_loss(self,pred, soft, T):
         pred = torch.log_softmax(pred / T, dim=1)
         soft = torch.softmax(soft / T, dim=1)
-        # print("cur_shape",pred.shape)
-        # print("cur",pred)
-        # print()
-        # print("pred_shape",soft.shape)
-        # print("prev",soft)
-        # print()
-        # print("kd:",-1 * torch.mul(soft, pred).sum())
-        # print('div:',pred.shape[0])
-        # if pred.isnan().sum()!=0:
-        #     print("cur has a nan")
-        # if soft.isnan().sum()!=0:
-        #     print("prev has a nan")
-            
         return -1 * torch.mul(soft, pred).sum() / pred.shape[0]
     
     def online_train(self, data):
         self.model.train()
         total_loss, total_correct, total_num_data = 0.0, 0.0, 0.0
         x, y = data
+        
+        if len(self.memory) > 0 and self.memory_batchsize > 0:
+            # memory_batchsize = min(self.memory_batchsize, len(self.memory))
+            # memory_images, memory_labels = self.memory.get_batch(memory_batchsize)
+            memory_images, memory_labels = next(self.memory_provider)
+            x = torch.cat([x, memory_images], dim=0)
+            y = torch.cat([y, memory_labels], dim=0)
+        
         for j in range(len(y)):
             y[j] = self.exposed_classes.index(y[j].item())
 
@@ -156,11 +119,11 @@ class LwF(_Trainer):
         y = y.to(self.device)
 
         self.optimizer.zero_grad()
-        
-        if self.task_id==0:
-            logit, loss = self.model_forward(x,y)
-        else:
-            logit, loss = self.lwf_forward(x,y)
+        logit, loss = self.model_forward(x,y)
+        # if self.task_id==0:
+        #     logit, loss = self.model_forward(x,y)
+        # else:
+        #     logit, loss = self.lwf_forward(x,y)
             
         _, preds = logit.topk(self.topk, 1, True, True)
         
@@ -175,19 +138,52 @@ class LwF(_Trainer):
 
         return total_loss, total_correct/total_num_data
 
+    #* Ori code
+    # def model_forward(self, x, y):
+    #     do_cutmix = self.cutmix and np.random.rand(1) < 0.5
+    #     if do_cutmix:
+    #         x, labels_a, labels_b, lam = cutmix_data(x=x, y=y, alpha=1.0)
+    #         with torch.cuda.amp.autocast(enabled=self.use_amp):
+    #             logit = self.model(x)
+    #             logit += self.mask
+    #             loss = lam * self.criterion(logit, labels_a) + (1 - lam) * self.criterion(logit, labels_b)
+    #     else:
+    #         with torch.cuda.amp.autocast(enabled=self.use_amp):
+    #             logit = self.model(x)
+    #             logit += self.mask
+    #             loss = self.criterion(logit, y)
+    #     return logit, loss
+    
     def model_forward(self, x, y):
+        kd_loss =0.
         do_cutmix = self.cutmix and np.random.rand(1) < 0.5
         if do_cutmix:
             x, labels_a, labels_b, lam = cutmix_data(x=x, y=y, alpha=1.0)
             with torch.cuda.amp.autocast(enabled=self.use_amp):
-                logit = self.model(x)
-                logit += self.mask
+                ori_logit = self.model(x)
+                logit = ori_logit+self.mask
                 loss = lam * self.criterion(logit, labels_a) + (1 - lam) * self.criterion(logit, labels_b)
+                if self.old_model is not None:
+                    old_logit = self.old_model(x)
+                    # old_logit = old_logit + self.old_mask
+                    # new_logit = ori_logit + self.old_mask
+                    kd_loss = self._KD_loss(ori_logit[:,:len(self.old_mask)],
+                                            old_logit[:,:len(self.old_mask)],T=2.)
+                    loss += self.kd_hp * kd_loss
         else:
             with torch.cuda.amp.autocast(enabled=self.use_amp):
-                logit = self.model(x)
-                logit += self.mask
+                ori_logit = self.model(x)
+                logit = ori_logit+self.mask
                 loss = self.criterion(logit, y)
+                if self.old_model is not None:
+                    old_logit = self.old_model(x)
+                    # old_logit = old_logit + self.old_mask
+                    # new_logit = ori_logit + self.old_mask
+                    kd_loss = self._KD_loss(ori_logit[:,:len(self.old_mask)],
+                                            old_logit[:,:len(self.old_mask)],T=2.)
+                    loss += self.kd_hp * kd_loss
+            
+        # loss = ce_loss + self.kd_hp * kd_loss
         return logit, loss
         
     def online_evaluate(self, test_loader):

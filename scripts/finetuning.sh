@@ -1,12 +1,12 @@
 #!/bin/bash
 
-#SBATCH --job-name Finetuning_iblurry_cifar100_N50_M10_rnd
-#SBATCH -p batch
+#SBATCH --job-name FT_ViT_iblurry_cifar100_N50_M10_rnd
+#SBATCH -p batch_agi
 #SBATCH -w agi2
 #SBATCH --nodes=1
 #SBATCH --gres=gpu:1
 #SBATCH --cpus-per-gpu=4
-#SBATCH --mem-per-gpu=20G
+#SBATCH --mem-per-gpu=60G
 #SBATCH --time=4-0
 #SBATCH -o %x_%j.log
 
@@ -41,7 +41,7 @@ N=50
 M=10
 GPU_TRANSFORM="--gpu_transform"
 USE_AMP="--use_amp"
-SEEDS="1 2 3"
+SEEDS="1 2 3 4 5"
 VIT="True"
 OPT="adam"
 
@@ -51,9 +51,9 @@ if [ "$DATASET" == "cifar10" ]; then
     BATCHSIZE=16; LR=3e-4 OPT_NAME=$OPT SCHED_NAME="default" MEMORY_EPOCH=256
 
 elif [ "$DATASET" == "cifar100" ]; then
-    MEM_SIZE=2000 ONLINE_ITER=3
-    MODEL_NAME="vit" EVAL_PERIOD=1000
-    BATCHSIZE=32; LR=3e-4 OPT_NAME=$OPT SCHED_NAME="default" MEMORY_EPOCH=256
+    MEM_SIZE=2000 ONLINE_ITER=60
+    MODEL_NAME="vit" EVAL_PERIOD=100
+    BATCHSIZE=64; LR=3e-4 OPT_NAME=$OPT SCHED_NAME="default" MEMORY_EPOCH=256
 
 elif [ "$DATASET" == "tinyimagenet" ]; then
     MEM_SIZE=4000 ONLINE_ITER=3
@@ -81,5 +81,5 @@ do
     --model_name $MODEL_NAME --opt_name $OPT_NAME --sched_name $SCHED_NAME \
     --lr $LR --batchsize $BATCHSIZE \
     --memory_size $MEM_SIZE $GPU_TRANSFORM --online_iter $ONLINE_ITER --data_dir /local_datasets/ \
-    --note $NOTE --eval_period $EVAL_PERIOD --memory_epoch $MEMORY_EPOCH --n_worker 4 --rnd_NM
+    --note $NOTE --eval_period $EVAL_PERIOD --memory_epoch $MEMORY_EPOCH --n_worker 1 --rnd_NM
 done
