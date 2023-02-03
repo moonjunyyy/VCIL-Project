@@ -56,6 +56,8 @@ class LwF(ER):
             _acc += acc
             _iter += 1
         self.update_memory(idx, labels[0])
+        self.old_model = self.freeze(copy.deepcopy(self.model))
+        self.old_mask = copy.deepcopy(self.mask)
         return _loss / _iter, _acc / _iter
 
     def add_new_class(self, class_name):
@@ -91,8 +93,9 @@ class LwF(ER):
         return model
     
     def online_after_task(self,task_id):
-        self.old_model = self.freeze(copy.deepcopy(self.model))
-        self.old_mask = copy.deepcopy(self.mask)
+        #* Task-Free를 위해서 매 Batch마다 Old model update!
+        # self.old_model = self.freeze(copy.deepcopy(self.model))
+        # self.old_mask = copy.deepcopy(self.mask)
         pass
         
     def _KD_loss(self,pred, soft, T):
