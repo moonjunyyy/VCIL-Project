@@ -99,7 +99,7 @@ class DualPrompt(nn.Module):
                  len_g_prompt   : int   = 5,
                  pos_e_prompt   : Iterable[int] = (2, 3, 4),
                  len_e_prompt   : int   = 20,
-                 prompt_func    : str   = None,
+                 prompt_func    : str   = 'prefix_tuning',
                  task_num       : int   = 10,
                  class_num      : int   = 100,
                  lambd          : float = 1.0,
@@ -121,8 +121,8 @@ class DualPrompt(nn.Module):
         self.add_module('backbone', timm.create_model(backbone_name, pretrained=True, num_classes=class_num))
         for name, param in self.backbone.named_parameters():
             param.requires_grad = False
-        self.backbone.head.weight.requires_grad = True
-        self.backbone.head.bias.requires_grad   = True
+        self.backbone.fc.weight.requires_grad = True
+        self.backbone.fc.bias.requires_grad   = True
 
         self.tasks = []
        
@@ -253,12 +253,12 @@ class DualPrompt(nn.Module):
 
         x = self.prompt_func(self.backbone.pos_drop(token_appended + self.backbone.pos_embed), g_p, e_p)
         x = self.backbone.norm(x)
-        x = self.backbone.head(x[:, 0])
+        x = self.backbone.fc(x[:, 0])
 
         # if self.training:
         #     x = x + self.mask
 
-        self.similarity = e_s.sum()
+        self.similarity = e_s.mean()
         return x
 
     def convert_train_task(self, task : torch.Tensor, **kwargs):

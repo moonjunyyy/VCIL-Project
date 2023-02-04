@@ -51,11 +51,12 @@ class Ours(_Trainer):
         self.mask[:len(self.exposed_classes)] = 0
         if 'reset' in self.sched_name:
             self.update_schedule(reset=True)
-        with torch.no_grad():
-            for name, param in self.model_without_ddp.named_parameters():
-                if name == 'mask':
-                    param.data[:len(self.exposed_classes)] = 0
-                    param.data[len(self.exposed_classes):] = -torch.inf
+        self.model_without_ddp.set_exposed_classes(self.exposed_classes)
+        # with torch.no_grad():
+        #     for name, param in self.model_without_ddp.named_parameters():
+        #         if name == 'mask':
+        #             param.data[len_class:len(self.exposed_classes)] = 0
+        #             param.data[len(self.exposed_classes):] = -torch.inf
 
     def online_before_task(self, task_id):
         pass
@@ -65,6 +66,7 @@ class Ours(_Trainer):
     
     def online_train(self, data):
         self.model.train()
+        self.model.train(True)
         total_loss, total_correct, total_num_data = 0.0, 0.0, 0.0
         x, y = data
         for j in range(len(y)):
@@ -92,6 +94,7 @@ class Ours(_Trainer):
 
     def model_forward(self, x, y):
         do_cutmix = self.cutmix and np.random.rand(1) < 0.5
+        # do_cutmix = False
         if do_cutmix:
             x, labels_a, labels_b, lam = cutmix_data(x=x, y=y, alpha=1.0)
             with torch.cuda.amp.autocast(enabled=self.use_amp):
@@ -112,6 +115,7 @@ class Ours(_Trainer):
         label = []
 
         self.model.eval()
+        self.model.train(False)
         with torch.no_grad():
             for i, data in enumerate(test_loader):
                 x, y = data

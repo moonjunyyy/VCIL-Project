@@ -129,7 +129,7 @@ class _Trainer():
         self.n_classes = n_classes
 
         train_transform = []
-        if self.model_name == 'vit' or self.model_name == 'L2P' or self.model_name == 'ours':
+        if self.model_name == 'vit' or self.model_name == 'L2P' or self.model_name == 'ours' or self.model_name == 'DualPrompt':
             inp_size = 224
         self.cutmix = "cutmix" in self.transforms 
         if "cutout" in self.transforms:
@@ -303,29 +303,31 @@ class _Trainer():
             self.online_before_task(task_id)
             
             for i, (images, labels, idx) in enumerate(self.train_dataloader):
-                if self.debug and (i+1)*self.batchsize >= 2000:
+                if self.debug and (i+1)*self.temp_batchsize >= 500:
                     break
                 samples_cnt += images[0].size(0) * self.world_size
-                if samples_cnt > num_eval:
-                # if samples_cnt % args.eval_period == 0:
-                # if True:
-                    test_sampler = OnlineTestSampler(self.test_dataset, self.exposed_classes)
-                    test_dataloader = DataLoader(self.test_dataset, batch_size=self.batchsize*2, sampler=test_sampler, num_workers=self.n_worker)
-                    # test_dataloader = DataLoader(self.test_dataset, batch_size=512, sampler=test_sampler, num_workers=self.n_worker)
-                    eval_dict = self.online_evaluate(test_dataloader)
-                    if self.distributed:
-                        eval_dict =  torch.tensor([eval_dict['avg_loss'], eval_dict['avg_acc'], *eval_dict['cls_acc']], device=self.device)
-                        dist.reduce(eval_dict, dst=0, op=dist.ReduceOp.SUM)
-                        eval_dict = eval_dict.cpu().numpy()
-                        eval_dict = {'avg_loss': eval_dict[0]/self.world_size, 'avg_acc': eval_dict[1]/self.world_size, 'cls_acc': eval_dict[2:]/self.world_size}
-                    if self.is_main_process():
-                        eval_results["test_acc"].append(eval_dict['avg_acc'])
-                        eval_results["avg_acc"].append(eval_dict['cls_acc'])
-                        eval_results["data_cnt"].append(num_eval)
-                        self.report_test(num_eval, eval_dict["avg_loss"], eval_dict['avg_acc'])
-                    num_eval += self.eval_period
                 loss, acc = self.online_step(images, labels, idx)
                 self.report_training(samples_cnt, loss, acc)
+
+                if samples_cnt + images[0].size(0) * self.world_size > num_eval:
+                # if samples_cnt % args.eval_period == 0:
+                # if True:
+                    with torch.no_grad():
+                        test_sampler = OnlineTestSampler(self.test_dataset, self.exposed_classes)
+                        test_dataloader = DataLoader(self.test_dataset, batch_size=self.batchsize*2, sampler=test_sampler, num_workers=self.n_worker)
+                        # test_dataloader = DataLoader(self.test_dataset, batch_size=512, sampler=test_sampler, num_workers=self.n_worker)
+                        eval_dict = self.online_evaluate(test_dataloader)
+                        if self.distributed:
+                            eval_dict =  torch.tensor([eval_dict['avg_loss'], eval_dict['avg_acc'], *eval_dict['cls_acc']], device=self.device)
+                            dist.reduce(eval_dict, dst=0, op=dist.ReduceOp.SUM)
+                            eval_dict = eval_dict.cpu().numpy()
+                            eval_dict = {'avg_loss': eval_dict[0]/self.world_size, 'avg_acc': eval_dict[1]/self.world_size, 'cls_acc': eval_dict[2:]/self.world_size}
+                        if self.is_main_process():
+                            eval_results["test_acc"].append(eval_dict['avg_acc'])
+                            eval_results["avg_acc"].append(eval_dict['cls_acc'])
+                            eval_results["data_cnt"].append(num_eval)
+                            self.report_test(num_eval, eval_dict["avg_loss"], eval_dict['avg_acc'])
+                        num_eval += self.eval_period
                 
                 # loss, acc = self.online_step([image,label], samples_cnt)
                 # self.report_training(samples_cnt, loss, acc)
