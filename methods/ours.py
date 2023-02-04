@@ -18,27 +18,30 @@ class Ours(_Trainer):
 
     def __init__(self, **kwargs):
         super(Ours, self).__init__(**kwargs)
-        self.prev_query = None
+        # self.prev_query = None
         self.old_fc = None
         self.old_mask = None
+        self.old_query = None
     
-    def prev_trace(self):
-        self.old_mask = copy.deepcopy(self.mask)
+    def prev_trace(self,query):
         self.old_fc = copy.deepcopy(self.model.backbone.fc)
+        self.old_mask = self.mask.clone().detach()
         for p in self.old_fc.parameters():
             p.requires_grad=False
+        self.old_query = query
     
     def online_step(self, images, labels, idx):
         # image, label = sample
-        self.prev_trace()
+        
+        # self.is_task_changed(image,Bidx)
         self.add_new_class(labels[0])
         # train with augmented batches
         _loss, _acc, _iter = 0.0, 0.0, 0
         for Bidx,(image, label) in enumerate(zip(images, labels)):
             #* check task shift
-            if self.prev_query is not None:
+            if self.old_fc is not None:
                 self.is_task_changed(image,Bidx)
-                pass
+            
             #*====================
             loss, acc = self.online_train([image.clone(), label.clone()])
             _loss += loss
@@ -88,6 +91,8 @@ class Ours(_Trainer):
         # pass
     
     def online_train(self, data):
+        
+        
         self.model.train()
         total_loss, total_correct, total_num_data = 0.0, 0.0, 0.0
         x, y = data
@@ -100,8 +105,10 @@ class Ours(_Trainer):
         y = y.to(self.device)
         
         self.optimizer.zero_grad()
-        logit, loss, main_query = self.model_forward(x,y)
+        logit, loss, main_idx, query = self.model_forward(x,y)
         _, preds = logit.topk(self.topk, 1, True, True)
+        
+        self.prev_trace(query[main_idx])
         
         self.scaler.scale(loss).backward()
         self.scaler.step(self.optimizer)
@@ -112,8 +119,6 @@ class Ours(_Trainer):
         total_correct += torch.sum(preds == y.unsqueeze(1)).item()
         total_num_data += y.size(0)
         
-        self.prev_query = main_query
-
         return total_loss, total_correct/total_num_data
 
     def model_forward(self, x, y):
@@ -149,7 +154,7 @@ class Ours(_Trainer):
                 #     loss[sub_idx] = (len(main_idx)/len(sub_idx))*loss[sub_idx]
                 loss = loss.mean() + sim
                 
-        return logit, loss, query[main_idx]
+        return logit, loss, main_idx, query
 
     def online_evaluate(self, test_loader):
         total_correct, total_num_data, total_loss = 0.0, 0.0, 0.0
@@ -201,47 +206,72 @@ class Ours(_Trainer):
         else:
             self.scheduler.step()
     
+    
     def is_task_changed(self,x,idx):
         self.model.eval()
+        self.old_fc.eval()
+        # self.old_fc.eval()
         with torch.no_grad():
             x =x.to(self.device)
-            cur_query,curm_idx,_ = self.model.query_forward(x)
+            query,main_idx,_ = self.model.task_forward(x)
+            # query = self.model.backbone.fc_norm(query)
+            new_S_logit = self.model.backbone.fc(query[main_idx]) + self.mask
+            new_S_ent = self._get_entropy(new_S_logit)
             
-            cur_main_query = cur_query[curm_idx].mean(dim=0).unsqueeze(0)
-            prev_main_query = self.prev_query.mean(dim=0).unsqueeze(0)
-            sim = torch.cosine_similarity(cur_main_query,prev_main_query)
-            dist = torch.dist(cur_main_query,prev_main_query,p=2.)
+            #* Calculate Entropy via prev Classifier 
+            old_S_logit = self.old_fc(self.old_query) + self.old_mask
+            old_S_ent = self._get_entropy(old_S_logit)
             
-            
-            cur_feat = self.model.backbone.fc_norm(cur_query[curm_idx])
-            cur_old_logit = self.old_fc(cur_feat)+ self.old_mask
-            cur_old_ent = self._get_entropy(cur_old_logit)
-            
-            cur_new_logit = self.model.backbone.fc(cur_feat)+ self.mask
-            cur_new_ent = self._get_entropy(cur_new_logit)
-            
-            #* old_var --> train 안에서 정해놓으면 될듯
-            prev_feat = self.model.backbone.fc_norm(self.prev_query)
-            prev_old_logit = self.old_fc(prev_feat)+ self.old_mask
-            prev_old_ent = self._get_entropy(prev_old_logit)
-            
-            prev_new_logit = self.model.backbone.fc(prev_feat)+ self.mask
-            prev_new_ent = self._get_entropy(prev_new_logit)
-            
-            if idx % 50 ==0:
+            if idx ==0 or idx % 50 ==0:
                 #* Cur / Prev : Classifier
                 #* old / new : query
                 print()
-                # print("cur:",cur_main_query.shape)
-                # print("prev:",prev_main_query.shape)
-                # print("sim:",sim)
-                # print("dist:",dist)
-                print("Cur_old_Entropy:",cur_old_ent)
-                print("Prev_old_Entropy:",prev_old_ent)
+                print("old fc Entropy:",old_S_ent)
+                print("new fc Entropy:",new_S_ent)
                 print()
-                print("Cur_new_Entropy:",cur_new_ent)
-                print("Prev_new_Entropy:",prev_new_ent)
-                print()
+    
+    # def is_task_changed(self,x,idx):
+    #     self.model.eval()
+    #     with torch.no_grad():
+    #         x =x.to(self.device)
+    #         cur_query,curm_idx,_ = self.model.query_forward(x)
+            
+    #         cur_main_query = cur_query[curm_idx].mean(dim=0).unsqueeze(0)
+    #         prev_main_query = self.prev_query.mean(dim=0).unsqueeze(0)
+    #         sim = torch.cosine_similarity(cur_main_query,prev_main_query)
+    #         dist = torch.dist(cur_main_query,prev_main_query,p=2.)
+            
+            
+    #         cur_feat = self.model.backbone.fc_norm(cur_query[curm_idx])
+            
+    #         cur_old_logit = self.old_fc(cur_feat)+ self.old_mask
+    #         cur_old_ent = self._get_entropy(cur_old_logit)
+            
+    #         cur_new_logit = self.model.backbone.fc(cur_feat)+ self.mask
+    #         cur_new_ent = self._get_entropy(cur_new_logit)
+            
+    #         #* old_var --> train 안에서 정해놓으면 될듯
+    #         prev_feat = self.model.backbone.fc_norm(self.prev_query)
+    #         prev_old_logit = self.old_fc(prev_feat)+ self.old_mask
+    #         prev_old_ent = self._get_entropy(prev_old_logit)
+            
+    #         prev_new_logit = self.model.backbone.fc(prev_feat)+ self.mask
+    #         prev_new_ent = self._get_entropy(prev_new_logit)
+            
+    #         if idx % 50 ==0:
+    #             #* Cur / Prev : Classifier
+    #             #* old / new : query
+    #             print()
+    #             # print("cur:",cur_main_query.shape)
+    #             # print("prev:",prev_main_query.shape)
+    #             # print("sim:",sim)
+    #             # print("dist:",dist)
+    #             print("Cur_old_Entropy:",cur_old_ent)
+    #             print("Prev_old_Entropy:",prev_old_ent)
+    #             print()
+    #             print("Cur_new_Entropy:",cur_new_ent)
+    #             print("Prev_new_Entropy:",prev_new_ent)
+    #             print()
             
     def _get_entropy(self,p, mean=True):
         p = F.softmax(p,dim=1)

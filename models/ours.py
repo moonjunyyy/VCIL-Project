@@ -100,6 +100,7 @@ class Ours(nn.Module):
         self.sub_cnt =0.
         self.deep_layer = [2,3,4]
         
+        self.task_id =0
         
         # self.simmilarity=0.
         # self.num_heads=12
@@ -193,24 +194,13 @@ class Ours(nn.Module):
             
             # print("main",main_idx.sum())
             # print("sub",sub_idx.sum())
+            # print()
             
-            #todo sample마다 각각의 prompt를 사용하여 학습하기!!
-            #todo sub_prompt_forward / main_prompt_forward implementation
-            # main_x = x[main_idx]    #* go to main prompts
-            # sub_x = x[sub_idx]      #* go to sub prompts 
-            # sub_x = None
-            
-            # s_prompts = self.sub_prompt
             m_prompts = self.main_prompts[self.task_id] #* 1,2,3,20,768
-            # print("m_prompts:",m_prompts.shape) 
             main_key = self.main_key[self.task_id].unsqueeze(0)
             
-            # prompt_per_sample = torch.full((x.shape[0],1),self.task_id).to(self.device)
-            # print("task_id:",self.task_id)
-            # print("prompt_per_sample:",prompt_per_sample.shape)
             one,dual,num_layer,p_length,dim = m_prompts.shape
             m_prompts = m_prompts.unsqueeze(0).expand(x.shape[0],one,dual,num_layer,p_length,dim) #* B,1,dual,Num_layer,prompt_len,dim
-            # print("m_prompts[per_sample]:",m_prompts.shape) #* B,1,2,3,20,768
         
 
         x,sim = self.main_prompt_forward(x,query,m_prompts,main_key=main_key)
@@ -220,8 +210,6 @@ class Ours(nn.Module):
         x = self.backbone.fc(x)
         
         
-        # x_dict = {'main':main_x, 'sub':None}
-        # feat_dict = {'main':main_feats, 'sub':None}
         if test:
             return x
         else:
@@ -464,4 +452,24 @@ class Ours(nn.Module):
             query = self.backbone.norm(query)[:, 0]
         main_idx,sub_idx = self.split_samples(query)
         
+        return query,main_idx,sub_idx
+
+    def task_forward(self, x):
+        query,main_idx,sub_idx = self.query_forward(x)
+        
+        # with torch.no_grad():
+        #     x = self.backbone.patch_embed(x)
+        #     m_prompts = self.main_prompts[self.task_id] #* 1,2,3,20,768
+        #     main_key = self.main_key[self.task_id].unsqueeze(0)
+            
+        #     one,dual,num_layer,p_length,dim = m_prompts.shape
+        #     m_prompts = m_prompts.unsqueeze(0).expand(x.shape[0],one,dual,num_layer,p_length,dim) #* B,1,dual,Num_layer,prompt_len,dim
+            
+
+        #     x,sim = self.main_prompt_forward(x,query,m_prompts,main_key=main_key)
+        #     # self.simmilarity = sim.mean()
+        #     feats = x[:,0]
+        #     x = self.backbone.fc_norm(feats)
+        #     x = self.backbone.fc(x)
+        # return x,feats,main_idx,sub_idx
         return query,main_idx,sub_idx
