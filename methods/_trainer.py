@@ -292,6 +292,10 @@ class _Trainer():
             # self.train_sampler.set_task(task_id)
             # self.current_task_data(self.train_dataloader)
             
+            self.train_sampler.set_task(task_id)
+            # self.current_task_data(self.train_dataloader)
+            self.online_before_task(task_id)
+            
             # if task_id ==0:
             #     self.train_data_config(self.n_tasks,self.train_dataset,self.train_sampler)
             # print()
