@@ -100,7 +100,7 @@ class Ours(nn.Module):
         self.sub_cnt =0.
         self.deep_layer = [2,3,4]
         
-        self.task_id =0
+        # self.task_id =0
         
         # self.simmilarity=0.
         # self.num_heads=12
@@ -110,12 +110,15 @@ class Ours(nn.Module):
         
         self.n_task = n_task
         
-        self.sub_key     = nn.Parameter(torch.randn(1, self.backbone.embed_dim))
-        self.sub_prompt = nn.Parameter(torch.randn(1, self.prompt_len, self.backbone.embed_dim))
+        # self.sub_key     = nn.Parameter(torch.randn(1, self.backbone.embed_dim))
+        # self.sub_prompt = nn.Parameter(torch.randn(1, self.prompt_len, self.backbone.embed_dim))
         
-        self.main_key     = nn.Parameter(torch.randn(self.n_task, self.backbone.embed_dim))
-        self.main_prompts = nn.Parameter(torch.randn(self.n_task,1,2, len(self.deep_layer), self.prompt_len, self.backbone.embed_dim))
+        # self.main_key     = nn.Parameter(torch.randn(self.n_task, self.backbone.embed_dim))
+        # self.main_prompts = nn.Parameter(torch.randn(self.n_task,1,2, len(self.deep_layer), self.prompt_len, self.backbone.embed_dim))
+        self.main_key     = nn.Parameter(torch.randn(1, self.backbone.embed_dim))
+        self.main_prompts = nn.Parameter(torch.randn(1,1,2, len(self.deep_layer), self.prompt_len, self.backbone.embed_dim))
         
+        #* weight initialization
         torch.nn.init.uniform_(self.main_key,     -1, 1)
         torch.nn.init.uniform_(self.main_prompts, -1, 1)
         
@@ -162,7 +165,7 @@ class Ours(nn.Module):
             
             query_norm = self.l2_normalize(query,dim=1)
             #* key_norm = self.l2_normalize(cand_keys,dim=1)
-            key_norm = self.l2_normalize(self.main_key[:self.task_id+1],dim=1)
+            key_norm = self.l2_normalize(self.main_key,dim=1)
             similarity = torch.matmul(query_norm, key_norm.t()) # B, keys
             # simmilarity = F.cosine_similarity(query, cand_keys, dim=1)
             topk = similarity.topk(self.selection_size, dim=1)[1]
@@ -196,8 +199,8 @@ class Ours(nn.Module):
             # print("sub",sub_idx.sum())
             # print()
             
-            m_prompts = self.main_prompts[self.task_id] #* 1,2,3,20,768
-            main_key = self.main_key[self.task_id].unsqueeze(0)
+            m_prompts = self.main_prompts[-1] #* 1,2,3,20,768
+            main_key = self.main_key[-1].unsqueeze(0)
             
             one,dual,num_layer,p_length,dim = m_prompts.shape
             m_prompts = m_prompts.unsqueeze(0).expand(x.shape[0],one,dual,num_layer,p_length,dim) #* B,1,dual,Num_layer,prompt_len,dim
@@ -206,14 +209,14 @@ class Ours(nn.Module):
         x,sim = self.main_prompt_forward(x,query,m_prompts,main_key=main_key)
         self.simmilarity = sim.mean()
         feats = x[:,0]
-        x = self.backbone.fc_norm(feats)
-        x = self.backbone.fc(x)
+        feats = self.backbone.fc_norm(feats)
+        x = self.backbone.fc(feats)
         
         
         if test:
             return x
         else:
-            return x,query,main_idx,sub_idx
+            return x,feats,query,main_idx,sub_idx
         #todo ==========================================================
     
     def l2_normalize(self,x, dim=None, epsilon=1e-12):
@@ -280,20 +283,31 @@ class Ours(nn.Module):
         return n_dist,threshold
     
 
-    def expand_prompt(self,task_id):
-        # if task_id==0:
-        #     pass
-        # else:
-            
-        #     tmp_prompt_data = copy.deepcopy(self.sub_prompt.data)
-        #     tmp_key_data = copy.deepcopy(self.sub_key.data)
-        #     # s = s[:,None,None,None,:,:]
-        #     tmp_prompt_data = tmp_prompt_data[:,None,None,None,:,:].squeeze(0)
-        #     # s = s.expand(m[0].shape); print()
-        #     tmp_prompt_data = tmp_prompt_data.expand(self.main_prompts[task_id].data)
-        #     self.main_key[task_id].data = tmp_key_data
-        #     self.main_prompts[task_id].data = tmp_prompt_data
-        pass
+    def expand_prompt(self,device):
+        #* self.main_key     = nn.Parameter(torch.randn(1, self.backbone.embed_dim))
+        #* self.main_prompts = nn.Parameter(torch.randn(1,1,2, len(self.deep_layer), self.prompt_len, self.backbone.embed_dim))
+        
+        prompt_num,one,dual,num_layer,prompt_len, dim = self.main_prompts.shape
+        prev_prompt_data = self.main_prompts.data
+        
+        self.main_prompts = nn.Parameter(torch.randn(prompt_num+1,one,dual, num_layer, prompt_len, dim, device=device))
+        torch.nn.init.uniform_(self.main_prompts, -1, 1)
+        self.main_prompts[:-1].data = prev_prompt_data
+        # self.main_prompts[-1].data = prev_prompt_data[-1]
+        
+        key_num,key_dim = self.main_key.shape
+        prev_key_data = self.main_key.data
+        
+        self.main_key = nn.Parameter(torch.randn(key_num+1, key_dim,device=device))
+        torch.nn.init.uniform_(self.main_key,-1, 1)
+        self.main_key[:-1].data = prev_key_data
+        # self.main_key[-1].data = prev_key_data[-1]
+        
+        
+        print("[Expand Prompt Status]")
+        print("main_prompt:",self.main_prompts.shape)
+        print("main_key:",self.main_key.shape)
+        print()
 
     def sub_prompt_forward(self,sub_x,sub_query,prompts):
         #* prompt attach to input tokens
@@ -365,57 +379,6 @@ class Ours(nn.Module):
         return main_x,simmilarity
     
     
-    # def main_prompt_forward(self,main_x,main_query,prompts,main_key):
-    #     #* prompt attach to MSA
-    #     B,N,D = main_x.size()
-    #     simmilarity = torch.cosine_similarity(main_query, main_key, dim=1)
-        
-    #     batch_size, one,dual,num_layer, length, embed_dim = prompts.shape
-    #     prompts = prompts.contiguous().view(batch_size,dual*num_layer,length,embed_dim)
-        
-    #     #todo MSA attach
-    #     for idx, block in enumerate(self.backbone.blocks):
-    #         if idx in self.deep_layer:
-    #             #todo self.pre_attn(self.backbone.norm1(x), prompts)
-    #             #! 수정 시작하자!
-                
-    #             q = block.norm1(main_x)
-    #             k = q.clone()
-    #             v = q.clone()
-                
-    #             k = torch.cat([prompts[:,self.deep_layer.index(idx)*2+0], k], dim=1)
-    #             v = torch.cat([prompts[:,self.deep_layer.index(idx)*2+1], v], dim=1)
-    #             #?---------------------------------------
-    #             #? MSA Layer forward start
-    #             attn   = block.attn
-    #             weight = attn.qkv.weight
-    #             bias   = attn.qkv.bias
-    #             B, N, C = q.shape
-    #             q = F.linear(q, weight[:C   ,:], bias[:C   ]).reshape(B,  N, attn.num_heads, C // attn.num_heads).permute(0, 2, 1, 3)
-    #             _B, _N, _C = k.shape
-    #             k = F.linear(k, weight[C:2*C,:], bias[C:2*C]).reshape(B, _N, attn.num_heads, C // attn.num_heads).permute(0, 2, 1, 3)
-    #             _B, _N, _C = v.shape
-    #             v = F.linear(v, weight[2*C: ,:], bias[2*C: ]).reshape(B, _N, attn.num_heads, C // attn.num_heads).permute(0, 2, 1, 3)
-
-    #             attn = (q @ k.transpose(-2, -1)) * block.attn.scale
-    #             attn = attn.softmax(dim=-1)
-    #             attn = block.attn.attn_drop(attn)
-
-    #             attn = (attn @ v).transpose(1, 2).reshape(B, N, C)
-    #             attn = block.attn.proj(attn)
-    #             attn = block.attn.proj_drop(attn)
-    #             #?---------------------------------------
-    #             #? MSA Layer forward done
-                
-    #             main_x = main_x + block.drop_path1(block.ls1(attn))
-    #             main_x = main_x + block.drop_path2(block.ls2(block.mlp(block.norm2(main_x))))
-    #         else:
-    #             main_x = block(main_x)
-    #     #todo================================================================
-    #     main_x = self.backbone.norm(main_x)
-        
-    #     return main_x,simmilarity
-    
     def train(self: T, mode : bool = True, **kwargs):
         ten = super().train()
         self.backbone.eval()
@@ -431,13 +394,13 @@ class Ours(nn.Module):
         #* return F.cross_entropy(output, target) + (1-self.simmilarity)
         return F.cross_entropy(output, target,reduction='none'), (1-self.simmilarity)
 
-    def set_device(self,device):
-        self.device = device
-    def set_info(self,task_id):
-        #* Task Id is needed to control prompt scope
-        #* we already make whold prompt
-        #* if you expand prompts whenever new task are incomed, you don't need this one
-        self.task_id = task_id
+    # def set_device(self,device):
+    #     self.device = device
+    # def set_info(self,task_id):
+    #     #* Task Id is needed to control prompt scope
+    #     #* we already make whold prompt
+    #     #* if you expand prompts whenever new task are incomed, you don't need this one
+    #     self.task_id = task_id
     
     def query_forward(self,inputs):
         # self.eval()
@@ -455,21 +418,28 @@ class Ours(nn.Module):
         return query,main_idx,sub_idx
 
     def task_forward(self, x):
-        query,main_idx,sub_idx = self.query_forward(x)
         
-        # with torch.no_grad():
-        #     x = self.backbone.patch_embed(x)
-        #     m_prompts = self.main_prompts[self.task_id] #* 1,2,3,20,768
-        #     main_key = self.main_key[self.task_id].unsqueeze(0)
+        query,main_idx,sub_idx = self.query_forward(x)
+        # x = self.backbone.patch_embed(x)
+        # main_idx,sub_idx = self.split_samples(query)
+        # # self.main_cnt += main_idx.sum().item()
+        #     # self.sub_cnt += sub_idx.sum().item()
             
-        #     one,dual,num_layer,p_length,dim = m_prompts.shape
-        #     m_prompts = m_prompts.unsqueeze(0).expand(x.shape[0],one,dual,num_layer,p_length,dim) #* B,1,dual,Num_layer,prompt_len,dim
+        #     # print("main",main_idx.sum())
+        #     # print("sub",sub_idx.sum())
+        #     # print()
             
+        # m_prompts = self.main_prompts[-1] #* 1,2,3,20,768
+        # main_key = self.main_key[-1].unsqueeze(0)
+        
+        # one,dual,num_layer,p_length,dim = m_prompts.shape
+        # m_prompts = m_prompts.unsqueeze(0).expand(x.shape[0],one,dual,num_layer,p_length,dim) #* B,1,dual,Num_layer,prompt_len,dim
+        
 
-        #     x,sim = self.main_prompt_forward(x,query,m_prompts,main_key=main_key)
-        #     # self.simmilarity = sim.mean()
-        #     feats = x[:,0]
-        #     x = self.backbone.fc_norm(feats)
-        #     x = self.backbone.fc(x)
-        # return x,feats,main_idx,sub_idx
+        # x,_ = self.main_prompt_forward(x,query,m_prompts,main_key=main_key)
+        # # self.simmilarity = sim.mean()
+        # feats = x[:,0]
+        # feats = self.backbone.fc_norm(feats)
+        # x = self.backbone.fc_norm(feats)
+        # x = self.backbone.fc(x)
         return query,main_idx,sub_idx
