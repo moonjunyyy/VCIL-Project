@@ -72,7 +72,7 @@ def vit_base_patch16_224_l2p(pretrained=False, **kwargs):
 
 class Ours(nn.Module):
     def __init__(self,
-                 pool_size      : int   = 1,
+                 pool_size      : int   = 5,
                  selection_size : int   = 1,
                  prompt_len     : int   = 20,    #* prompt len for multu layer
                  n_task = 5,
@@ -117,8 +117,8 @@ class Ours(nn.Module):
         
         # self.main_key     = nn.Parameter(torch.randn(self.n_task, self.backbone.embed_dim))
         # self.main_prompts = nn.Parameter(torch.randn(self.n_task,1,2, len(self.deep_layer), self.prompt_len, self.backbone.embed_dim))
-        self.main_key     = nn.Parameter(torch.randn(1, self.backbone.embed_dim))
-        self.main_prompts = nn.Parameter(torch.randn(1,1,2, len(self.deep_layer), self.prompt_len, self.backbone.embed_dim))
+        self.main_key     = nn.Parameter(torch.randn(5, self.backbone.embed_dim))
+        self.main_prompts = nn.Parameter(torch.randn(5,1,2, len(self.deep_layer), self.prompt_len, self.backbone.embed_dim))
         
         #*===============================
         self.g_layer = [0,1]
@@ -178,20 +178,6 @@ class Ours(nn.Module):
             # simmilarity = F.cosine_similarity(query, cand_keys, dim=1)
             topk = similarity.topk(self.selection_size, dim=1)[1]
             
-            # for sample_i, select in enumerate(topk):
-            #     main_idx.append(sample_i)
-            #     m_prompts.append(select)
-                # if select.item()<= self.task_id:
-                #     main_idx.append(sample_i)
-                #     m_prompts.append(select)
-                # else:
-                #     sub_idx.append(sample_i)
-                #     s_prompts.append(select)
-            
-            # main_idx = torch.tensor(main_idx)
-            # m_prompts = torch.tensor(m_prompts)
-            # sub_idx = torch.tensor(sub_idx)
-            
             m_prompts = self.main_prompts[topk].squeeze(1)
             # m_prompts = self.main_prompts[topk]
             main_key = self.main_key[topk]
@@ -203,15 +189,26 @@ class Ours(nn.Module):
             self.main_cnt += main_idx.sum().item()
             self.sub_cnt += sub_idx.sum().item()
             
-            # print("main",main_idx.sum())
-            # print("sub",sub_idx.sum())
-            # print()
+            m_prompts=[]
+            s_prompts=[]
             
-            m_prompts = self.main_prompts[-1] #* 1,2,3,20,768
-            main_key = self.main_key[-1].unsqueeze(0)
+            query_norm = self.l2_normalize(query,dim=1)
+            #* key_norm = self.l2_normalize(cand_keys,dim=1)
+            key_norm = self.l2_normalize(self.main_key,dim=1)
+            similarity = torch.matmul(query_norm, key_norm.t()) # B, keys
+            # simmilarity = F.cosine_similarity(query, cand_keys, dim=1)
+            topk = similarity.topk(self.selection_size, dim=1)[1]
             
-            one,dual,num_layer,p_length,dim = m_prompts.shape
-            m_prompts = m_prompts.unsqueeze(0).expand(x.shape[0],one,dual,num_layer,p_length,dim) #* B,1,dual,Num_layer,prompt_len,dim
+            m_prompts = self.main_prompts[topk].squeeze(1)
+            # m_prompts = self.main_prompts[topk]
+            main_key = self.main_key[topk]
+            
+            
+            # m_prompts = self.main_prompts[-1] #* 1,2,3,20,768
+            # main_key = self.main_key[-1].unsqueeze(0)
+            
+            # one,dual,num_layer,p_length,dim = m_prompts.shape
+            # m_prompts = m_prompts.unsqueeze(0).expand(x.shape[0],one,dual,num_layer,p_length,dim) #* B,1,dual,Num_layer,prompt_len,dim
         
 
         x,sim = self.main_prompt_forward(x,query,m_prompts,main_key=main_key)
@@ -362,11 +359,11 @@ class Ours(nn.Module):
                 k = torch.cat([prompts[:,self.deep_layer.index(idx)*2+0], k], dim=1)
                 v = torch.cat([prompts[:,self.deep_layer.index(idx)*2+1], v], dim=1)
             #?---------------------------------------
-            #*---------------------------------------
-            if idx in self.g_layer:
-                k = torch.cat([g_prompts[:,self.g_layer.index(idx)*2+0], k], dim=1)
-                v = torch.cat([g_prompts[:,self.g_layer.index(idx)*2+1], v], dim=1)
-            #*---------------------------------------
+            # #*---------------------------------------
+            # if idx in self.g_layer:
+            #     k = torch.cat([g_prompts[:,self.g_layer.index(idx)*2+0], k], dim=1)
+            #     v = torch.cat([g_prompts[:,self.g_layer.index(idx)*2+1], v], dim=1)
+            # #*---------------------------------------
                 
             #? MSA Layer forward start
             attn   = block.attn

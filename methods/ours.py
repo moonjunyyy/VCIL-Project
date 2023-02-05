@@ -42,10 +42,10 @@ class Ours(_Trainer):
         
         if self.old_fc is not None:
             flag = self.is_task_changed(images[0])
-            if flag:
-                print("Detect New Task incomes!!")
-                self.model.expand_prompt(self.device)
-                self.reset_opt()
+            # if flag:
+            #     print("Detect New Task incomes!!")
+            #     self.model.expand_prompt(self.device)
+            #     self.reset_opt()
         self.add_new_class(labels[0])
         # train with augmented batches
         _loss, _acc, _iter = 0.0, 0.0, 0
@@ -125,6 +125,7 @@ class Ours(_Trainer):
         self.update_schedule()
         
         # self.prev_trace()
+        self.old_query = query[main_idx]
 
         total_loss += loss.item()
         total_correct += torch.sum(preds == y.unsqueeze(1)).item()
@@ -140,8 +141,8 @@ class Ours(_Trainer):
                 ori_logit,feats,query,main_idx,sub_idx= self.model(x)     #* logit, feats, main_idx, sub_idx
                 #* logit scale
                 if len(sub_idx) !=0:
-                # ori_logit[sub_idx] = (len(sub_idx)/(len(sub_idx)+len(main_idx)))*ori_logit[sub_idx]
-                    ori_logit[sub_idx] = (len(sub_idx)/len(main_idx))*ori_logit[sub_idx]
+                    ori_logit[sub_idx] = (len(sub_idx)/(len(sub_idx)+len(main_idx)))*ori_logit[sub_idx]
+                    # ori_logit[sub_idx] = (len(sub_idx)/len(main_idx))*ori_logit[sub_idx]
                 #     ori_logit[main_idx] = ((len(sub_idx)+len(main_idx))/(len(main_idx)))*ori_logit[main_idx]
                 
                 logit = ori_logit + self.mask
@@ -160,7 +161,7 @@ class Ours(_Trainer):
                     old_logit = self.old_fc(old_feats) + self.old_mask
                     kd_loss = self._KD_loss(ori_logit[:,:len(self.old_mask)],old_logit[:,:len(self.old_mask)],T=2.)
                     
-                    loss += 0.2 * kd_loss
+                    loss += 0.02 * kd_loss
         else:
             with torch.cuda.amp.autocast(enabled=self.use_amp):
                 ori_logit,feats,query,main_idx,sub_idx= self.model(x)     #* logit, feats, main_idx, sub_idx
@@ -171,7 +172,7 @@ class Ours(_Trainer):
                 logit = ori_logit + self.mask
                 loss,sim = self.criterion(logit, y)
                 if len(sub_idx) !=0:
-                    ori_logit[sub_idx] = (len(sub_idx)/len(main_idx))*ori_logit[sub_idx]
+                    ori_logit[sub_idx] = (len(sub_idx)/(len(sub_idx)+len(main_idx)))*ori_logit[sub_idx]
                 #     loss[sub_idx] = (len(main_idx)/len(sub_idx))*loss[sub_idx]
                 
                 loss = loss.mean() + sim
@@ -180,9 +181,9 @@ class Ours(_Trainer):
                     old_logit = self.old_fc(old_feats) + self.old_mask
                     kd_loss = self._KD_loss(ori_logit[:,:len(self.old_mask)],old_logit[:,:len(self.old_mask)],T=2.)
                     
-                    loss += 0.2 * kd_loss
+                    loss += 0.02 * kd_loss
             
-                
+
         return logit, loss, main_idx, query
 
     def _KD_loss(self,pred, soft, T):
@@ -256,30 +257,12 @@ class Ours(_Trainer):
             new_S_ent = self._get_entropy(new_S_logit)
             
             #*      Plan B
-            old_S_logit = self.old_fc(query[main_idx]) + self.old_mask
+            old_S_logit = self.model.backbone.fc(self.old_query) + self.mask
             old_S_ent = self._get_entropy(old_S_logit)
+            # old_S_logit = self.model.backbone.fc(query[main_idx]) + self.mask
+            # old_S_ent = self._get_entropy(old_S_logit)
             
-            # if idx ==0 or idx % 50 ==0:
-                #* current mean query 와 prev mean query Cosine check!
-                # cur_q = query[main_idx].mean(dim=0).unsqueeze(0)
-                # prev_q = self.old_query.mean(dim=0).unsqueeze(0)
-                # size = min(query[main_idx].shape[0],self.old_query.shape[0])
-                # print()
-                # print("Cosine_similarity_mean:",torch.cosine_similarity(cur_q,prev_q))
-                # print("Cosine_similarity_each_mean:",torch.cosine_similarity(query[main_idx][:size],self.old_query[:size]).mean())
-                # print()
-                # print("distance_mean:",torch.dist(cur_q,prev_q,p=2))
-                # print("distance:",torch.dist(query[main_idx][:size],self.old_query[:size],p=2))
-                # print("pairwise_distance_mean:",torch.pairwise_distance(query[main_idx][:size],self.old_query[:size]).mean()); print()
-                # # kl_div = F.kl_div(cur_q.log(),prev_q,reduction='batchmean')
-                # print("KL_DIV_mean:", F.kl_div(cur_q.softmax(dim=1).log(),prev_q.softmax(dim=1),reduction='batchmean'))
-                # print("KL_DIV_each:", F.kl_div(query[main_idx][:size].softmax(dim=1).log(),
-                #                            self.old_query[:size].softmax(dim=1),reduction='batchmean')); print()
-                # print("old fc Entropy:",old_S_ent)
-                # print("new fc Entropy:",new_S_ent)
-                # print()
-        # result = torch.abs(old_S_ent-new_S_ent) > 1.
-        result = new_S_ent - old_S_ent > 1.
+        result = new_S_ent - old_S_ent > 1.1
         print("old fc Entropy:",old_S_ent)
         print("new fc Entropy:",new_S_ent)
         print('result:',new_S_ent - old_S_ent)

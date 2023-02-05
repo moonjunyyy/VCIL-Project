@@ -308,7 +308,7 @@ class _Trainer():
             self.online_before_task(task_id)
             for i, (images, labels, idx) in enumerate(self.train_dataloader):
                 # if self.debug and (i+1)*self.batchsize >= 2000:
-                if self.debug and (i+1)*self.batchsize >= 4000:
+                if self.debug and (i+1)*self.batchsize >= 2000:
                     break
                 if samples_cnt > num_eval:
                 # if samples_cnt % args.eval_period == 0:

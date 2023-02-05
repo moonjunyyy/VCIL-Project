@@ -1,14 +1,15 @@
 #!/bin/bash
 
-#SBATCH -J Ours_cifar100_N50_M10_TF_test_KD_0.02_test
+#SBATCH --job-name lwf_cifar100_N50_M10_rnd_kd_0.02_M500_taskfree
 #SBATCH -p batch_agi
 #SBATCH -w agi2
 #SBATCH --nodes=1
 #SBATCH --gres=gpu:1
 #SBATCH --cpus-per-gpu=4
-#SBATCH --mem-per-gpu=48G
-#SBATCH --time=7-0
+#SBATCH --mem-per-gpu=20G
+#SBATCH --time=4-0
 #SBATCH -o %x_%j.log
+
 
 date
 # seeds=(1 21 42 3473 10741 32450 93462 85015 64648 71950 87557 99668 55552 4811 10741)
@@ -30,43 +31,46 @@ conda activate torch38gpu
 
 conda --version
 python --version
-
 # CIL CONFIG
-NOTE="Ours_Siblurry_cifar100_N50_M10_TF_test_KD0.02" # Short description of the experiment. (WARNING: logs/results with the same note will be overwritten!)
-MODE="ours"
+MODE="lwf++"
+NOTE="lwf_Siblurry_cifar100_N50_M10_rnd_kd0.02_M500_taskfree" # Short description of the experiment. (WARNING: logs/results with the same note will be overwritten!)
+
 DATASET="cifar100" # cifar10, cifar100, tinyimagenet, imagenet
 N_TASKS=5
 N=50
 M=10
 GPU_TRANSFORM="--gpu_transform"
 USE_AMP="--use_amp"
-SEEDS="1"
-
+SEEDS="1 2 3 4 5"
+VIT="True"
+OPT="adam"
 
 if [ "$DATASET" == "cifar10" ]; then
     MEM_SIZE=500 ONLINE_ITER=1
-    MODEL_NAME="resnet18" EVAL_PERIOD=100
-    BATCHSIZE=16; LR=3e-4 OPT_NAME="adam" SCHED_NAME="default"
+    MODEL_NAME="vit" EVAL_PERIOD=100
+    BATCHSIZE=16; LR=3e-4 OPT_NAME=$OPT SCHED_NAME="default" MEMORY_EPOCH=256
 
 elif [ "$DATASET" == "cifar100" ]; then
-    MEM_SIZE=2000 ONLINE_ITER=3
-    MODEL_NAME="ours" EVAL_PERIOD=100
-    BATCHSIZE=64; LR=0.005 OPT_NAME="adam" SCHED_NAME="default"
+    MEM_SIZE=500 ONLINE_ITER=3
+    MODEL_NAME="resnet34" EVAL_PERIOD=100
+    BATCHSIZE=64; LR=3e-4 OPT_NAME=$OPT SCHED_NAME="default" MEMORY_EPOCH=256
 
 elif [ "$DATASET" == "tinyimagenet" ]; then
     MEM_SIZE=4000 ONLINE_ITER=3
-    MODEL_NAME="resnet34" EVAL_PERIOD=100
-    BATCHSIZE=32; LR=3e-4 OPT_NAME="adam" SCHED_NAME="default"
+    MODEL_NAME="vit" EVAL_PERIOD=100
+    BATCHSIZE=32; LR=3e-4 OPT_NAME=$OPT SCHED_NAME="default" MEMORY_EPOCH=256
 
 elif [ "$DATASET" == "imagenet" ]; then
     N_TASKS=10 MEM_SIZE=20000 ONLINE_ITER=0.25
-    MODEL_NAME="resnet34" EVAL_PERIOD=1000
-    BATCHSIZE=256; LR=3e-4 OPT_NAME="adam" SCHED_NAME="default"
+    MODEL_NAME="vit" EVAL_PERIOD=1000
+    BATCHSIZE=256; LR= OPT_NAME=$OPT SCHED_NAME="multistep" MEMORY_EPOCH=100
 
 else
     echo "Undefined setting"
     exit 1
 fi
+
+echo "Batch size $BATCHSIZE (sum up all gpus) onlin iter $ONLINE_ITER"
 
 for RND_SEED in $SEEDS
 do
@@ -76,6 +80,6 @@ do
     --rnd_seed $RND_SEED \
     --model_name $MODEL_NAME --opt_name $OPT_NAME --sched_name $SCHED_NAME \
     --lr $LR --batchsize $BATCHSIZE \
-    --memory_size $MEM_SIZE $GPU_TRANSFORM --online_iter $ONLINE_ITER --data_dir /local_datasets \
-    --note $NOTE --eval_period $EVAL_PERIOD --n_worker 4 --rnd_NM --debug
+    --memory_size $MEM_SIZE $GPU_TRANSFORM --online_iter $ONLINE_ITER --data_dir /local_datasets/ \
+    --note $NOTE --eval_period $EVAL_PERIOD --memory_epoch $MEMORY_EPOCH --n_worker 4 --rnd_NM
 done
