@@ -100,6 +100,8 @@ class Ours(nn.Module):
         self.sub_cnt =0.
         self.deep_layer = [2,3,4]
         
+        
+        
         # self.task_id =0
         
         # self.simmilarity=0.
@@ -117,6 +119,12 @@ class Ours(nn.Module):
         # self.main_prompts = nn.Parameter(torch.randn(self.n_task,1,2, len(self.deep_layer), self.prompt_len, self.backbone.embed_dim))
         self.main_key     = nn.Parameter(torch.randn(1, self.backbone.embed_dim))
         self.main_prompts = nn.Parameter(torch.randn(1,1,2, len(self.deep_layer), self.prompt_len, self.backbone.embed_dim))
+        
+        #*===============================
+        self.g_layer = [0,1]
+        self.g_prompts = nn.Parameter(torch.randn(1,1,2, len(self.g_layer), self.prompt_len, self.backbone.embed_dim))
+        torch.nn.init.uniform_(self.g_prompts, -1, 1)
+        #*===============================
         
         #* weight initialization
         torch.nn.init.uniform_(self.main_key,     -1, 1)
@@ -333,6 +341,13 @@ class Ours(nn.Module):
         batch_size, one,dual,num_layer, length, embed_dim = prompts.shape
         prompts = prompts.contiguous().view(batch_size,dual*num_layer,length,embed_dim)
         
+        #* ---------------------
+        #* (torch.randn(1,1,2, len(self.g_layer), self.prompt_len, self.backbone.embed_dim))
+        # batch_size, one,dual,num_layer, length, embed_dim = prompts.shape
+        _,one,dual, g_layer, prompt_len, dim = self.g_prompts.shape
+        g_prompts= self.g_prompts.expand(batch_size,one,dual, g_layer, prompt_len, dim)
+        g_prompts = g_prompts.contiguous().view(batch_size,dual*g_layer,prompt_len,dim)
+        #* ---------------------
         #todo MSA attach
         for idx, block in enumerate(self.backbone.blocks):
             # if idx in self.deep_layer:
@@ -347,6 +362,12 @@ class Ours(nn.Module):
                 k = torch.cat([prompts[:,self.deep_layer.index(idx)*2+0], k], dim=1)
                 v = torch.cat([prompts[:,self.deep_layer.index(idx)*2+1], v], dim=1)
             #?---------------------------------------
+            #*---------------------------------------
+            if idx in self.g_layer:
+                k = torch.cat([g_prompts[:,self.g_layer.index(idx)*2+0], k], dim=1)
+                v = torch.cat([g_prompts[:,self.g_layer.index(idx)*2+1], v], dim=1)
+            #*---------------------------------------
+                
             #? MSA Layer forward start
             attn   = block.attn
             weight = attn.qkv.weight
@@ -442,3 +463,24 @@ class Ours(nn.Module):
         # x = self.backbone.fc_norm(feats)
         # x = self.backbone.fc(x)
         return query,main_idx,sub_idx
+    
+    def old_forward(self, x, prompts,key):
+        with torch.no_grad():
+            query,main_idx,sub_idx = self.query_forward(x)
+            x = self.backbone.patch_embed(x)
+            # main_idx,sub_idx = self.split_samples(query)
+                
+            # m_prompts = self.main_prompts[-1] #* 1,2,3,20,768
+            main_key = key[-1].unsqueeze(0)
+            
+            one,dual,num_layer,p_length,dim = prompts[-1].shape
+            m_prompts = prompts[-1].unsqueeze(0).expand(x.shape[0],one,dual,num_layer,p_length,dim) #* B,1,dual,Num_layer,prompt_len,dim
+            
+
+            x,_ = self.main_prompt_forward(x,query,m_prompts,main_key=main_key)
+            # self.simmilarity = sim.mean()
+            feats = x[:,0]
+            # feats = self.backbone.fc_norm(feats)
+            # x = self.backbone.fc_norm(feats)
+            # x = self.backbone.fc(x)
+        return feats

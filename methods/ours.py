@@ -22,36 +22,40 @@ class Ours(_Trainer):
         self.old_fc = None
         self.old_mask = None
         self.old_query = None
+        
     
-    def prev_trace(self,query):
+    def prev_trace(self):
         self.old_fc = copy.deepcopy(self.model.backbone.fc)
         self.old_mask = self.mask.clone().detach()
         for p in self.old_fc.parameters():
             p.requires_grad=False
-        self.old_query = query.clone().detach()
+        self.old_fc.eval()
+        self.old_prompt = self.model.main_prompts.clone().detach()
+        self.old_key = self.model.main_key.clone().detach()
+        # self.old_query = query.clone().detach()
         
     
     def online_step(self, images, labels, idx):
         # image, label = sample
+        #* check task shift
         
-        # self.is_task_changed(image,Bidx)
+        
+        if self.old_fc is not None:
+            flag = self.is_task_changed(images[0])
+            if flag:
+                print("Detect New Task incomes!!")
+                self.model.expand_prompt(self.device)
+                self.reset_opt()
         self.add_new_class(labels[0])
         # train with augmented batches
         _loss, _acc, _iter = 0.0, 0.0, 0
+        self.prev_trace()
         for Bidx,(image, label) in enumerate(zip(images, labels)):
-            #* check task shift
-            if self.old_fc is not None:
-                flag = self.is_task_changed(image,Bidx)
-                if flag:
-                    print("Detect New Task incomes!!")
-                    self.model.expand_prompt(self.device)
-                    self.reset_opt()
-            
-            #*====================
             loss, acc = self.online_train([image.clone(), label.clone()])
             _loss += loss
             _acc += acc
             _iter += 1
+        
         return _loss / _iter, _acc / _iter
     
     def add_new_class(self, class_name):
@@ -120,7 +124,7 @@ class Ours(_Trainer):
         self.scaler.update()
         self.update_schedule()
         
-        self.prev_trace(query[main_idx])
+        # self.prev_trace()
 
         total_loss += loss.item()
         total_correct += torch.sum(preds == y.unsqueeze(1)).item()
@@ -136,7 +140,9 @@ class Ours(_Trainer):
                 ori_logit,feats,query,main_idx,sub_idx= self.model(x)     #* logit, feats, main_idx, sub_idx
                 #* logit scale
                 if len(sub_idx) !=0:
+                # ori_logit[sub_idx] = (len(sub_idx)/(len(sub_idx)+len(main_idx)))*ori_logit[sub_idx]
                     ori_logit[sub_idx] = (len(sub_idx)/len(main_idx))*ori_logit[sub_idx]
+                #     ori_logit[main_idx] = ((len(sub_idx)+len(main_idx))/(len(main_idx)))*ori_logit[main_idx]
                 
                 logit = ori_logit + self.mask
                 a_loss, a_sim = self.criterion(logit, labels_a)
@@ -150,26 +156,31 @@ class Ours(_Trainer):
                 # loss = lam * self.criterion(logit, labels_a) + (1 - lam) * self.criterion(logit, labels_b)
                 loss = lam * (a_loss + a_sim) + (1 - lam) * (b_loss + b_sim)
                 if self.old_fc is not None:
-                    old_logit = self.old_fc(feats) + self.old_mask
+                    old_feats = self.model.old_forward(x,self.old_prompt,self.old_key)
+                    old_logit = self.old_fc(old_feats) + self.old_mask
                     kd_loss = self._KD_loss(ori_logit[:,:len(self.old_mask)],old_logit[:,:len(self.old_mask)],T=2.)
                     
-                    loss += 0.1 * kd_loss
+                    loss += 0.2 * kd_loss
         else:
             with torch.cuda.amp.autocast(enabled=self.use_amp):
                 ori_logit,feats,query,main_idx,sub_idx= self.model(x)     #* logit, feats, main_idx, sub_idx
-                if len(sub_idx) !=0:
-                    ori_logit[sub_idx] = (len(sub_idx)/len(main_idx))*ori_logit[sub_idx]
+                # if len(sub_idx) !=0:
+                #     ori_logit[sub_idx] = (len(sub_idx)/(len(sub_idx)+len(main_idx)))*ori_logit[sub_idx]
+                #     ori_logit[main_idx] = ((len(sub_idx)+len(main_idx))/(len(main_idx)))*ori_logit[main_idx]
                     
                 logit = ori_logit + self.mask
                 loss,sim = self.criterion(logit, y)
-                # if len(sub_idx) !=0:
+                if len(sub_idx) !=0:
+                    ori_logit[sub_idx] = (len(sub_idx)/len(main_idx))*ori_logit[sub_idx]
                 #     loss[sub_idx] = (len(main_idx)/len(sub_idx))*loss[sub_idx]
+                
                 loss = loss.mean() + sim
                 if self.old_fc is not None:
-                    old_logit = self.old_fc(feats) + self.old_mask
+                    old_feats = self.model.old_forward(x,self.old_prompt,self.old_key)
+                    old_logit = self.old_fc(old_feats) + self.old_mask
                     kd_loss = self._KD_loss(ori_logit[:,:len(self.old_mask)],old_logit[:,:len(self.old_mask)],T=2.)
                     
-                    loss += 0.1 * kd_loss
+                    loss += 0.2 * kd_loss
             
                 
         return logit, loss, main_idx, query
@@ -230,7 +241,7 @@ class Ours(_Trainer):
             self.scheduler.step()
     
     
-    def is_task_changed(self,x,idx):
+    def is_task_changed(self,x):
         self.model.eval()
         # self.old_fc.eval()
         # self.old_fc.eval()
@@ -245,7 +256,7 @@ class Ours(_Trainer):
             new_S_ent = self._get_entropy(new_S_logit)
             
             #*      Plan B
-            old_S_logit = self.model.backbone.fc(self.old_query) + self.mask
+            old_S_logit = self.old_fc(query[main_idx]) + self.old_mask
             old_S_ent = self._get_entropy(old_S_logit)
             
             # if idx ==0 or idx % 50 ==0:
@@ -268,7 +279,11 @@ class Ours(_Trainer):
                 # print("new fc Entropy:",new_S_ent)
                 # print()
         # result = torch.abs(old_S_ent-new_S_ent) > 1.
-        result = new_S_ent - old_S_ent > 1.2
+        result = new_S_ent - old_S_ent > 1.
+        print("old fc Entropy:",old_S_ent)
+        print("new fc Entropy:",new_S_ent)
+        print('result:',new_S_ent - old_S_ent)
+        print()
         if result:
             # cur_q = query[main_idx].mean(dim=0).unsqueeze(0)
             # prev_q = self.old_query.mean(dim=0).unsqueeze(0)
