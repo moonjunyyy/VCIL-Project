@@ -5,7 +5,7 @@
 #SBATCH --nodes=1
 #SBATCH --gres=gpu:1
 #SBATCH --cpus-per-gpu=4
-#SBATCH --mem-per-gpu=24G
+#SBATCH --mem-per-gpu=30G
 #SBATCH --time=7-0
 #SBATCH -o %x_%j.out
 #SBATCH -e %x_%j.err
@@ -77,5 +77,5 @@ do
     --model_name $MODEL_NAME --opt_name $OPT_NAME --sched_name $SCHED_NAME \
     --lr $LR --batchsize $BATCHSIZE \
     --memory_size $MEM_SIZE $GPU_TRANSFORM --online_iter $ONLINE_ITER --data_dir /local_datasets \
-    --note $NOTE --eval_period $EVAL_PERIOD --n_worker 4
+    --note $NOTE --eval_period $EVAL_PERIOD --n_worker 2
 done

@@ -35,7 +35,7 @@ def vit_base_patch16_224_l2p(pretrained=False, **kwargs):
 
 class Ours(nn.Module):
     def __init__(self,
-                 pos_g_prompt   : Iterable[int] = (0,1),
+                 pos_g_prompt   : Iterable[int] = (),
                  len_g_prompt   : int   = 5,
                  pos_e_prompt   : Iterable[int] = (2,3,4),
                  len_e_prompt   : int   = 20,
