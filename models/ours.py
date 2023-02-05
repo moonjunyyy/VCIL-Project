@@ -303,7 +303,6 @@ class Ours(nn.Module):
         self.main_key[:-1].data = prev_key_data
         # self.main_key[-1].data = prev_key_data[-1]
         
-        
         print("[Expand Prompt Status]")
         print("main_prompt:",self.main_prompts.shape)
         print("main_key:",self.main_key.shape)

@@ -153,7 +153,7 @@ class Ours(_Trainer):
                     old_logit = self.old_fc(feats) + self.old_mask
                     kd_loss = self._KD_loss(ori_logit[:,:len(self.old_mask)],old_logit[:,:len(self.old_mask)],T=2.)
                     
-                    loss += 0.2 * kd_loss
+                    loss += 0.1 * kd_loss
         else:
             with torch.cuda.amp.autocast(enabled=self.use_amp):
                 ori_logit,feats,query,main_idx,sub_idx= self.model(x)     #* logit, feats, main_idx, sub_idx
@@ -169,7 +169,7 @@ class Ours(_Trainer):
                     old_logit = self.old_fc(feats) + self.old_mask
                     kd_loss = self._KD_loss(ori_logit[:,:len(self.old_mask)],old_logit[:,:len(self.old_mask)],T=2.)
                     
-                    loss += 0.2 * kd_loss
+                    loss += 0.1 * kd_loss
             
                 
         return logit, loss, main_idx, query
