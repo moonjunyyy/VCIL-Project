@@ -14,7 +14,7 @@ ulimit -n 65536
 ### change 5-digit MASTER_PORT as you wish, slurm will raise Error if duplicated with others
 ### change WORLD_SIZE as gpus/node * num_nodes
 export MASTER_PORT=$(($RANDOM+32769))
-export WORLD_SIZE=$SLURM_NNODES
+export WORLD_SIZE=1
 
 ### get the first node name as master address - customized for vgg slurm
 ### e.g. master(gnodee[2-5],gnoded1) == gnodee2
@@ -77,6 +77,6 @@ do
     --rnd_seed $RND_SEED \
     --model_name $MODEL_NAME --opt_name $OPT_NAME --sched_name $SCHED_NAME \
     --lr $LR --batchsize $BATCHSIZE --n_worker 4 \
-    --memory_size $MEM_SIZE $GPU_TRANSFORM --online_iter $ONLINE_ITER --data_dir /local_datasets \
+    --memory_size $MEM_SIZE $GPU_TRANSFORM --online_iter $ONLINE_ITER --data_dir ./data \
     --note $NOTE --eval_period $EVAL_PERIOD --debug --memory_epoch $MEMORY_EPOCH --n_worker 4 --rnd_NM
 done

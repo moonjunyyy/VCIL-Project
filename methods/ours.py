@@ -1,6 +1,7 @@
 from methods._trainer import _Trainer
 from methods.er_baseline import ER
 import time
+import gc
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -10,28 +11,25 @@ from utils.data_loader import cutmix_data
 from utils.train_utils import select_optimizer, select_scheduler
 import numpy as np
 import torch.distributed as dist
+import datetime
 
 class Ours(_Trainer):
-
     def __init__(self, **kwargs):
         super(Ours, self).__init__(**kwargs)
     
     def online_step(self, images, labels, idx):
-        # image, label = sample
-        self.add_new_class(labels[0])
+        self.add_new_class(labels)
         # train with augmented batches
         _loss, _acc, _iter = 0.0, 0.0, 0
-        for image, label in zip(images, labels):
-            loss, acc = self.online_train([image.clone(), label.clone()])
+        for j in range(len(labels)):
+            labels[j] = self.exposed_classes.index(labels[j].item())
+        for _ in range(int(self.online_iter) * self.temp_batchsize * self.world_size):
+            loss, acc = self.online_train([images.clone(), labels.clone()])
             _loss += loss
             _acc += acc
             _iter += 1
-        # mask = torch.sigmoid(self.model_without_ddp.mask).tolist()
-        # mask = self.model_without_ddp.mask.tolist()
-        # for m in mask:
-        #     print(m)
-        # m = F.softmax(self.model_without_ddp.mask)
-        # print(m)
+        del(images, labels)
+        gc.collect()
         return _loss / _iter, _acc / _iter
     
     def add_new_class(self, class_name):
@@ -52,11 +50,6 @@ class Ours(_Trainer):
         if 'reset' in self.sched_name:
             self.update_schedule(reset=True)
         self.model_without_ddp.set_exposed_classes(self.exposed_classes)
-        # with torch.no_grad():
-        #     for name, param in self.model_without_ddp.named_parameters():
-        #         if name == 'mask':
-        #             param.data[len_class:len(self.exposed_classes)] = 0
-        #             param.data[len(self.exposed_classes):] = -torch.inf
 
     def online_before_task(self, task_id):
         pass
@@ -69,13 +62,11 @@ class Ours(_Trainer):
         self.model.train(True)
         total_loss, total_correct, total_num_data = 0.0, 0.0, 0.0
         x, y = data
-        for j in range(len(y)):
-            y[j] = self.exposed_classes.index(y[j].item())
-        # x = torch.cat([self.train_transform(transforms.ToPILImage()(_x)).unsqueeze(0) for _x in x])
-        # x = torch.cat([self.train_transform(_x).unsqueeze(0) for _x in x])
 
         x = x.to(self.device)
         y = y.to(self.device)
+        
+        x = self.train_transform(x)
 
         self.optimizer.zero_grad()
         logit, loss = self.model_forward(x,y)
@@ -154,3 +145,12 @@ class Ours(_Trainer):
                 param_group["lr"] = self.lr
         else:
             self.scheduler.step()
+    
+    def report_training(self, sample_num, train_loss, train_acc):
+        print(
+            f"Train | Sample # {sample_num} | train_loss {train_loss:.4f} | train_acc {train_acc:.4f} | "
+            f"lr {self.optimizer.param_groups[0]['lr']:.6f} | "
+            f"running_time {datetime.timedelta(seconds=int(time.time() - self.start_time))} | "
+            f"ETA {datetime.timedelta(seconds=int((time.time() - self.start_time) * (self.total_samples-sample_num) / sample_num))} | "
+            f"N_Prompts {self.model_without_ddp.e_prompts.size(0)} | "
+        )

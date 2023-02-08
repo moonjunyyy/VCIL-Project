@@ -97,7 +97,7 @@ class DualPrompt(nn.Module):
     def __init__(self,
                  pos_g_prompt   : Iterable[int] = (0, 1),
                  len_g_prompt   : int   = 5,
-                 pos_e_prompt   : Iterable[int] = (2, 3, 4),
+                 pos_e_prompt   : Iterable[int] = (-1,),
                  len_e_prompt   : int   = 20,
                  prompt_func    : str   = 'prefix_tuning',
                  task_num       : int   = 10,
@@ -262,7 +262,8 @@ class DualPrompt(nn.Module):
         return x
 
     def convert_train_task(self, task : torch.Tensor, **kwargs):
-        
+    
+        task = torch.tensor(task)
         flag = -1
         for n, t in enumerate(self.tasks):
             if torch.equal(t, task):

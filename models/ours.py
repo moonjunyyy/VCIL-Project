@@ -39,8 +39,8 @@ class Ours(nn.Module):
                  len_g_prompt   : int   = 5,
                  pos_e_prompt   : Iterable[int] = (2,3,4),
                  len_e_prompt   : int   = 20,
-                 prompt_func    : str   = 'prompt_tuning',
-                 task_num       : int   = 5,
+                 prompt_func    : str   = 'prefix_tuning',
+                 task_num       : int   = 10,
                  class_num      : int   = 100,
                  lambd          : float = 1.0,
                  backbone_name  : str   = None,
@@ -201,7 +201,8 @@ class Ours(nn.Module):
         # simmilarity = 1 - F.cosine_similarity(query.unsqueeze(1), key, dim=-1)
         simmilarity = 1 - F.cosine_similarity(query.unsqueeze(1), self.key, dim=-1)
         if self.training:
-            key_range   = 1 / ( 0.005 * self.count + 1).log()
+            key_range   = 1000 / (self.count + 1)
+            # key_range   = 1 / ( 0.001 * self.count + 1).log()
             in_range    = simmilarity < key_range
             no_match    = (in_range.sum(-1) == 0).nonzero().squeeze()
             if no_match.numel() != 0:
@@ -213,31 +214,13 @@ class Ours(nn.Module):
                     self.count = torch.cat((self.count, torch.zeros(no_match.shape[0], device=self.count.device)), dim=0)
                     self.key   = nn.Parameter(torch.cat((self.key, query[no_match].clone()), dim=0))
                     self.mask  = nn.Parameter(torch.cat((self.mask, torch.zeros(no_match.shape[0], self.class_num, device=self.mask.device)), dim=0))
-                    self.e_prompts = nn.Parameter(torch.cat((self.e_prompts, torch.randn(no_match.shape[0], self.e_size, self.backbone.embed_dim, device=self.e_prompts.device)), dim=0))
+                    self.e_prompts = nn.Parameter(torch.cat((self.e_prompts, self.e_prompts[simmilarity[no_match].argmin(dim=-1)].clone()), dim=0))
                 simmilarity = 1 - F.cosine_similarity(query.unsqueeze(1), self.key, dim=-1)
         topk = simmilarity.topk(1, dim=1, largest=False)[1]
         simmilarity = simmilarity[:, topk].squeeze().clone()
         e_prompts = self.e_prompts[topk].squeeze().clone()
         mask = self.mask[topk].squeeze().clone()
 
-        # simmilarity = simmilarity * (self.count + 1)
-        # topk = simmilarity.topk(1, dim=1, largest=False)[1]
-        # simmilarity = simmilarity.gather(1, topk).squeeze()
-        # if self.training:
-        #     too_far_prompts = (simmilarity >  (1 / ( 0.001 * self.count[topk].squeeze() + 1).log())).nonzero().squeeze()
-        #     if too_far_prompts.numel() != 0:
-        #         if too_far_prompts.numel() == 1:
-        #             too_far_prompts = too_far_prompts.unsqueeze(0)
-        #         print('too_far_prompts', too_far_prompts)
-        #         print('sim', simmilarity[too_far_prompts])
-        #         with torch.no_grad():
-        #             self.count = torch.cat((self.count, torch.zeros(too_far_prompts.shape[0], device=self.count.device)), dim=0)
-        #             self.key = nn.Parameter(torch.cat((self.key, query[too_far_prompts].clone()), dim=0))
-        #             self.mask = nn.Parameter(torch.cat((self.mask, torch.zeros((too_far_prompts.shape[0], self.class_num), device=self.mask.device)), dim=0))
-        #             self.e_prompts = nn.Parameter(torch.cat((self.e_prompts, self.e_prompts[topk.squeeze()[too_far_prompts]].clone()), dim=0))
-        #         simmilarity = F.cosine_similarity(query.unsqueeze(1), self.key, dim=-1)
-        #         topk = simmilarity.topk(1, dim=1)[1]
-        #         simmilarity = simmilarity.gather(1, topk).squeeze()
         g_prompts = self.g_prompts[0].repeat(B, 1, 1)
         # e_prompts = self.e_prompts[topk]
         # mask = self.mask[topk].squeeze()

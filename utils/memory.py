@@ -80,7 +80,17 @@ class Memory:
 
     def __len__(self):
         return len(self.labels)
-    
+
+    def sample(self, memory_batchsize):
+        assert self.data_source is not None
+        idx = torch.randperm(len(self.images), dtype=torch.int64)[:memory_batchsize]
+        images = []
+        labels = []
+        for i in idx:
+            images.append(self.images[i])
+            labels.append(self.labels[i])
+        return torch.cat(images), torch.tensor(labels)
+
 class MemoryBatchSampler(torch.utils.data.Sampler):
     def __init__(self, memory: Memory, batch_size: int, iterations: int = 1) -> None:
         self.memory = memory

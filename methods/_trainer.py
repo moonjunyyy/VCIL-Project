@@ -90,8 +90,8 @@ class _Trainer():
         self.train_count = 0
 
         self.ngpus_per_nodes = torch.cuda.device_count()
-        
-        if "WORLD_SIZE" in os.environ:
+        self.world_size = 1
+        if "WORLD_SIZE" in os.environ and os.environ["WORLD_SIZE"] != '':
             self.world_size  = int(os.environ["WORLD_SIZE"]) * self.ngpus_per_nodes
         else:
             self.world_size  = self.world_size * self.ngpus_per_nodes
@@ -126,11 +126,14 @@ class _Trainer():
         }
 
         mean, std, n_classes, inp_size, _ = get_statistics(dataset=self.dataset)
+        if self.model_name == 'vit' or self.model_name == 'L2P' or self.model_name == 'ours' or self.model_name == 'DualPrompt':
+            inp_size = 224    
         self.n_classes = n_classes
+        self.inp_size = inp_size
+        self.mean = mean
+        self.std = std
 
         train_transform = []
-        if self.model_name == 'vit' or self.model_name == 'L2P' or self.model_name == 'ours' or self.model_name == 'DualPrompt':
-            inp_size = 224
         self.cutmix = "cutmix" in self.transforms 
         if "cutout" in self.transforms:
             train_transform.append(Cutout(size=16))
@@ -151,11 +154,13 @@ class _Trainer():
                 train_transform.append(transforms.AutoAugment(transforms.AutoAugmentPolicy('svhn')))
                 
         self.train_transform = transforms.Compose([
+                lambda x: (x * 255).to(torch.uint8),
                 transforms.Resize((inp_size, inp_size)),
                 transforms.RandomCrop(inp_size, padding=4),
                 transforms.RandomHorizontalFlip(),
                 *train_transform,
-                transforms.ToTensor(),
+                lambda x: x.float() / 255,
+                # transforms.ToTensor(),
                 transforms.Normalize(mean, std),])
         print(f"Using train-transforms {train_transform}")
         self.test_transform = transforms.Compose([
@@ -168,14 +173,16 @@ class _Trainer():
         _w = dist.get_world_size() if self.distributed else None # means that it is not distributed
 
         self.train_dataset   = self.datasets[self.dataset](root=self.data_dir, train=True,  download=True, 
-                                                      transform=self.train_transform)
-        self.online_iter_dataset = OnlineIterDataset(self.train_dataset, self.temp_batchsize * self.online_iter * self.world_size)
+                                                      transform=transforms.ToTensor())
+        self.online_iter_dataset = OnlineIterDataset(self.train_dataset, 1)
         self.test_dataset    = self.datasets[self.dataset](root=self.data_dir, train=False, download=True, transform=self.test_transform)
 
         self.train_sampler   = OnlineSampler(self.online_iter_dataset, self.n_tasks, self.m, self.n, self.rnd_seed, 0, self.rnd_NM, _w, _r)
+        # self.train_sampler   = OnlineSampler(self.train_dataset, self.n_tasks, self.m, self.n, self.rnd_seed, 0, self.rnd_NM, _w, _r)
         self.test_sampler    = OnlineTestSampler(self.test_dataset, [], _w, _r)
 
-        self.train_dataloader    = DataLoader(self.online_iter_dataset, batch_size=self.temp_batchsize, sampler=self.train_sampler, num_workers=self.n_worker, pin_memory=True)
+        self.train_dataloader    = DataLoader(self.online_iter_dataset, batch_size=self.temp_batchsize, sampler=self.train_sampler, num_workers=self.n_worker)
+        # self.train_dataloader    = DataLoader(self.train_dataset, batch_size=self.temp_batchsize, sampler=self.train_sampler, num_workers=self.n_worker)
         
         self.mask = torch.zeros(self.n_classes, device=self.device) - torch.inf
         self.seen = 0
@@ -206,16 +213,7 @@ class _Trainer():
 
     def run(self):
         # Distributed Launch
-        # mp.set_start_method('spawn')
         if self.ngpus_per_nodes > 1:
-            # processes = []
-            # for i in range(0, self.ngpus_per_nodes):
-            #     p = mp.Process(target=self.main_worker, args=(i,))
-            #     processes.append(p)
-            #     p.start()
-            # for p in processes:
-            #     p.join()
-            os.environ["TORCH_DISTRIBUTED_DEBUG"] = "DETAIL"
             mp.spawn(self.main_worker, nprocs=self.ngpus_per_nodes, join=True)
         else:
             self.main_worker(0)
@@ -304,18 +302,16 @@ class _Trainer():
             
             self.train_sampler.set_task(task_id)
             # self.current_task_data(self.train_dataloader)
-            self.online_before_task(task_id)
-            
+
+            self.online_before_task(task_id)          
             for i, (images, labels, idx) in enumerate(self.train_dataloader):
                 if self.debug and (i+1)*self.temp_batchsize >= 500:
                     break
-                samples_cnt += images[0].size(0) * self.world_size
+                samples_cnt += images.size(0) * self.world_size
                 loss, acc = self.online_step(images, labels, idx)
                 self.report_training(samples_cnt, loss, acc)
 
-                if samples_cnt + images[0].size(0) * self.world_size > num_eval:
-                # if samples_cnt % args.eval_period == 0:
-                # if True:
+                if samples_cnt + images.size(0) * self.world_size > num_eval:
                     with torch.no_grad():
                         test_sampler = OnlineTestSampler(self.test_dataset, self.exposed_classes)
                         test_dataloader = DataLoader(self.test_dataset, batch_size=self.batchsize*2, sampler=test_sampler, num_workers=self.n_worker)
@@ -332,9 +328,6 @@ class _Trainer():
                             eval_results["data_cnt"].append(num_eval)
                             self.report_test(num_eval, eval_dict["avg_loss"], eval_dict['avg_acc'])
                         num_eval += self.eval_period
-                
-                # loss, acc = self.online_step([image,label], samples_cnt)
-                # self.report_training(samples_cnt, loss, acc)
             self.online_after_task(task_id)
             
             test_sampler = OnlineTestSampler(self.test_dataset, self.exposed_classes)
@@ -345,7 +338,6 @@ class _Trainer():
             if self.distributed:
                 eval_dict =  torch.tensor([eval_dict['avg_loss'], eval_dict['avg_acc'], *eval_dict['cls_acc']], device=self.device)
                 dist.reduce(eval_dict, dst=0, op=dist.ReduceOp.SUM)
-                # dist.all_reduce(eval_dict, op=dist.ReduceOp.SUM)
                 eval_dict = eval_dict.cpu().numpy()
                 eval_dict = {'avg_loss': eval_dict[0]/self.world_size, 'avg_acc': eval_dict[1]/self.world_size, 'cls_acc': eval_dict[2:]/self.world_size}
             task_acc = eval_dict['avg_acc']
@@ -353,21 +345,16 @@ class _Trainer():
             print("[2-4] Update the information for the current task")
             task_records["task_acc"].append(task_acc)
             task_records["cls_acc"].append(eval_dict["cls_acc"])
-            # print(f"Test | Sample # {samples_cnt} | test_loss {avg_loss:.4f} | test_acc {avg_acc:.4f} | ")
 
             print("[2-5] Report task result")
             # self.writer.add_scalar("Metrics/TaskAcc", task_acc, task_id)
-        
         if self.is_main_process():        
             np.save(f"{self.log_path}/logs/{self.dataset}/{self.note}/seed_{self.rnd_seed}.npy", task_records["task_acc"])
 
-        # if self.mode == 'gdumb':
-        #     eval_results, task_records = self.evaluate_all(self.test_dataset, self.memory_epoch, self.batchsize, self.n_worker)
-        if self.eval_period is not None:
-            np.save(f'{self.log_path}/logs/{self.dataset}/{self.note}/seed_{self.rnd_seed}_eval.npy', eval_results['test_acc'])
-            np.save(f'{self.log_path}/logs/{self.dataset}/{self.note}/seed_{self.rnd_seed}_eval_time.npy', eval_results['data_cnt'])
-
-        if self.is_main_process():        
+            if self.eval_period is not None:
+                np.save(f'{self.log_path}/logs/{self.dataset}/{self.note}/seed_{self.rnd_seed}_eval.npy', eval_results['test_acc'])
+                np.save(f'{self.log_path}/logs/{self.dataset}/{self.note}/seed_{self.rnd_seed}_eval_time.npy', eval_results['data_cnt'])
+    
             # Accuracy (A)
             A_auc = np.mean(eval_results["test_acc"])
             A_avg = np.mean(task_records["task_acc"])
@@ -386,7 +373,7 @@ class _Trainer():
         
     def add_new_class(self, class_name):
         # For DDP, normally go into this function
-        len_class = len(self.exposed_classes)
+        # len_class = len(self.exposed_classes)
         exposed_classes = []
         for label in class_name:
             if label.item() not in self.exposed_classes:
@@ -472,18 +459,6 @@ class _Trainer():
             f"Test | Sample # {sample_num} | test_loss {avg_loss:.4f} | test_acc {avg_acc:.4f} | "
         )
     
-    # def sync_data(self, sample_num, loss, acc):
-        
-    #     torch.cuda.synchronize()
-    #     t = torch.tensor([loss, acc, sample_num], dtype=torch.float64, device='cuda')
-    #     dist.barrier()
-    #     dist.all_reduce(t)
-    #     t = t.tolist()
-    #     loss = t[0] / self.world_size
-    #     acc = t[1] / self.world_size
-    #     sample_num=int(t[2])
-    #     return sample_num,loss,acc
-
     def _interpret_pred(self, y, pred):
         # xlable is batch
         ret_num_data = torch.zeros(self.n_classes)

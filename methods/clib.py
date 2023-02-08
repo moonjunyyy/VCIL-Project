@@ -11,6 +11,7 @@ import torchvision.transforms as transforms
 from torch.utils.tensorboard import SummaryWriter
 from scipy.stats import ttest_ind
 
+import gc
 from methods.er_baseline import ER
 from utils.memory import MemoryBatchSampler, MemoryOrderedSampler
 from utils.memory import Memory
@@ -52,26 +53,27 @@ class CLIB(ER):
         # self.online_iter_dataset = OnlineIterDataset(self.train_dataset, 1)
         # self.train_sampler   = OnlineSampler(self.online_iter_dataset, self.n_tasks, self.m, self.n, self.rnd_seed, 0, self.rnd_NM, _w, _r)
         # self.train_dataloader    = DataLoader(self.online_iter_dataset, batch_size=self.temp_batchsize, sampler=self.train_sampler, num_workers=self.n_worker, pin_memory=True)
-        
         self.loss_update_dataset = self.datasets[self.dataset](root=self.data_dir, train=True, download=True,
-                                     transform=transforms.Compose([transforms.Resize((self.inp_size,self.inp_size)),transforms.ToTensor()]))
+                                     transform=transforms.Compose([transforms.Resize((self.inp_size,self.inp_size)),
+                                                                   transforms.ToTensor()]))
         self.memory = Memory(data_source=self.loss_update_dataset)
 
     def online_step(self, images, labels, idx):
-        self.add_new_class(labels[0])
-        self.update_memory(idx, labels[0])
+        self.add_new_class(labels)
+        self.update_memory(idx, labels)
         self.memory_sampler  = MemoryBatchSampler(self.memory, self.memory_batchsize, self.temp_batchsize * self.online_iter * self.world_size)
-        self.memory_dataloader   = DataLoader(self.train_dataset, batch_size=self.memory_batchsize, sampler=self.memory_sampler, num_workers=self.n_worker, pin_memory=True)
+        self.memory_dataloader   = DataLoader(self.train_dataset, batch_size=self.memory_batchsize, sampler=self.memory_sampler, num_workers=0)
         self.memory_provider     = iter(self.memory_dataloader)
         # train with augmented batches
-        _loss, _acc, self.iter = 0.0, 0.0, 0
-        for image, label in zip(images, labels):
+        _loss, _acc, _iter = 0.0, 0.0, 0
+        for _ in range(int(self.online_iter) * self.temp_batchsize * self.world_size):
             loss, acc = self.online_train([torch.empty(0), torch.empty(0)])
             _loss += loss
             _acc += acc
-            self.iter += 1
-        self.num_updates -= int(self.num_updates)
-        return _loss / self.iter, _acc / self.iter
+            _iter += 1
+        del(images, labels)
+        gc.collect()
+        return _loss / _iter, _acc / _iter
 
     def update_memory(self, index, label):
         # Update memory
@@ -116,6 +118,8 @@ class CLIB(ER):
 
         x = x.to(self.device)
         y = y.to(self.device)
+
+        x = self.train_transform(x)
 
         self.optimizer.zero_grad()
         logit, loss = self.model_forward(x,y)

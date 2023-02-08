@@ -1,6 +1,7 @@
 # When we make a new one, we should inherit the Finetune class.
 import logging
 import time
+import gc
 
 import numpy as np
 import torch
@@ -32,18 +33,22 @@ class ER(_Trainer):
 
     def online_step(self, images, labels, idx):
         # image, label = sample
-        self.add_new_class(labels[0])
+        self.add_new_class(labels)
         self.memory_sampler  = MemoryBatchSampler(self.memory, self.memory_batchsize, self.temp_batchsize * self.online_iter * self.world_size)
-        self.memory_dataloader   = DataLoader(self.train_dataset, batch_size=self.memory_batchsize, sampler=self.memory_sampler, num_workers=0, pin_memory=True)
+        self.memory_dataloader   = DataLoader(self.train_dataset, batch_size=self.memory_batchsize, sampler=self.memory_sampler, num_workers=0)
         self.memory_provider     = iter(self.memory_dataloader)
         # train with augmented batches
+        for j in range(len(labels)):
+            labels[j] = self.exposed_classes.index(labels[j].item())
         _loss, _acc, _iter = 0.0, 0.0, 0
-        for image, label in zip(images, labels):
-            loss, acc = self.online_train([image.clone(), label.clone()])
+        for _ in range(int(self.online_iter) * self.temp_batchsize * self.world_size):
+            loss, acc = self.online_train([images.clone(), labels.clone()])
             _loss += loss
             _acc += acc
             _iter += 1
-        self.update_memory(idx, labels[0])
+        self.update_memory(idx, labels)
+        del(images, labels)
+        gc.collect()
         return _loss / _iter, _acc / _iter
     
     def update_memory(self, sample, label):
@@ -79,9 +84,9 @@ class ER(_Trainer):
         for i, index in enumerate(idx):
             if len(self.memory) >= self.memory_size:
                 if index < self.memory_size:
-                    self.memory.replace_data([sample[i], label[i].item()], index)
+                    self.memory.replace_data([sample[i], self.exposed_classes[label[i].item()]], index)
             else:
-                self.memory.replace_data([sample[i], label[i].item()])
+                self.memory.replace_data([sample[i], self.exposed_classes[label[i].item()]])
 
     def online_before_task(self, task_id):
         pass
@@ -94,18 +99,15 @@ class ER(_Trainer):
         total_loss, total_correct, total_num_data = 0.0, 0.0, 0.0
         x, y = data
         if len(self.memory) > 0 and self.memory_batchsize > 0:
-            # memory_batchsize = min(self.memory_batchsize, len(self.memory))
-            # memory_images, memory_labels = self.memory.get_batch(memory_batchsize)
             memory_images, memory_labels = next(self.memory_provider)
+            for i in range(len(memory_labels)):
+                memory_labels[i] = self.exposed_classes.index(memory_labels[i].item())
             x = torch.cat([x, memory_images], dim=0)
             y = torch.cat([y, memory_labels], dim=0)
-        for j in range(len(y)):
-            y[j] = self.exposed_classes.index(y[j].item())
-        # x = torch.cat([self.train_transform(transforms.ToPILImage()(_x)).unsqueeze(0) for _x in x])
-        # x = torch.cat([self.train_transform(_x).unsqueeze(0) for _x in x])
 
         x = x.to(self.device)
         y = y.to(self.device)
+        x = self.train_transform(x)
 
         self.optimizer.zero_grad()
         logit, loss = self.model_forward(x,y)

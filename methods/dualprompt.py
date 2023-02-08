@@ -27,6 +27,7 @@ import copy
 import time
 import datetime
 
+import gc
 import numpy as np
 import pandas as pd
 import torch
@@ -81,14 +82,16 @@ class DualPrompt(_Trainer):
         self.class_mask_dict={}
     
     def online_step(self, images, labels, idx):
-        self.add_new_class(labels[0])
+        self.add_new_class(labels)
         # train with augmented batches
         _loss, _acc, _iter = 0.0, 0.0, 0
-        for image, label in zip(images, labels):
-            loss, acc = self.online_train([image.clone(), label.clone()])
+        for _ in range(int(self.online_iter) * self.temp_batchsize * self.world_size):
+            loss, acc = self.online_train([images.clone(), labels.clone()])
             _loss += loss
             _acc += acc
             _iter += 1
+        del(images, labels)
+        gc.collect()
         return _loss / _iter, _acc / _iter
 
     def online_train(self, data):
@@ -100,6 +103,8 @@ class DualPrompt(_Trainer):
 
         x = x.to(self.device)
         y = y.to(self.device)
+
+        x = self.train_transform(x)
 
         self.optimizer.zero_grad()
         logit, loss = self.model_forward(x,y)
