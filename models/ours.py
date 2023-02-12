@@ -35,11 +35,11 @@ def vit_base_patch16_224_l2p(pretrained=False, **kwargs):
 
 class Ours(nn.Module):
     def __init__(self,
-                 pos_g_prompt   : Iterable[int] = (),
+                 pos_g_prompt   : Iterable[int] = (0,1),
                  len_g_prompt   : int   = 5,
                  pos_e_prompt   : Iterable[int] = (2,3,4),
-                 len_e_prompt   : int   = 20,
-                 prompt_func    : str   = 'prefix_tuning',
+                 len_e_prompt   : int   = 5,
+                 prompt_func    : str   = 'prompt_tuning',
                  task_num       : int   = 10,
                  class_num      : int   = 100,
                  lambd          : float = 1.0,
@@ -54,22 +54,12 @@ class Ours(nn.Module):
         self.class_num   = class_num
         self.task_num    = task_num
 
-        # model_kwargs = dict(
-        # patch_size=16, embed_dim=768, depth=12, num_heads=12, **kwargs)
-        
-        # self.add_module('backbone', timm.models.create_model(backbone_name, pretrained=True, num_classes=class_num))
         self.add_module('backbone', timm.models.create_model(backbone_name, pretrained=True, num_classes=class_num,
                                                              drop_rate=0.,drop_path_rate=0.,drop_block_rate=None))
         for name, param in self.backbone.named_parameters():
                 param.requires_grad = False
         self.backbone.fc.weight.requires_grad = True
         self.backbone.fc.bias.requires_grad   = True
-
-        # self.fc = self.backbone.fc
-        
-        # self.key     = nn.Parameter(torch.randn(pool_size, self.backbone.embed_dim))
-        # self.prompts = nn.Parameter(torch.randn(pool_size, self.prompt_len, self.backbone.embed_dim))
-        # self.mask    = nn.Parameter((torch.zeros(pool_size, self.class_num)))
 
         self.register_buffer('pos_g_prompt', torch.tensor(pos_g_prompt, dtype=torch.int64))
         self.register_buffer('pos_e_prompt', torch.tensor(pos_e_prompt, dtype=torch.int64))
@@ -133,6 +123,7 @@ class Ours(nn.Module):
             if pos_e.numel() != 0:
                 x = torch.cat((x, e_prompt[:, pos_e]), dim = 1)
             x = block(x)
+            x = x[:, :N, :]
         return x
     
     def prefix_tuning(self,
@@ -146,20 +137,19 @@ class Ours(nn.Module):
         e_prompt = e_prompt.contiguous().view(B, 2 * self.e_length, self.len_e_prompt, C)
 
         for n, block in enumerate(self.backbone.blocks):
-
             xq = block.norm1(x)
             xk = xq.clone()
             xv = xq.clone()
 
             pos_g = ((self.pos_g_prompt.eq(n)).nonzero()).squeeze()
             if pos_g.numel() != 0:
-                xk = torch.cat((xk, g_prompt[:, pos_g * 2 + 0]), dim = 1)
-                xv = torch.cat((xv, g_prompt[:, pos_g * 2 + 1]), dim = 1)
+                xk = torch.cat((xk, g_prompt[:, pos_g * 2 + 0].clone()), dim = 1)
+                xv = torch.cat((xv, g_prompt[:, pos_g * 2 + 1].clone()), dim = 1)
 
             pos_e = ((self.pos_e_prompt.eq(n)).nonzero()).squeeze()
             if pos_e.numel() != 0:
-                xk = torch.cat((xk, e_prompt[:, pos_e * 2 + 0]), dim = 1)
-                xv = torch.cat((xv, e_prompt[:, pos_e * 2 + 1]), dim = 1)
+                xk = torch.cat((xk, e_prompt[:, pos_e * 2 + 0].clone()), dim = 1)
+                xv = torch.cat((xv, e_prompt[:, pos_e * 2 + 1].clone()), dim = 1)
             
             attn   = block.attn
             weight = attn.qkv.weight
@@ -182,7 +172,6 @@ class Ours(nn.Module):
 
             x = x + block.drop_path1(block.ls1(attention))
             x = x + block.drop_path2(block.ls2(block.mlp(block.norm2(x))))
-
         return x
 
     def forward(self, inputs : torch.Tensor, **kwargs) -> torch.Tensor:
@@ -194,15 +183,19 @@ class Ours(nn.Module):
             cls_token = self.backbone.cls_token.expand(B, -1, -1)
             token_appended = torch.cat((cls_token, x), dim=1)
             x = self.backbone.pos_drop(token_appended + self.backbone.pos_embed)
-            query = self.backbone.blocks(x)
-            query = self.backbone.norm(query)[:, 0]
+            query = x.clone()
+            for n, block in enumerate(self.backbone.blocks):
+                if n == len(self.backbone.blocks) - 1: break
+                query = block(query)
+            query = query[:, 0]
+            # query = self.backbone.norm(query)[:, 0]
 
         # key = self.key / (self.count.unsqueeze(-1) + 1)
         # simmilarity = 1 - F.cosine_similarity(query.unsqueeze(1), key, dim=-1)
         simmilarity = 1 - F.cosine_similarity(query.unsqueeze(1), self.key, dim=-1)
         if self.training:
-            key_range   = 1000 / (self.count + 1)
-            # key_range   = 1 / ( 0.001 * self.count + 1).log()
+            # key_range   = 1 / (self.count + 1)
+            key_range   = 1 / ( 0.1 * self.count + 1).log()
             in_range    = simmilarity < key_range
             no_match    = (in_range.sum(-1) == 0).nonzero().squeeze()
             if no_match.numel() != 0:
@@ -254,7 +247,7 @@ class Ours(nn.Module):
         self.key_wise_distance = (- (self.key_wise_distance + 1e-5).log()).mean()
 
         # if self.training:
-        x = x * mask
+        # x = x * mask
         return x
     
     def loss_fn(self, output, target):

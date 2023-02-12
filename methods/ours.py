@@ -153,4 +153,5 @@ class Ours(_Trainer):
             f"running_time {datetime.timedelta(seconds=int(time.time() - self.start_time))} | "
             f"ETA {datetime.timedelta(seconds=int((time.time() - self.start_time) * (self.total_samples-sample_num) / sample_num))} | "
             f"N_Prompts {self.model_without_ddp.e_prompts.size(0)} | "
+            f"N_Exposed {len(self.exposed_classes)} | "
         )
