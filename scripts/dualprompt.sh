@@ -1,13 +1,14 @@
 #!/bin/bash
 
 #SBATCH -J DP_iblurry_cifar100_N50_M10_RND
+#SBATCH -p batch_agi
+#SBATCH  -w agi2
 #SBATCH --nodes=1
 #SBATCH --gres=gpu:1
 #SBATCH --cpus-per-gpu=4
-#SBATCH --mem-per-gpu=48G
+#SBATCH --mem-per-gpu=20G
 #SBATCH -t 7-0
 #SBATCH -o %x_%j.log
-#SBATCH -e %x_%j.err
 
 date
 ulimit -n 65536
@@ -23,8 +24,8 @@ master_addr=$(scontrol show hostnames "$SLURM_JOB_NODELIST" | head -n 1)
 export MASTER_ADDR=$master_addr
 echo "MASTER_ADDR="$MASTER_ADDR
 
-source /data/moonjunyyy/init.sh
-conda activate iblurry
+source /data/keonhee/init.sh
+conda activate torch38gpu
 
 conda --version
 python --version
@@ -50,7 +51,7 @@ if [ "$DATASET" == "cifar10" ]; then
 elif [ "$DATASET" == "cifar100" ]; then
     MEM_SIZE=2000 ONLINE_ITER=3
     MODEL_NAME="DualPrompt" EVAL_PERIOD=100
-    BATCHSIZE=64; LR=5e-3 OPT_NAME="adam" SCHED_NAME="default" MEMORY_EPOCH=256
+    BATCHSIZE=64; LR=3e-2 OPT_NAME="adam" SCHED_NAME="default" MEMORY_EPOCH=256
 
 elif [ "$DATASET" == "tinyimagenet" ]; then
     MEM_SIZE=4000 ONLINE_ITER=3
@@ -76,7 +77,7 @@ do
     --n_tasks $N_TASKS --m $M --n $N \
     --rnd_seed $RND_SEED \
     --model_name $MODEL_NAME --opt_name $OPT_NAME --sched_name $SCHED_NAME \
-    --lr $LR --batchsize $BATCHSIZE --n_worker 4 \
+    --lr $LR --batchsize $BATCHSIZE --n_worker 2 \
     --memory_size $MEM_SIZE $GPU_TRANSFORM --online_iter $ONLINE_ITER --data_dir ./data \
-    --note $NOTE --eval_period $EVAL_PERIOD --debug --memory_epoch $MEMORY_EPOCH --n_worker 4 --rnd_NM
+    --note $NOTE --eval_period $EVAL_PERIOD  --memory_epoch $MEMORY_EPOCH --n_worker 2 --rnd_NM
 done

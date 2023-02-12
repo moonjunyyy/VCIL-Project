@@ -1,183 +1,136 @@
-from methods._trainer import _Trainer
-from methods.er_baseline import ER
-import time
+from typing import TypeVar
+
+import timm
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from torch.utils.data import DataLoader
-from utils.memory import MemoryBatchSampler
-from utils.data_loader import cutmix_data
-from utils.train_utils import select_optimizer, select_scheduler
-import numpy as np
-import torch.distributed as dist
-
+import logging
 import copy
-#! 1. New Class들어올때마다 Prompt 1개씩 추가
-#! --> Prompt를 가능한 작게 prompt_len:1
-class Ours(_Trainer):
 
-    def __init__(self, **kwargs):
-        super(Ours, self).__init__(**kwargs)
-        # self.prev_query = None
-        self.old_fc = None
-        self.old_mask = None
-        self.old_query = None
-    
-    def prev_trace(self,query):
-        self.old_fc = copy.deepcopy(self.model.backbone.fc)
-        self.old_mask = self.mask.clone().detach()
-        for p in self.old_fc.parameters():
-            p.requires_grad=False
-        self.old_query = query.clone().detach()
+import numpy as np
+import pandas as pd
+import torch
+import torch.nn as nn
+from torch import optim
+from torch.utils.data import DataLoader
+from torch.utils.tensorboard import SummaryWriter
+from utils.augment import Cutout, Invert, Solarize, select_autoaugment
+from torchvision import transforms
+from randaugment.randaugment import RandAugment
+
+from methods.er_baseline import ER
+from utils.data_loader import cutmix_data, ImageDataset
+from utils.augment import Cutout, Invert, Solarize, select_autoaugment
+
+import logging
+import copy
+import time
+import datetime
+
+import gc
+import numpy as np
+import pandas as pd
+import torch
+import torch.nn as nn
+from torch.utils.data import DataLoader
+from torch.utils.tensorboard import SummaryWriter
+from torch import optim
+
+from methods._trainer import _Trainer
+
+from utils.data_loader import ImageDataset, StreamDataset, MemoryDataset, cutmix_data, get_statistics
+from utils.train_utils import select_model, select_optimizer, select_scheduler
+
+import timm
+from timm.models import create_model
+from timm.models.registry import register_model
+from timm.models.vision_transformer import _cfg, default_cfgs
+from models.vit import _create_vision_transformer
+
+
+logger = logging.getLogger()
+writer = SummaryWriter("tensorboard")
+
+T = TypeVar('T', bound = 'nn.Module')
+
+default_cfgs['vit_base_patch16_224'] = _cfg(
+        url='https://storage.googleapis.com/vit_models/imagenet21k/ViT-B_16.npz',
+        num_classes=21843)
+
+# Register the backbone model to timm
+@register_model
+def vit_base_patch16_224(pretrained=False, **kwargs):
+    """ ViT-Base model (ViT-B/32) from original paper (https://arxiv.org/abs/2010.11929).
+    ImageNet-21k weights @ 224x224, source https://github.com/google-research/vision_transformer.
+    NOTE: this model has valid 21k classifier head and no representation (pre-logits) layer
+    """
+    model_kwargs = dict(
+        patch_size=16, embed_dim=768, depth=12, num_heads=12, **kwargs)
+    model = _create_vision_transformer('vit_base_patch16_224', pretrained=pretrained, **model_kwargs)
+    return model
+
+class Ours(_Trainer):
+    def __init__(self, *args, **kwargs):
+        super(Ours, self).__init__(*args, **kwargs)
         
+        if 'imagenet' in self.dataset:
+            self.lr_gamma = 0.99995
+        else:
+            self.lr_gamma = 0.9999
+        
+        self.class_mask = None
+        self.class_mask_dict={}
     
     def online_step(self, images, labels, idx):
-        # image, label = sample
-        
-        # self.is_task_changed(image,Bidx)
-        self.add_new_class(labels[0])
+        self.add_new_class(labels)
         # train with augmented batches
         _loss, _acc, _iter = 0.0, 0.0, 0
-        for Bidx,(image, label) in enumerate(zip(images, labels)):
-            #* check task shift
-            if self.old_fc is not None:
-                flag = self.is_task_changed(image,Bidx)
-                if flag:
-                    print("Detect New Task incomes!!")
-                    self.model.expand_prompt(self.device)
-                    self.reset_opt()
-            
-            #*====================
-            loss, acc = self.online_train([image.clone(), label.clone()])
+        # for _ in range(int(self.online_iter) * self.temp_batchsize * self.world_size):
+        for _ in range(int(self.online_iter)):
+            loss, acc = self.online_train([images.clone(), labels.clone()])
             _loss += loss
             _acc += acc
             _iter += 1
+        del(images, labels)
+        gc.collect()
         return _loss / _iter, _acc / _iter
-    
-    def add_new_class(self, class_name):
-        #* 새로운 Class 들어오면 Prompt한개씩 확장
-        #* 이전에 존재하는 Class의 경우 Temp Prompt만들어서 Distillation할수있도록 셋팅하자!
-        len_class = len(self.exposed_classes)
-        exposed_classes = []
-        for label in class_name:
-            if label.item() not in self.exposed_classes:
-                self.exposed_classes.append(label.item())
-        if self.distributed:
-            exposed_classes = torch.cat(self.all_gather(torch.tensor(self.exposed_classes, device=self.device))).cpu().tolist()
-            self.exposed_classes = []
-            for cls in exposed_classes:
-                if cls not in self.exposed_classes:
-                    self.exposed_classes.append(cls)
-        # self.memory.add_new_class(cls_list=self.exposed_classes)
-        self.mask[:len(self.exposed_classes)] = 0
-        if 'reset' in self.sched_name:
-            self.update_schedule(reset=True)
-        
-    def online_before_task(self, task_id):
-        
-        # self.model_without_ddp.set_device(self.device)
-        # self.model_without_ddp.set_info(task_id)
-        self.model.main_cnt=0.
-        self.model.sub_cnt=0.
-        self.sample_cnt = 0.
-        
-        print("main_prompt:",self.model_without_ddp.main_prompts.shape)
-        print("main_key:",self.model_without_ddp.main_key.shape)
-        # print("sub_prompt:",self.model_without_ddp.sub_prompt.shape)
-        # print("sub_key:",self.model_without_ddp.sub_key.shape)
-    
-    
 
-    def online_after_task(self, task_id):
-        print("main_cnt:",int(self.model.main_cnt))
-        print("sub_cnt:",int(self.model.sub_cnt))
-        print("total_samples:", self.sample_cnt); print()
-        # print("data Iter:",self.temp_batchsize * self.online_iter * self.world_size)
-        # pass
-    
     def online_train(self, data):
-        
-        
         self.model.train()
         total_loss, total_correct, total_num_data = 0.0, 0.0, 0.0
+        
+        
+        
         x, y = data
-        # print('y',torch.unique(y))
-        self.sample_cnt += y.size(0)
         for j in range(len(y)):
             y[j] = self.exposed_classes.index(y[j].item())
 
         x = x.to(self.device)
         y = y.to(self.device)
-        
+
+        x = self.train_transform(x)
+
         self.optimizer.zero_grad()
-        logit, loss, main_idx, query = self.model_forward(x,y)
+        logit, loss = self.model_forward(x,y)
         _, preds = logit.topk(self.topk, 1, True, True)
-        
-        
         
         self.scaler.scale(loss).backward()
         self.scaler.step(self.optimizer)
         self.scaler.update()
         self.update_schedule()
-        
-        self.prev_trace(query[main_idx])
 
         total_loss += loss.item()
         total_correct += torch.sum(preds == y.unsqueeze(1)).item()
         total_num_data += y.size(0)
-        
+
         return total_loss, total_correct/total_num_data
 
     def model_forward(self, x, y):
-        do_cutmix = self.cutmix and np.random.rand(1) < 0.5
-        if do_cutmix:
-            x, labels_a, labels_b, lam = cutmix_data(x=x, y=y, alpha=1.0)
-            with torch.cuda.amp.autocast(enabled=self.use_amp):
-                ori_logit,feats,query,main_idx,sub_idx= self.model(x)     #* logit, feats, main_idx, sub_idx
-                #* logit scale
-                if len(sub_idx) !=0:
-                    ori_logit[sub_idx] = (len(sub_idx)/len(main_idx))*ori_logit[sub_idx]
-                
-                logit = ori_logit + self.mask
-                a_loss, a_sim = self.criterion(logit, labels_a)
-                b_loss, b_sim = self.criterion(logit, labels_b)
-                #* loss scale
-                # if len(sub_idx) !=0:
-                #     a_loss[sub_idx] = (len(main_idx)/len(sub_idx))*a_loss[sub_idx]
-                #     b_loss[sub_idx] = (len(main_idx)/len(sub_idx))*b_loss[sub_idx]
-                a_loss = a_loss.mean()
-                b_loss = b_loss.mean()
-                # loss = lam * self.criterion(logit, labels_a) + (1 - lam) * self.criterion(logit, labels_b)
-                loss = lam * (a_loss + a_sim) + (1 - lam) * (b_loss + b_sim)
-                if self.old_fc is not None:
-                    old_logit = self.old_fc(feats) + self.old_mask
-                    kd_loss = self._KD_loss(ori_logit[:,:len(self.old_mask)],old_logit[:,:len(self.old_mask)],T=2.)
-                    
-                    loss += 0.1 * kd_loss
-        else:
-            with torch.cuda.amp.autocast(enabled=self.use_amp):
-                ori_logit,feats,query,main_idx,sub_idx= self.model(x)     #* logit, feats, main_idx, sub_idx
-                if len(sub_idx) !=0:
-                    ori_logit[sub_idx] = (len(sub_idx)/len(main_idx))*ori_logit[sub_idx]
-                    
-                logit = ori_logit + self.mask
-                loss,sim = self.criterion(logit, y)
-                # if len(sub_idx) !=0:
-                #     loss[sub_idx] = (len(main_idx)/len(sub_idx))*loss[sub_idx]
-                loss = loss.mean() + sim
-                if self.old_fc is not None:
-                    old_logit = self.old_fc(feats) + self.old_mask
-                    kd_loss = self._KD_loss(ori_logit[:,:len(self.old_mask)],old_logit[:,:len(self.old_mask)],T=2.)
-                    
-                    loss += 0.1 * kd_loss
-            
-                
-        return logit, loss, main_idx, query
-
-    def _KD_loss(self,pred, soft, T):
-        pred = torch.log_softmax(pred / T, dim=1)
-        soft = torch.softmax(soft / T, dim=1)
-        return -1 * torch.mul(soft, pred).sum() / pred.shape[0]
+        with torch.cuda.amp.autocast(enabled=self.use_amp):
+            logit = self.model(x)
+            logit += self.mask
+            loss = self.criterion(logit, y)
+        return logit, loss
 
     def online_evaluate(self, test_loader):
         total_correct, total_num_data, total_loss = 0.0, 0.0, 0.0
@@ -189,19 +142,15 @@ class Ours(_Trainer):
         with torch.no_grad():
             for i, data in enumerate(test_loader):
                 x, y = data
-                
                 for j in range(len(y)):
                     y[j] = self.exposed_classes.index(y[j].item())
 
                 x = x.to(self.device)
                 y = y.to(self.device)
 
-                logit = self.model(x,test=True)     #* logit, feats, main_idx, sub_idx
+                logit = self.model(x)
                 logit = logit + self.mask
-                
-                loss,sim = self.criterion(logit, y)
-                loss = loss.mean()+sim
-                
+                loss = self.criterion(logit, y)
                 pred = torch.argmax(logit, dim=-1)
                 _, preds = logit.topk(self.topk, 1, True, True)
                 total_correct += torch.sum(preds == y.unsqueeze(1)).item()
@@ -228,73 +177,123 @@ class Ours(_Trainer):
                 param_group["lr"] = self.lr
         else:
             self.scheduler.step()
-    
-    
-    def is_task_changed(self,x,idx):
-        self.model.eval()
-        # self.old_fc.eval()
-        # self.old_fc.eval()
-        with torch.no_grad():
-            x =x.to(self.device)
-            query,main_idx,_ = self.model.task_forward(x)
-            # query = self.model.backbone.fc_norm(query)
             
-            # new_S_logit = self.model.backbone.fc(query[main_idx]) + self.mask
-            # new_S_ent = self._get_entropy(new_S_logit)
-            new_S_logit = self.model.backbone.fc(query[main_idx]) + self.mask
-            new_S_ent = self._get_entropy(new_S_logit)
-            
-            #*      Plan B
-            old_S_logit = self.model.backbone.fc(self.old_query) + self.mask
-            old_S_ent = self._get_entropy(old_S_logit)
-            
-            # if idx ==0 or idx % 50 ==0:
-                #* current mean query 와 prev mean query Cosine check!
-                # cur_q = query[main_idx].mean(dim=0).unsqueeze(0)
-                # prev_q = self.old_query.mean(dim=0).unsqueeze(0)
-                # size = min(query[main_idx].shape[0],self.old_query.shape[0])
-                # print()
-                # print("Cosine_similarity_mean:",torch.cosine_similarity(cur_q,prev_q))
-                # print("Cosine_similarity_each_mean:",torch.cosine_similarity(query[main_idx][:size],self.old_query[:size]).mean())
-                # print()
-                # print("distance_mean:",torch.dist(cur_q,prev_q,p=2))
-                # print("distance:",torch.dist(query[main_idx][:size],self.old_query[:size],p=2))
-                # print("pairwise_distance_mean:",torch.pairwise_distance(query[main_idx][:size],self.old_query[:size]).mean()); print()
-                # # kl_div = F.kl_div(cur_q.log(),prev_q,reduction='batchmean')
-                # print("KL_DIV_mean:", F.kl_div(cur_q.softmax(dim=1).log(),prev_q.softmax(dim=1),reduction='batchmean'))
-                # print("KL_DIV_each:", F.kl_div(query[main_idx][:size].softmax(dim=1).log(),
-                #                            self.old_query[:size].softmax(dim=1),reduction='batchmean')); print()
-                # print("old fc Entropy:",old_S_ent)
-                # print("new fc Entropy:",new_S_ent)
-                # print()
-        # result = torch.abs(old_S_ent-new_S_ent) > 1.
-        result = new_S_ent - old_S_ent > 1.2
-        if result:
-            # cur_q = query[main_idx].mean(dim=0).unsqueeze(0)
-            # prev_q = self.old_query.mean(dim=0).unsqueeze(0)
-            # size = min(query[main_idx].shape[0],self.old_query.shape[0])
-            print("task change!")
-            # print("KL_DIV_mean:", F.kl_div(cur_q.softmax(dim=1).log(),prev_q.softmax(dim=1),reduction='batchmean'))
-            # print("KL_DIV_each:", F.kl_div(query[main_idx][:size].softmax(dim=1).log(),
-            print("old fc Entropy:",old_S_ent)
-            print("new fc Entropy:",new_S_ent)
-            print()
-        
-        return result
-            
-    def _get_entropy(self,p, mean=True):
-        p = F.softmax(p,dim=1)
-        en = -torch.sum(p * torch.log(p+1e-5), 1)
-        if mean:
-            return torch.mean(en)
-        else:
-            return en
+    def online_before_task(self,train_loader):
+        # Task-Free
+        pass
 
-            
-            
-            
-        
-        # self.prev_query = (prev_main_query + cur_main_query)/2
-        # self.query.
+    def online_after_task(self, cur_iter):
+        self.model_without_ddp.convert_train_task(self.exposed_classes)
+        pass
+
+    def reset_opt(self):
+        self.optimizer = select_optimizer(self.opt_name, self.lr, self.model, True)
+        self.scheduler = select_scheduler(self.sched_name, self.optimizer, self.lr_gamma)
         
     
+    
+    def _compute_grads_uncert(self,ref_head,feat,y,exposed_classes):
+        sample_criterion = nn.CrossEntropyLoss(reduction='none')
+        batch_criterion = nn.CrossEntropyLoss()
+        sample_g = []
+        ref_head.zero_grad()
+        tmp_logit = ref_head(feat)[:,:len(exposed_classes)]
+    #     print('feats')
+    #     print(feat[:3]); print()
+    #     print('tmp_logit')
+    #     print(tmp_logit); print()
+
+        p = torch.softmax(tmp_logit,dim=1)
+        idx = torch.arange(len(y))
+        uncert = 1. - p[idx,y[idx]].clone().detach() #B
+        
+        sample_loss = sample_criterion(tmp_logit,y)
+        
+        for idx in range(len(y)):
+            sample_loss[idx].backward(retain_graph=True)
+            _g = ref_head.weight.grad[y[idx]].clone()
+            sample_g.append(_g)
+            ref_head.zero_grad()
+        sample_g = torch.stack(sample_g)    #B,dim
+        
+        ref_head.zero_grad()
+        batch_loss = batch_criterion(tmp_logit,y)
+        batch_loss.backward(retain_graph=True)
+        batch_g = ref_head.weight.grad[:len(exposed_classes)].clone()  # C,dim
+        idx = torch.arange(len(y))
+        batch_g=batch_g[y[idx]]    #B,dim
+        ref_head.zero_grad()
+    #     del ref_head
+    #     print('uncertain')
+    #     print(uncert); print()
+    #     print('sample_g')
+    #     print(sample_g); print()
+    #     print('batch_g')
+    #     print(batch_g); print()
+        
+        
+        return uncert, sample_g, batch_g
+    
+    
+    
+    def _get_ignore(self,ref_head,feat,y,exposed_classes):
+        uncert, sample_g, batch_g = self._compute_grads_uncert(ref_head,feat,y,exposed_classes)
+        sample_l2norm = torch.norm(sample_g,p=2,dim=1)  # B
+        if sample_l2norm.sum().item() == 0: #all loss is zero case
+            return None,sample_g
+        batch_l2norm = torch.norm(batch_g,p=2,dim=1)    # B
+        uncert_soft = torch.softmax(uncert,dim=0)
+    #     ignore_score = 1. + torch.max((sample_l2norm-batch_l2norm)*uncert_soft,torch.zeros(1,device=device))
+        ignore_score = 1. + torch.max((sample_l2norm/batch_l2norm),torch.zeros(1,device=self.device))
+        return ignore_score,sample_g
+
+    def _get_drift(self,model,y,sample_g):
+        idx = torch.arange(len(y))
+        pre_wts = model.head.weight[y[idx]].clone().detach()
+    #     with torch.no_grad():
+        post_wts = pre_wts-sample_g
+        drift = 1 - torch.cosine_similarity(pre_wts,post_wts,dim=1) # B
+        return drift
+
+    def get_score(self,model,ref_head,feat,y,exposed_classes):
+        ign_feat = model.fc_norm(feat[:,0].clone().detach())
+        
+        ignore_score,sample_g = self._get_ignore(ref_head,ign_feat,y,exposed_classes)
+        drift_score = self._get_drift(model,y,sample_g)
+        
+        return ignore_score, drift_score
+
+
+    def _get_loss(self,ign_score,drift_score,model,ref_head,feat,y,exposed_classes,criterion):
+        alpha = 0.5
+        #####################################################################
+        #* ignore_loss
+        if ign_score != None:
+            ign_feat = model.fc_norm(feat[:,0])
+            ign_logit = ref_head(ign_feat)[:,:len(exposed_classes)]
+            ign_logit = ign_logit*(1/ign_score[:,None])
+            ignore_loss = criterion(ign_logit, y)
+            ignore_loss = ignore_loss.mean()
+        else:
+            ignore_loss = torch.zeros(1,device=self.device)
+        
+    #     print('ignore_score')
+    #     print(ign_score)
+    #     print('ignore_loss:',ignore_loss)
+        
+        ########################################################################
+        #* drift_loss
+        ori_logit = model.forward_head(feat)[:,:len(exposed_classes)]
+    #     print('ori_logit')
+    #     print(ori_logit)
+        drift_logit = ori_logit*drift_score[:,None]
+    #     print('drift_logit')
+    #     print(drift_logit)
+        drift_loss = criterion(drift_logit, y)
+        drift_loss = drift_loss.mean()
+    #     print('drift_score')
+    #     print(drift_score)
+    #     print('drift_loss:',drift_loss)
+        loss = alpha*ignore_loss + (1-alpha)*drift_loss
+        
+        return loss,ori_logit

@@ -1,17 +1,17 @@
 #!/bin/bash
 
 #SBATCH -J iblurry_cifar100_N50_M10_RND
-#SBATCH -p batch
+#SBATCH -p batch_agi
+#SBATCH -w agi2
 #SBATCH --nodes=1
 #SBATCH --gres=gpu:1
 #SBATCH --cpus-per-gpu=4
-#SBATCH --mem-per-gpu=48G
+#SBATCH --mem-per-gpu=20G
 #SBATCH --time=7-0
 #SBATCH -o %x_%j.log
 #SBATCH -e %x_%j.err
 
 date
-# seeds=(1 21 42 3473 10741 32450 93462 85015 64648 71950 87557 99668 55552 4811 10741)
 ulimit -n 65536
 ### change 5-digit MASTER_PORT as you wish, slurm will raise Error if duplicated with others
 ### change WORLD_SIZE as gpus/node * num_nodes
@@ -25,8 +25,8 @@ master_addr=$(scontrol show hostnames "$SLURM_JOB_NODELIST" | head -n 1)
 export MASTER_ADDR=$master_addr
 echo "MASTER_ADDR="$MASTER_ADDR
 
-source /data/moonjunyyy/init.sh
-conda activate iblurry
+source /data/keonhee/init.sh
+conda activate torch38gpu
 
 conda --version
 python --version
@@ -41,26 +41,27 @@ M=10
 GPU_TRANSFORM="--gpu_transform"
 USE_AMP="--use_amp"
 SEEDS="1 2 3 4 5"
+# SEEDS="1"
 
 
 if [ "$DATASET" == "cifar10" ]; then
     MEM_SIZE=500 ONLINE_ITER=1
-    MODEL_NAME="resnet18" EVAL_PERIOD=100
+    MODEL_NAME="ours" EVAL_PERIOD=100
     BATCHSIZE=16; LR=3e-4 OPT_NAME="adam" SCHED_NAME="default"
 
 elif [ "$DATASET" == "cifar100" ]; then
     MEM_SIZE=2000 ONLINE_ITER=3
     MODEL_NAME="ours" EVAL_PERIOD=1000
-    BATCHSIZE=16; LR=3e-2 OPT_NAME="adam" SCHED_NAME="default"
+    BATCHSIZE=64; LR=3e-2 OPT_NAME="adam" SCHED_NAME="default"
 
 elif [ "$DATASET" == "tinyimagenet" ]; then
     MEM_SIZE=4000 ONLINE_ITER=3
-    MODEL_NAME="resnet34" EVAL_PERIOD=100
+    MODEL_NAME="ours" EVAL_PERIOD=100
     BATCHSIZE=32; LR=3e-4 OPT_NAME="adam" SCHED_NAME="default"
 
 elif [ "$DATASET" == "imagenet" ]; then
     N_TASKS=10 MEM_SIZE=20000 ONLINE_ITER=0.25
-    MODEL_NAME="resnet34" EVAL_PERIOD=1000
+    MODEL_NAME="ours" EVAL_PERIOD=1000
     BATCHSIZE=256; LR=3e-4 OPT_NAME="adam" SCHED_NAME="default"
 
 else
