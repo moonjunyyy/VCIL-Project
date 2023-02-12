@@ -27,6 +27,7 @@ import copy
 import time
 import datetime
 
+import gc
 import numpy as np
 import pandas as pd
 import torch
@@ -82,18 +83,16 @@ class L2P(ER):
         # self.class_mask_dict={}
     
     def online_step(self, images, labels, idx):
-        self.add_new_class(labels[0])
-        self.memory_sampler  = MemoryBatchSampler(self.memory, self.memory_batchsize, self.temp_batchsize * self.online_iter * self.world_size)
-        self.memory_dataloader   = DataLoader(self.train_dataset, batch_size=self.memory_batchsize, sampler=self.memory_sampler, num_workers=0, pin_memory=True)
-        self.memory_provider     = iter(self.memory_dataloader)
+        self.add_new_class(labels)
         # train with augmented batches
         _loss, _acc, _iter = 0.0, 0.0, 0
-        for image, label in zip(images, labels):
-            loss, acc = self.online_train([image.clone(), label.clone()])
+        for _ in range(int(self.online_iter) * self.temp_batchsize * self.world_size):
+            loss, acc = self.online_train([images.clone(), labels.clone()])
             _loss += loss
             _acc += acc
             _iter += 1
-        self.update_memory(idx, labels[0])
+        del(images, labels)
+        gc.collect()
         return _loss / _iter, _acc / _iter
 
     def online_train(self, data):
@@ -109,6 +108,8 @@ class L2P(ER):
             y[j] = self.exposed_classes.index(y[j].item())
         x = x.to(self.device)
         y = y.to(self.device)
+
+        x = self.train_transform(x)
 
         self.optimizer.zero_grad()
         logit, loss = self.model_forward(x,y)

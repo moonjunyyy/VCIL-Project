@@ -1,20 +1,13 @@
 # When we make a new one, we should inherit the Finetune class.
 import logging
-import copy
-import time
-import datetime
 
 import numpy as np
-import pandas as pd
 import torch
-import torch.nn as nn
-from torch.utils.data import DataLoader
-import torchvision.transforms as transforms
 from torch.utils.tensorboard import SummaryWriter
-from torch import optim
 
-from utils.data_loader import ImageDataset, StreamDataset, MemoryDataset, cutmix_data, get_statistics
-from utils.train_utils import select_model, select_optimizer, select_scheduler
+from utils.data_loader import cutmix_data
+from utils.train_utils import select_scheduler
+import gc
 
 import torchvision.transforms as transforms
 from methods._trainer import _Trainer
@@ -38,11 +31,13 @@ class FT(_Trainer):
         self.add_new_class(labels[0])
         # train with augmented batches
         _loss, _acc, _iter = 0.0, 0.0, 0
-        for image, label in zip(images, labels):
-            loss, acc = self.online_train([image.clone(), label.clone()])
+        for _ in range(int(self.online_iter) * self.temp_batchsize * self.world_size):
+            loss, acc = self.online_train([images.clone(), labels.clone()])
             _loss += loss
             _acc += acc
             _iter += 1
+        del(images, labels)
+        gc.collect()
         return _loss / _iter, _acc / _iter
 
     def online_before_task(self, task_id):
@@ -61,6 +56,8 @@ class FT(_Trainer):
 
         x = x.to(self.device)
         y = y.to(self.device)
+
+        x = self.train_transform(x)
 
         self.optimizer.zero_grad()
         logit, loss = self.model_forward(x,y)

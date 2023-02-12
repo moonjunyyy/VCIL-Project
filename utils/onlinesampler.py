@@ -331,6 +331,9 @@ class OnlineBatchSampler(Sampler):
         assert len(indices) == self.num_samples
         return indices[:self.num_selected_samples]
 
+    def get_task_classes(self, cur_iter):
+        return list(set(self.classes[self.indices[cur_iter]]))
+
 class OnlineTestSampler(Sampler):
     def __init__(self, data_source: Optional[Sized], exposed_class, num_replicas=None, rank=None) -> None:
         self.data_source    = data_source

@@ -17,13 +17,8 @@ class OnlineIterDataset(Dataset):
         self.targets = dataset.targets
 
     def __getitem__(self, index):
-        images = []
-        labels = []
-        for _ in range(self.iteration):
-            image, label = self.dataset[index]
-            images.append(image)
-            labels.append(label)
-        return images, labels, index
+        image, label = self.dataset.__getitem__(index)
+        return image, label, index
 
     def __len__(self):
         return len(self.dataset)

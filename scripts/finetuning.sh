@@ -1,14 +1,13 @@
 #!/bin/bash
 
-#SBATCH --job-name FT_ViT_iblurry_cifar100_N50_M10_rnd
-#SBATCH -p batch_agi
-#SBATCH -w agi2
+#SBATCH --job-name Finetuning_iblurry_cifar100_N50_M10
 #SBATCH --nodes=1
 #SBATCH --gres=gpu:1
 #SBATCH --cpus-per-gpu=4
-#SBATCH --mem-per-gpu=60G
-#SBATCH --time=4-0
+#SBATCH --mem-per-gpu=48G
+#SBATCH --time=7-0
 #SBATCH -o %x_%j.log
+#SBATCH -e %x_%j.err
 
 
 date
@@ -41,7 +40,7 @@ N=50
 M=10
 GPU_TRANSFORM="--gpu_transform"
 USE_AMP="--use_amp"
-SEEDS="1 2 3 4 5"
+SEEDS="4 5"
 VIT="True"
 OPT="adam"
 
@@ -51,8 +50,8 @@ if [ "$DATASET" == "cifar10" ]; then
     BATCHSIZE=16; LR=3e-4 OPT_NAME=$OPT SCHED_NAME="default" MEMORY_EPOCH=256
 
 elif [ "$DATASET" == "cifar100" ]; then
-    MEM_SIZE=2000 ONLINE_ITER=60
-    MODEL_NAME="vit" EVAL_PERIOD=100
+    MEM_SIZE=2000 ONLINE_ITER=3
+    MODEL_NAME="vit" EVAL_PERIOD=1000
     BATCHSIZE=64; LR=3e-4 OPT_NAME=$OPT SCHED_NAME="default" MEMORY_EPOCH=256
 
 elif [ "$DATASET" == "tinyimagenet" ]; then

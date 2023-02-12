@@ -1,14 +1,13 @@
 #!/bin/bash
 
-#SBATCH -J L2P_iblurry_cifar100_N50_M10_mem500
-#SBATCH -p batch_agi
-#SBATCH -w agi2
+#SBATCH -J L2P_iblurry_cifar100_N100_M10
 #SBATCH --nodes=1
 #SBATCH --gres=gpu:1
 #SBATCH --cpus-per-gpu=4
 #SBATCH --mem-per-gpu=48G
-#SBATCH --time=14-0
+#SBATCH -t 7-0
 #SBATCH -o %x_%j.log
+#SBATCH -e %x_%j.err
 
 date
 ulimit -n 65536
@@ -31,7 +30,7 @@ conda --version
 python --version
 
 # CIL CONFIG
-NOTE="L2P_iblurry_cifar100_N50_M10_mem500" # Short description of the experiment. (WARNING: logs/results with the same note will be overwritten!)
+NOTE="L2P_iblurry_cifar100_N100_M10" # Short description of the experiment. (WARNING: logs/results with the same note will be overwritten!)
 MODE="L2P"
 DATASET="cifar100" # cifar10, cifar100, tinyimagenet, imagenet
 N_TASKS=5
@@ -49,8 +48,8 @@ if [ "$DATASET" == "cifar10" ]; then
     BATCHSIZE=32; LR=3e-4 OPT_NAME="adam" SCHED_NAME="default" MEMORY_EPOCH=256
 
 elif [ "$DATASET" == "cifar100" ]; then
-    MEM_SIZE=500 ONLINE_ITER=3
-    MODEL_NAME="L2P" EVAL_PERIOD=100
+    MEM_SIZE=2000 ONLINE_ITER=3
+    MODEL_NAME="L2P" EVAL_PERIOD=1000
     BATCHSIZE=64; LR=3e-2 OPT_NAME="adam" SCHED_NAME="default" MEMORY_EPOCH=256
 
 elif [ "$DATASET" == "tinyimagenet" ]; then
@@ -78,6 +77,6 @@ do
     --rnd_seed $RND_SEED \
     --model_name $MODEL_NAME --opt_name $OPT_NAME --sched_name $SCHED_NAME \
     --lr $LR --batchsize $BATCHSIZE --n_worker 4 \
-    --memory_size $MEM_SIZE $GPU_TRANSFORM --online_iter $ONLINE_ITER --data_dir /local_datasets \
-    --note $NOTE --eval_period $EVAL_PERIOD --memory_epoch $MEMORY_EPOCH --n_worker 4 --rnd_NM
+    --memory_size $MEM_SIZE $GPU_TRANSFORM --online_iter $ONLINE_ITER --data_dir ./data \
+    --note $NOTE --eval_period $EVAL_PERIOD --memory_epoch $MEMORY_EPOCH --n_worker 4
 done
