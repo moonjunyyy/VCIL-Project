@@ -69,9 +69,9 @@ def vit_base_patch16_224(pretrained=False, **kwargs):
     model = _create_vision_transformer('vit_base_patch16_224', pretrained=pretrained, **model_kwargs)
     return model
 
-class Ours(_Trainer):
+class Ours_test(_Trainer):
     def __init__(self, *args, **kwargs):
-        super(Ours, self).__init__(*args, **kwargs)
+        super(Ours_test, self).__init__(*args, **kwargs)
         
         if 'imagenet' in self.dataset:
             self.lr_gamma = 0.99995
@@ -127,11 +127,13 @@ class Ours(_Trainer):
 
     def model_forward(self, x, y,ref_fc):
         with torch.cuda.amp.autocast(enabled=self.use_amp):
-            feat = self.model(x,only_feat=True)
-            # print("x",x.shape)
-            # print("feat:",feat.shape)
-            ign_score, drift_score = self.get_score(ref_head=ref_fc,feat=feat,y=y)
-            loss,logit = self._get_loss(ign_score,drift_score,ref_fc,feat,y)
+            #* feat = self.model(x,only_feat=True)
+            #* ign_score,sample_g = self.get_score(ref_head=ref_fc,feat=feat,y=y)
+            #* loss,logit = self._get_loss(ign_score,feat,y,sample_g)
+            
+            logit = self.model(x)
+            logit += self.mask
+            loss = self.criterion(logit, y).mean() + self.model._get_sim()
         return logit, loss
 
     def online_evaluate(self, test_loader):
@@ -241,11 +243,14 @@ class Ours(_Trainer):
     def _get_ignore(self,ref_head,feat,y):
         uncert, sample_g, batch_g = self._compute_grads_uncert(ref_head,feat,y)
         sample_l2norm = torch.norm(sample_g,p=2,dim=1)  # B
+        # sample_l2norm = F.normalize(sample_l2norm,dim=0)
         if sample_l2norm.sum().item() == 0: #all loss is zero case
             return None,sample_g
         batch_l2norm = torch.norm(batch_g,p=2,dim=1)    # B
+        # batch_l2norm = F.normalize(batch_l2norm,dim=0)
+        
         uncert_soft = torch.softmax(uncert,dim=0)
-        ignore_score = 1. + torch.max((sample_l2norm-batch_l2norm)*uncert_soft,torch.zeros(1,device=self.device))
+        ignore_score = torch.max((sample_l2norm-batch_l2norm),torch.zeros(1,device=self.device))
         # ignore_score = 1. + torch.max((sample_l2norm/batch_l2norm),torch.zeros(1,device=self.device))
         return ignore_score,sample_g
 
@@ -261,47 +266,72 @@ class Ours(_Trainer):
         ign_feat = self.model.backbone.fc_norm(feat[:,0].clone().detach())
         
         ignore_score,sample_g = self._get_ignore(ref_head,ign_feat,y)
-        drift_score = self._get_drift(y,sample_g)
+        # drift_score = self._get_drift(y,sample_g)
         
-        return ignore_score, drift_score
+        return ignore_score,sample_g
+    
+    #* for ignore problem
+    def str_loss(self,logit,y,str_score):
+        # targets = F.one_hot(y,len(self.exposed_classes))
+        # gamma=0.5
+        log_p = F.log_softmax(logit,dim=1)
+        # uncert = 1. - p[idx,y[idx]].clone().detach() #B
+        
+        idx = torch.arange(len(y))
+        uncert = 1 - log_p[idx,y[idx]]
+        ce = F.nll_loss(log_p,y,reduction='none')
+        
+        
+        loss = (str_score*uncert)*ce
+        # print("str_loss:",str_score*uncert)
+        
+        return loss
+        
+    #* for drift problem
+    def cp_loss(self,logit,y,sample_g):
+        # idx = torch.arange(len(y))
+        sample_w = self.model.backbone.fc.weight[y]
+        next_w = sample_w.clone().detach() - self.lr*sample_g
+        
+        cp = torch.cosine_similarity(sample_w,next_w,dim=1)
+        
+        cp_loss = self.criterion(logit, y) * cp
+        
+        
+        return cp_loss
 
 
-    def _get_loss(self,ign_score,drift_score,ref_head,feat,y):
-        # alpha = 0.5
-        for p in ref_head.parameters():
-            p.requires_grad = False
-        #####################################################################
-        #* ignore_loss
-        if ign_score != None:
+    def _get_loss(self,str_score,feat,y,sample_g):
+        # for p in ref_head.parameters():
+        #     p.requires_grad = False
+        #*#########################################################################
+        #* strength_loss
+        if str_score != None:
             ign_feat = self.model.backbone.fc_norm(feat[:,0])
             #* 원래는 Head는 학습X !!
             #* ign_logit = ref_head(ign_feat)[:,:len(self.exposed_classes)]
             ign_logit = self.model.backbone.fc(ign_feat)[:,:len(self.exposed_classes)]
-            ign_logit = ign_logit*(1/ign_score[:,None])
-            ignore_loss = self.criterion(ign_logit, y)
-            ignore_loss = ignore_loss.mean()
+            # ign_logit = ign_logit*(1/ign_score[:,None])
+            str_loss = self.str_loss(ign_logit, y,str_score)
+            str_loss = str_loss.mean()
         else:
-            ignore_loss = torch.zeros(1,device=self.device)
+            str_loss = torch.zeros(1,device=self.device)
         
     #     print('ignore_score')
     #     print(ign_score)
     #     print('ignore_loss:',ignore_loss)
         
-        ########################################################################
-        #* drift_loss
-        # ori_feat = self.model.backbone.fc_norm(feat[:,0])
-        # print('ori_feat',ori_feat.shape)
-        ori_logit = self.model.backbone.forward_head(feat)[:,:len(self.exposed_classes)]
-    #     print('ori_logit')
-    #     print(ori_logit)
-        #* drift_logit = ori_logit*drift_score[:,None]
-    #     print('drift_logit')
-    #     print(drift_logit)
-        drift_loss = self.criterion(ori_logit, y) * drift_score
-        drift_loss = drift_loss.mean()
-    #     print('drift_score')
-    #     print(drift_score)
-    #     print('drift_loss:',drift_loss)
-        loss = self.alpha*ignore_loss + (1-self.alpha)*drift_loss + self.model._get_sim()
-        # print(f"ignore: {alpha*ignore_loss.item():.4f} drift:{(1-alpha)*drift_loss.item():.4f} loss: {loss.item():.4f}")
-        return loss, ori_logit
+        #*########################################################################
+        #* compensation_loss
+        # cur_wts = 
+        # drift_loss = self.criterion(ori_logit, y) * drift_score
+        logit = self.model.backbone.forward_head(feat)[:,:len(self.exposed_classes)]
+        cp_loss = self.cp_loss(logit,y,sample_g)
+        cp_loss = cp_loss.mean()
+        #*########################################################################
+        #* CE_loss
+        # ce_logit = self.model.backbone.forward_head(feat)[:,:len(self.exposed_classes)]
+        # ce_loss = self.criterion(ce_logit, y)
+        # ce_loss = ce_loss.mean() + self.model._get_sim()
+        loss = 0.2*str_loss + cp_loss + self.model._get_sim()
+        return loss, logit

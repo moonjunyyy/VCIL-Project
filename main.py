@@ -28,11 +28,12 @@ from methods.rainbow_memory import RM
 from methods.Finetuning import FT
 from methods.ewc import EWCpp
 from methods.ours import Ours
+from methods.ours_test import Ours_test
 from methods.dualprompt import DualPrompt
 
 # torch.autograd.set_detect_anomaly(True)
 torch.backends.cudnn.enabled = False
-methods = { "er": ER, "clib":CLIB, 'L2P':L2P, 'rm':RM, 'Finetuning':FT, 'ewc++':EWCpp, 'ours':Ours, 'DualPrompt':DualPrompt }
+methods = { "er": ER, "clib":CLIB, 'L2P':L2P, 'rm':RM, 'Finetuning':FT, 'ewc++':EWCpp, 'ours':Ours, 'ours_test':Ours_test, 'DualPrompt':DualPrompt }
 # torch.autograd.set_detect_anomaly(True)
 # os.environ["CUDA_LAUNCH_BLOCKING"]="1"
 # os.environ["TORCH_DISTRIBUTED_DEBUG"] = "DETAIL"

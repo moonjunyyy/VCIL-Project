@@ -116,6 +116,9 @@ def base_parser():
 
     # MIR
     parser.add_argument('--mir_cands', type=int, default=50, help='# candidates to use for MIR')
+    # Prompt-based (ViT)
+    parser.add_argument('--selection_size', type=int, default=1, help='# candidates to use for ViT_Prompt')
+    parser.add_argument('--alpha', type=float, default=0.5, help='# candidates to use for ViT_Prompt')
 
     args = parser.parse_args()
     return args

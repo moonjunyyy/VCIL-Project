@@ -150,7 +150,7 @@ def select_scheduler(sched_name, opt, hparam=None):
 
 #     print("[Selected Model]:", model_name )
 #     return model
-def select_model(model_name, dataset, num_classes=None):
+def select_model(model_name, dataset, num_classes=None,selection_size=None):
     
     opt = edict(
         {
@@ -214,7 +214,7 @@ def select_model(model_name, dataset, num_classes=None):
     elif model_name == "DualPrompt":
         model = DualPrompt(backbone_name="vit_base_patch16_224", class_num=num_classes)
     elif model_name == "ours":
-        model = Ours(backbone_name="vit_base_patch16_224", class_num=num_classes)
+        model = Ours(backbone_name="vit_base_patch16_224", class_num=num_classes, selection_size = selection_size)
     # elif model_name == "resnet18":
     #     model = timm.create_model('resnet18', num_classes=num_classes)
     # elif model_name == "resnet32":

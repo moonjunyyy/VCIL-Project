@@ -86,7 +86,7 @@ class L2P(ER):
         self.add_new_class(labels)
         # train with augmented batches
         _loss, _acc, _iter = 0.0, 0.0, 0
-        for _ in range(int(self.online_iter) * self.temp_batchsize * self.world_size):
+        for _ in range(int(self.online_iter)):
             loss, acc = self.online_train([images.clone(), labels.clone()])
             _loss += loss
             _acc += acc
@@ -100,10 +100,10 @@ class L2P(ER):
         total_loss, total_correct, total_num_data = 0.0, 0.0, 0.0
         x, y = data
             
-        if len(self.memory) > 0 and self.memory_batchsize > 0:
-            memory_images, memory_labels = next(self.memory_provider)
-            x = torch.cat([x, memory_images], dim=0)
-            y = torch.cat([y, memory_labels], dim=0)
+        # if len(self.memory) > 0 and self.memory_batchsize > 0:
+        #     memory_images, memory_labels = next(self.memory_provider)
+        #     x = torch.cat([x, memory_images], dim=0)
+        #     y = torch.cat([y, memory_labels], dim=0)
         for j in range(len(y)):
             y[j] = self.exposed_classes.index(y[j].item())
         x = x.to(self.device)
@@ -127,14 +127,6 @@ class L2P(ER):
         return total_loss, total_correct/total_num_data
 
     def model_forward(self, x, y):
-        # do_cutmix = self.cutmix and np.random.rand(1) < 0.5
-        # if do_cutmix:
-        #     x, labels_a, labels_b, lam = cutmix_data(x=x, y=y, alpha=1.0)
-        #     with torch.cuda.amp.autocast(enabled=self.use_amp):
-        #         logit = self.model(x)
-        #         logit += self.mask
-        #         loss = lam * self.criterion(logit, labels_a) + (1 - lam) * self.criterion(logit, labels_b)
-        # else:
         with torch.cuda.amp.autocast(enabled=self.use_amp):
             logit = self.model(x)
             logit += self.mask

@@ -64,6 +64,9 @@ class _Trainer():
         self.data_dir    = kwargs.get("data_dir")
         self.debug   = kwargs.get("debug")
         self.note    = kwargs.get("note")
+        #* for Prompt Based
+        self.selection_size = kwargs.get("selection_size")
+        self.alpha = kwargs.get("alpha")
         
         self.eval_period     = kwargs.get("eval_period")
         self.temp_batchsize  = kwargs.get("temp_batchsize")
@@ -191,7 +194,7 @@ class _Trainer():
     def setup_distributed_model(self):
 
         print("Building model...")
-        self.model = select_model(self.model_name, self.dataset, self.n_classes).to(self.device)
+        self.model = select_model(self.model_name, self.dataset, self.n_classes,self.selection_size).to(self.device)
         self.scaler = torch.cuda.amp.GradScaler(enabled=self.use_amp)
         # self.writer = SummaryWriter(f"{self.log_path}/tensorboard/{self.dataset}/{self.note}/seed_{self.rnd_seed}")
         
@@ -261,7 +264,7 @@ class _Trainer():
                 'which can slow down your training considerably! '
                 'You may see unexpected behavior when restarting '
                 'from checkpoints.')
-        cudnn.benchmark = True
+        cudnn.benchmark = False
     
         print(f"[2] Incrementally training {self.n_tasks} tasks")
         task_records = defaultdict(list)
@@ -276,7 +279,7 @@ class _Trainer():
             # #todo ==================================================
             if task_id ==0 and not self.debug:
                 print()
-                #! self.train_data_config(self.n_tasks,self.train_dataset,self.train_sampler)
+                self.train_data_config(self.n_tasks,self.train_dataset,self.train_sampler)
                 
             # #todo ==================================================
             print("\n" + "#" * 50)
@@ -305,7 +308,7 @@ class _Trainer():
 
             self.online_before_task(task_id)          
             for i, (images, labels, idx) in enumerate(self.train_dataloader):
-                if self.debug and (i+1)*self.temp_batchsize >= 500:
+                if self.debug and (i+1)*self.temp_batchsize >= 110:
                     break
                 samples_cnt += images.size(0) * self.world_size
                 loss, acc = self.online_step(images, labels, idx)
@@ -451,6 +454,7 @@ class _Trainer():
         print(
             f"Train | Sample # {sample_num} | train_loss {train_loss:.4f} | train_acc {train_acc:.4f} | "
             f"lr {self.optimizer.param_groups[0]['lr']:.6f} | "
+            f"Num_Classes {len(self.exposed_classes)} | "
             f"running_time {datetime.timedelta(seconds=int(time.time() - self.start_time))} | "
             f"ETA {datetime.timedelta(seconds=int((time.time() - self.start_time) * (self.total_samples-sample_num) / sample_num))}"
         )

@@ -69,9 +69,9 @@ def vit_base_patch16_224(pretrained=False, **kwargs):
     model = _create_vision_transformer('vit_base_patch16_224', pretrained=pretrained, **model_kwargs)
     return model
 
-class DualPrompt(_Trainer):
+class Ours(_Trainer):
     def __init__(self, *args, **kwargs):
-        super(DualPrompt, self).__init__(*args, **kwargs)
+        super(Ours, self).__init__(*args, **kwargs)
         
         if 'imagenet' in self.dataset:
             self.lr_gamma = 0.99995
@@ -80,6 +80,7 @@ class DualPrompt(_Trainer):
         
         self.class_mask = None
         self.class_mask_dict={}
+        self.criterion = nn.CrossEntropyLoss(reduction='none')
     
     def online_step(self, images, labels, idx):
         self.add_new_class(labels)
@@ -97,6 +98,8 @@ class DualPrompt(_Trainer):
     def online_train(self, data):
         self.model.train()
         total_loss, total_correct, total_num_data = 0.0, 0.0, 0.0
+        
+        ref_fc = copy.deepcopy(self.model.backbone.fc)
         x, y = data
         for j in range(len(y)):
             y[j] = self.exposed_classes.index(y[j].item())
@@ -105,11 +108,12 @@ class DualPrompt(_Trainer):
         y = y.to(self.device)
 
         x = self.train_transform(x)
-
+        
         self.optimizer.zero_grad()
-        logit, loss = self.model_forward(x,y)
+        logit, loss = self.model_forward(x,y,ref_fc=ref_fc)
         _, preds = logit.topk(self.topk, 1, True, True)
         
+        self.optimizer.zero_grad()
         self.scaler.scale(loss).backward()
         self.scaler.step(self.optimizer)
         self.scaler.update()
@@ -121,19 +125,13 @@ class DualPrompt(_Trainer):
 
         return total_loss, total_correct/total_num_data
 
-    def model_forward(self, x, y):
-        # do_cutmix = self.cutmix and np.random.rand(1) < 0.5
-        # if do_cutmix:
-        #     x, labels_a, labels_b, lam = cutmix_data(x=x, y=y, alpha=1.0)
-        #     with torch.cuda.amp.autocast(enabled=self.use_amp):
-        #         logit = self.model(x)
-        #         logit += self.mask
-        #         loss = lam * self.criterion(logit, labels_a) + (1 - lam) * self.criterion(logit, labels_b)
-        # else:
+    def model_forward(self, x, y,ref_fc):
         with torch.cuda.amp.autocast(enabled=self.use_amp):
-            logit = self.model(x)
-            logit += self.mask
-            loss = self.criterion(logit, y)
+            feat = self.model(x,only_feat=True)
+            # print("x",x.shape)
+            # print("feat:",feat.shape)
+            ign_score,sample_g = self.get_score(ref_head=ref_fc,feat=feat,y=y)
+            loss,logit = self._get_loss(ign_score,feat,y,sample_g)
         return logit, loss
 
     def online_evaluate(self, test_loader):
@@ -164,7 +162,7 @@ class DualPrompt(_Trainer):
                 correct_l += correct_xlabel_cnt.detach().cpu()
                 num_data_l += xlabel_cnt.detach().cpu()
 
-                total_loss += loss.item()
+                total_loss += loss.mean().item()
                 label += y.tolist()
 
         avg_acc = total_correct / total_num_data
@@ -193,3 +191,133 @@ class DualPrompt(_Trainer):
     def reset_opt(self):
         self.optimizer = select_optimizer(self.opt_name, self.lr, self.model, True)
         self.scheduler = select_scheduler(self.sched_name, self.optimizer, self.lr_gamma)
+        
+    
+    
+    def _compute_grads_uncert(self,ref_head,feat,y):
+        sample_criterion = nn.CrossEntropyLoss(reduction='none')
+        batch_criterion = nn.CrossEntropyLoss()
+        sample_g = []
+        ref_head.zero_grad()
+        tmp_logit = ref_head(feat)[:,:len(self.exposed_classes)]
+    #     print('feats')
+    #     print(feat[:3]); print()
+    #     print('tmp_logit')
+    #     print(tmp_logit); print()
+
+        p = torch.softmax(tmp_logit,dim=1)
+        idx = torch.arange(len(y))
+        uncert = 1. - p[idx,y[idx]].clone().detach() #B
+        
+        sample_loss = sample_criterion(tmp_logit,y)
+        
+        for idx in range(len(y)):
+            sample_loss[idx].backward(retain_graph=True)
+            _g = ref_head.weight.grad[y[idx]].clone()
+            sample_g.append(_g)
+            ref_head.zero_grad()
+        sample_g = torch.stack(sample_g)    #B,dim
+        
+        ref_head.zero_grad()
+        batch_loss = batch_criterion(tmp_logit,y)
+        batch_loss.backward(retain_graph=True)
+        batch_g = ref_head.weight.grad[:len(self.exposed_classes)].clone()  # C,dim
+        idx = torch.arange(len(y))
+        batch_g=batch_g[y[idx]]    #B,dim
+        ref_head.zero_grad()
+    #     del ref_head
+    #     print('uncertain')
+    #     print(uncert); print()
+    #     print('sample_g')
+    #     print(sample_g); print()
+    #     print('batch_g')
+    #     print(batch_g); print()
+        
+        
+        return uncert, sample_g, batch_g
+    
+    
+    
+    def _get_ignore(self,ref_head,feat,y):
+        uncert, sample_g, batch_g = self._compute_grads_uncert(ref_head,feat,y)
+        sample_l2norm = torch.norm(sample_g,p=2,dim=1)  # B
+        if sample_l2norm.sum().item() == 0: #all loss is zero case
+            return None,sample_g
+        batch_l2norm = torch.norm(batch_g,p=2,dim=1)    # B
+        uncert_soft = torch.softmax(uncert,dim=0)
+        ignore_score = torch.max((sample_l2norm-batch_l2norm),torch.zeros(1,device=self.device))
+        # ignore_score = 1. + torch.max((sample_l2norm/batch_l2norm),torch.zeros(1,device=self.device))
+        return ignore_score,sample_g
+
+    def _get_drift(self,y,sample_g):
+        idx = torch.arange(len(y))
+        pre_wts = self.model.backbone.fc.weight[y[idx]].clone().detach()
+    #     with torch.no_grad():
+        post_wts = pre_wts-sample_g
+        drift = 1 - torch.cosine_similarity(pre_wts,post_wts,dim=1) # B
+        return drift
+
+    def get_score(self,ref_head,feat,y):
+        ign_feat = self.model.backbone.fc_norm(feat[:,0].clone().detach())
+        
+        ignore_score,sample_g = self._get_ignore(ref_head,ign_feat,y)
+        # drift_score = self._get_drift(y,sample_g)
+        
+        return ignore_score,sample_g
+    
+    #* for ignore problem
+    def str_loss(self,logit,y,str_score):
+        # targets = F.one_hot(y,len(self.exposed_classes))
+        gamma=1.
+        log_p = F.log_softmax(logit,dim=1)
+        ce = F.nll_loss(log_p,y,reduction='none')
+        
+        loss = (str_score**gamma)*ce
+        
+        return loss
+        
+    #* for drift problem
+    def cp_loss(self,y,sample_g):
+        # idx = torch.arange(len(y))
+        sample_w = self.model.backbone.fc.weight[y]
+        next_w = sample_w.clone().detach() - self.lr*sample_g
+        
+        cp_loss = 1- torch.cosine_similarity(sample_w,next_w,dim=1)
+        
+        return cp_loss
+
+
+    def _get_loss(self,ign_score,feat,y,sample_g):
+        # for p in ref_head.parameters():
+        #     p.requires_grad = False
+        #*#########################################################################
+        #* strength_loss
+        if ign_score != None:
+            ign_feat = self.model.backbone.fc_norm(feat[:,0])
+            #* 원래는 Head는 학습X !!
+            #* ign_logit = ref_head(ign_feat)[:,:len(self.exposed_classes)]
+            ign_logit = self.model.backbone.fc(ign_feat)[:,:len(self.exposed_classes)]
+            # ign_logit = ign_logit*(1/ign_score[:,None])
+            str_loss = self.str_loss(ign_logit, y)
+            str_loss = str_loss.mean()
+        else:
+            str_loss = torch.zeros(1,device=self.device)
+        
+    #     print('ignore_score')
+    #     print(ign_score)
+    #     print('ignore_loss:',ignore_loss)
+        
+        #*########################################################################
+        #* compensation_loss
+        # cur_wts = 
+        # drift_loss = self.criterion(ori_logit, y) * drift_score
+        cp_loss = self.cp_loss(y,sample_g)
+        cp_loss = cp_loss.mean()
+        #*########################################################################
+        #* CE_loss
+        ce_logit = self.model.backbone.forward_head(feat)[:,:len(self.exposed_classes)]
+        ce_loss = self.criterion(ce_logit, y)
+        ce_loss = ce_loss.mean() + self.model._get_sim()
+        loss = ce_loss + str_loss + cp_loss 
+        # print(f"ignore: {alpha*ignore_loss.item():.4f} drift:{(1-alpha)*drift_loss.item():.4f} loss: {loss.item():.4f}")
+        return loss, ce_logit

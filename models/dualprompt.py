@@ -60,11 +60,11 @@ class Prompt(nn.Module):
         self.register_buffer('counter',   torch.zeros(pool_size))
     
     def forward(self, query : torch.Tensor, **kwargs):
-
         B, D = query.shape
         assert D == self.dimention, f'Query dimention {D} does not match prompt dimention {self.dimention}'
         # Select prompts
         match = 1 - F.cosine_similarity(query.unsqueeze(1), self.key, dim=-1)
+        # match = 1 - F.cosine_similarity(query.unsqueeze(1), self.key, dim=-1)
         if self.training and self._diversed_selection:
             topk = match * F.normalize(self.frequency, p=1, dim=-1)
         else:
@@ -97,7 +97,7 @@ class DualPrompt(nn.Module):
     def __init__(self,
                  pos_g_prompt   : Iterable[int] = (0, 1),
                  len_g_prompt   : int   = 5,
-                 pos_e_prompt   : Iterable[int] = (-1,),
+                 pos_e_prompt   : Iterable[int] = (2,3,4),
                  len_e_prompt   : int   = 20,
                  prompt_func    : str   = 'prefix_tuning',
                  task_num       : int   = 10,
@@ -125,7 +125,7 @@ class DualPrompt(nn.Module):
         self.backbone.fc.bias.requires_grad   = True
 
         self.tasks = []
-       
+
         self.len_g_prompt = len_g_prompt
         self.len_e_prompt = len_e_prompt
         g_pool = 1
@@ -163,14 +163,14 @@ class DualPrompt(nn.Module):
         for n, block in enumerate(self.backbone.blocks):
             pos_g = ((self.pos_g_prompt.eq(n)).nonzero()).squeeze()
             if pos_g.numel() != 0:
-                x = torch.cat((x, g_prompt[:, pos_g].unsqueeze(0).expand(B,-1,-1)), dim = 1)
+                x = torch.cat((x, g_prompt[:, pos_g]), dim = 1)
 
             pos_e = ((self.pos_e_prompt.eq(n)).nonzero()).squeeze()
             if pos_e.numel() != 0:
-                x = torch.cat((x, e_prompt[:, pos_e].unsqueeze(0).expand(B,-1,-1)), dim = 1)
+                x = torch.cat((x, e_prompt[:, pos_e]), dim = 1)
             x = block(x)
         return x
-    
+
     def prefix_tuning(self,
                       x        : torch.Tensor,
                       g_prompt : torch.Tensor,
@@ -180,11 +180,8 @@ class DualPrompt(nn.Module):
         B, N, C = x.size()
         g_prompt = g_prompt.contiguous().view(B, 2 * self.g_length, self.len_g_prompt, C)
         e_prompt = e_prompt.contiguous().view(B, 2 * self.e_length, self.len_e_prompt, C)
-        # g_prompt = g_prompt + self.backbone.pos_embed[:,:1,:].unsqueeze(1).expand(B, 2 * self.g_length, self.len_g_prompt, C)
-        # e_prompt = e_prompt + self.backbone.pos_embed[:,:1,:].unsqueeze(1).expand(B, 2 * self.e_length, self.len_e_prompt, C)
 
         for n, block in enumerate(self.backbone.blocks):
-
             xq = block.norm1(x)
             xk = xq.clone()
             xv = xq.clone()
@@ -224,7 +221,6 @@ class DualPrompt(nn.Module):
         return x
 
     def forward(self, inputs : torch.Tensor) :
-        
         with torch.no_grad():
             x = self.backbone.patch_embed(inputs)
             B, N, D = x.size()
@@ -241,12 +237,13 @@ class DualPrompt(nn.Module):
         else:
             g_p = None
         if self.e_prompt is not None:
-            if self.training:
-                e_s = 1 - F.cosine_similarity(query.unsqueeze(1), self.e_prompt.key[self.task_id], dim = -1)
-                e_p = self.e_prompt.prompts[self.task_id].expand(B, -1, -1)
-                self.e_prompt.counter[self.task_id] += B
-            else:
-                e_s, e_p = self.e_prompt(query)
+            # if self.training:
+            #     e_s = 1 - F.cosine_similarity(query.unsqueeze(1), self.e_prompt.key[self.task_id], dim = -1)
+            #     e_p = self.e_prompt.prompts[self.task_id].expand(B, -1, -1)
+            #     self.e_prompt.counter[self.task_id] += B
+            # else:
+            #     e_s, e_p = self.e_prompt(query,self.task_id+1)
+            e_s, e_p = self.e_prompt(query)
         else:
             e_p = None
             e_s = 0
@@ -255,15 +252,12 @@ class DualPrompt(nn.Module):
         x = self.backbone.norm(x)
         x = self.backbone.fc(x[:, 0])
 
-        # if self.training:
-        #     x = x + self.mask
-
         self.similarity = e_s.mean()
         return x
 
     def convert_train_task(self, task : torch.Tensor, **kwargs):
     
-        task = torch.tensor(task)
+        task = torch.tensor(task,dtype=torch.float)
         flag = -1
         for n, t in enumerate(self.tasks):
             if torch.equal(t, task):
@@ -275,13 +269,15 @@ class DualPrompt(nn.Module):
             if self.training:
                 if self.task_id != 0:
                     with torch.no_grad():
-                        self.e_prompt.prompts[self.task_id] = self.e_prompt.prompts[self.task_id - 1].detach().clone()
-                        self.e_prompt.key[self.task_id] = self.e_prompt.key[self.task_id - 1].detach().clone()
+                        # self.e_prompt.prompts[self.task_id] = self.e_prompt.prompts[self.task_id - 1].detach().clone()
+                        # self.e_prompt.key[self.task_id] = self.e_prompt.key[self.task_id - 1].detach().clone()
+                        self.e_prompt.prompts[self.task_id] = self.e_prompt.prompts[self.task_id - 1].clone()
+                        self.e_prompt.key[self.task_id] = self.e_prompt.key[self.task_id - 1].clone()
         else :
             self.task_id = flag
 
-        self.mask += -torch.inf
-        self.mask[task] = 0
+        # self.mask += -torch.inf
+        # self.mask[task] = 0
         return
         
     def get_count(self):

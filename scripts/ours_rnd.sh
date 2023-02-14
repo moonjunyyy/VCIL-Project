@@ -1,6 +1,6 @@
 #!/bin/bash
 
-#SBATCH -J iblurry_cifar100_N50_M10_RND
+#SBATCH -J Ours_Siblurry_loss_update
 #SBATCH -p batch_agi
 #SBATCH -w agi2
 #SBATCH --nodes=1
@@ -9,7 +9,6 @@
 #SBATCH --mem-per-gpu=20G
 #SBATCH --time=7-0
 #SBATCH -o %x_%j.log
-#SBATCH -e %x_%j.err
 
 date
 ulimit -n 65536
@@ -32,7 +31,7 @@ conda --version
 python --version
 
 # CIL CONFIG
-NOTE="iblurry_cifar100_N50_M10_RND" # Short description of the experiment. (WARNING: logs/results with the same note will be overwritten!)
+NOTE="Ours_Siblurry_cifar100_N50_M10_update" # Short description of the experiment. (WARNING: logs/results with the same note will be overwritten!)
 MODE="ours"
 DATASET="cifar100" # cifar10, cifar100, tinyimagenet, imagenet
 N_TASKS=5
@@ -78,5 +77,5 @@ do
     --model_name $MODEL_NAME --opt_name $OPT_NAME --sched_name $SCHED_NAME \
     --lr $LR --batchsize $BATCHSIZE \
     --memory_size $MEM_SIZE $GPU_TRANSFORM --online_iter $ONLINE_ITER --data_dir /local_datasets \
-    --note $NOTE --eval_period $EVAL_PERIOD --n_worker 4 --rnd_NM
+    --note $NOTE --eval_period $EVAL_PERIOD --n_worker 2 --rnd_NM --selection_size 1 --alpha 1
 done

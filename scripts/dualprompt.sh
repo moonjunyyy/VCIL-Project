@@ -1,6 +1,6 @@
 #!/bin/bash
 
-#SBATCH -J DP_iblurry_cifar100_N50_M10_RND
+#SBATCH -J DP_Si_id_X_prefix
 #SBATCH -p batch_agi
 #SBATCH  -w agi2
 #SBATCH --nodes=1
@@ -50,7 +50,7 @@ if [ "$DATASET" == "cifar10" ]; then
 
 elif [ "$DATASET" == "cifar100" ]; then
     MEM_SIZE=2000 ONLINE_ITER=3
-    MODEL_NAME="DualPrompt" EVAL_PERIOD=100
+    MODEL_NAME="DualPrompt" EVAL_PERIOD=1000
     BATCHSIZE=64; LR=3e-2 OPT_NAME="adam" SCHED_NAME="default" MEMORY_EPOCH=256
 
 elif [ "$DATASET" == "tinyimagenet" ]; then
@@ -77,7 +77,7 @@ do
     --n_tasks $N_TASKS --m $M --n $N \
     --rnd_seed $RND_SEED \
     --model_name $MODEL_NAME --opt_name $OPT_NAME --sched_name $SCHED_NAME \
-    --lr $LR --batchsize $BATCHSIZE --n_worker 2 \
+    --lr $LR --batchsize $BATCHSIZE \
     --memory_size $MEM_SIZE $GPU_TRANSFORM --online_iter $ONLINE_ITER --data_dir ./data \
     --note $NOTE --eval_period $EVAL_PERIOD  --memory_epoch $MEMORY_EPOCH --n_worker 2 --rnd_NM
 done
