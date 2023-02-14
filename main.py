@@ -12,7 +12,7 @@ from methods.ewc import EWCpp
 from methods.ours import Ours
 from methods.dualprompt import DualPrompt
 
-torch.backends.cudnn.enabled = False
+# torch.backends.cudnn.enabled = False
 methods = { "er": ER, "clib":CLIB, 'L2P':L2P, 'rm':RM, 'Finetuning':FT, 'ewc++':EWCpp, 'ours':Ours, 'DualPrompt':DualPrompt }
 # torch.autograd.set_detect_anomaly(True)
 # os.environ["CUDA_LAUNCH_BLOCKING"]="1"

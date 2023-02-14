@@ -5,8 +5,8 @@
 #SBATCH --nodes=1
 #SBATCH --gres=gpu:1
 #SBATCH --cpus-per-gpu=4
-#SBATCH --mem-per-gpu=30G
-#SBATCH --time=7-0
+#SBATCH --mem-per-gpu=16G
+#SBATCH --time=14-0
 #SBATCH -o %x_%j.out
 #SBATCH -e %x_%j.err
 
@@ -41,7 +41,7 @@ N=50
 M=10
 GPU_TRANSFORM="--gpu_transform"
 USE_AMP="--use_amp"
-SEEDS="1"
+SEEDS="1 2 3 4 5"
 
 
 if [ "$DATASET" == "cifar10" ]; then
@@ -51,7 +51,7 @@ if [ "$DATASET" == "cifar10" ]; then
 
 elif [ "$DATASET" == "cifar100" ]; then
     MEM_SIZE=2000 ONLINE_ITER=3
-    MODEL_NAME="ours" EVAL_PERIOD=100
+    MODEL_NAME="ours" EVAL_PERIOD=1000
     BATCHSIZE=64; LR=5e-3 OPT_NAME="adam" SCHED_NAME="default"
 
 elif [ "$DATASET" == "tinyimagenet" ]; then
@@ -77,6 +77,6 @@ do
     --rnd_seed $RND_SEED \
     --model_name $MODEL_NAME --opt_name $OPT_NAME --sched_name $SCHED_NAME \
     --lr $LR --batchsize $BATCHSIZE \
-    --memory_size $MEM_SIZE $GPU_TRANSFORM --online_iter $ONLINE_ITER --data_dir ./data/ \
-    --note $NOTE --eval_period $EVAL_PERIOD --n_worker 4 --transforms autoaug
+    --memory_size $MEM_SIZE $GPU_TRANSFORM --online_iter $ONLINE_ITER --data_dir /local_datasets \
+    --note $NOTE --eval_period $EVAL_PERIOD --n_worker 4 --transforms autoaug --rnd_NM
 done

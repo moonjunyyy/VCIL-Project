@@ -23,7 +23,7 @@ class Ours(_Trainer):
         _loss, _acc, _iter = 0.0, 0.0, 0
         for j in range(len(labels)):
             labels[j] = self.exposed_classes.index(labels[j].item())
-        for _ in range(int(self.online_iter) * self.temp_batchsize * self.world_size):
+        for _ in range(int(self.online_iter)):
             loss, acc = self.online_train([images.clone(), labels.clone()])
             _loss += loss
             _acc += acc
@@ -154,4 +154,5 @@ class Ours(_Trainer):
             f"ETA {datetime.timedelta(seconds=int((time.time() - self.start_time) * (self.total_samples-sample_num) / sample_num))} | "
             f"N_Prompts {self.model_without_ddp.e_prompts.size(0)} | "
             f"N_Exposed {len(self.exposed_classes)} | "
+            f"Counts {self.model_without_ddp.count.to(torch.int64).tolist()}"
         )

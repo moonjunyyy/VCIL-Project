@@ -237,17 +237,18 @@ class _Trainer():
         self.setup_distributed_model()
 
         if self.rnd_seed is not None:
-            rnd_seed = self.rnd_seed
-            random.seed(rnd_seed)
-            torch.manual_seed(rnd_seed)
-            cudnn.deterministic = True
+            random.seed(self.rnd_seed)
             np.random.seed(self.rnd_seed)
+            torch.manual_seed(self.rnd_seed)
+            torch.cuda.manual_seed(self.rnd_seed)
+            torch.cuda.manual_seed_all(self.rnd_seed) # if use multi-GPU
+            cudnn.deterministic = True
             print('You have chosen to seed training. '
                 'This will turn on the CUDNN deterministic setting, '
                 'which can slow down your training considerably! '
                 'You may see unexpected behavior when restarting '
                 'from checkpoints.')
-        cudnn.benchmark = True
+        cudnn.benchmark = False
     
         print(f"[2] Incrementally training {self.n_tasks} tasks")
         task_records = defaultdict(list)
