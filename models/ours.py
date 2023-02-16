@@ -43,9 +43,10 @@ class Ours(nn.Module):
                  task_num       : int   = 10,
                  class_num      : int   = 100,
                  lambd          : float = 1.0,
-                 use_mask       : bool  = False,
+                 use_mask       : bool  = True,
                  use_dyna_exp   : bool  = False,
                  use_contrastiv : bool  = False,
+                 use_last_layer : bool  = True,
                  backbone_name  : str   = None,
                  **kwargs):
 
@@ -59,6 +60,7 @@ class Ours(nn.Module):
         self.use_mask    = use_mask
         self.use_dyna_exp    = use_dyna_exp
         self.use_contrastiv  = use_contrastiv
+        self.use_last_layer  = use_last_layer
 
         self.add_module('backbone', timm.models.create_model(backbone_name, pretrained=True, num_classes=class_num,
                                                              drop_rate=0.,drop_path_rate=0.,drop_block_rate=None))
@@ -82,7 +84,7 @@ class Ours(nn.Module):
         self.register_buffer('count', torch.zeros(e_pool))
         # self.register_buffer('key', torch.randn(e_pool, self.backbone.embed_dim))
         self.key     = nn.Parameter(torch.randn(e_pool, self.backbone.embed_dim), requires_grad=False)
-        self.mask    = nn.Parameter(-torch.ones(e_pool, self.class_num) * 10)
+        self.mask    = nn.Parameter(torch.zeros(e_pool, self.class_num))
 
         if prompt_func == 'prompt_tuning':
             self.prompt_func = self.prompt_tuning
@@ -191,7 +193,7 @@ class Ours(nn.Module):
             x = self.backbone.pos_drop(token_appended + self.backbone.pos_embed)
             query = x.clone()
             for n, block in enumerate(self.backbone.blocks):
-                if n == len(self.backbone.blocks) - 1: break
+                if n == len(self.backbone.blocks) - 1 and not self.use_last_layer: break
                 query = block(query)
             query = query[:, 0]
             # query = self.backbone.norm(query)[:, 0]
@@ -217,7 +219,7 @@ class Ours(nn.Module):
                     if self.use_contrastiv:
                         mass = self.count + 1
         topk = similarity.topk(1, dim=1, largest=False)[1]
-        similarity = similarity[:, topk].squeeze().clone()
+        similarity = similarity[torch.arange(len(topk), device=topk.device), topk].squeeze().clone()
         e_prompts = self.e_prompts[topk].squeeze().clone()
         mask = self.mask[topk].squeeze().clone()
 
@@ -226,7 +228,6 @@ class Ours(nn.Module):
             with torch.no_grad():
                 num = topk.view(-1).bincount(minlength=self.e_prompts.size(0))
                 self.count += num
-
 
         x = self.prompt_func(self.backbone.pos_drop(token_appended + self.backbone.pos_embed), g_prompts, e_prompts)
         x = self.backbone.norm(x)

@@ -97,9 +97,9 @@ class DualPrompt(nn.Module):
     def __init__(self,
                  pos_g_prompt   : Iterable[int] = (0, 1),
                  len_g_prompt   : int   = 5,
-                 pos_e_prompt   : Iterable[int] = (-1,),
-                 len_e_prompt   : int   = 20,
-                 prompt_func    : str   = 'prefix_tuning',
+                 pos_e_prompt   : Iterable[int] = (2,3,4),
+                 len_e_prompt   : int   = 5,
+                 prompt_func    : str   = 'prompt_tuning',
                  task_num       : int   = 10,
                  class_num      : int   = 100,
                  lambd          : float = 1.0,
@@ -163,13 +163,15 @@ class DualPrompt(nn.Module):
         for n, block in enumerate(self.backbone.blocks):
             pos_g = ((self.pos_g_prompt.eq(n)).nonzero()).squeeze()
             if pos_g.numel() != 0:
-                x = torch.cat((x, g_prompt[:, pos_g].unsqueeze(0).expand(B,-1,-1)), dim = 1)
+                x = torch.cat((x, g_prompt[:, pos_g]), dim = 1)
 
             pos_e = ((self.pos_e_prompt.eq(n)).nonzero()).squeeze()
             if pos_e.numel() != 0:
-                x = torch.cat((x, e_prompt[:, pos_e].unsqueeze(0).expand(B,-1,-1)), dim = 1)
+                x = torch.cat((x, e_prompt[:, pos_e]), dim = 1)
             x = block(x)
+            x = x[:, :N, :]
         return x
+    
     
     def prefix_tuning(self,
                       x        : torch.Tensor,
@@ -241,11 +243,11 @@ class DualPrompt(nn.Module):
         else:
             g_p = None
         if self.e_prompt is not None:
-            if self.training:
-                e_s = 1 - F.cosine_similarity(query.unsqueeze(1), self.e_prompt.key[self.task_id], dim = -1)
-                e_p = self.e_prompt.prompts[self.task_id].expand(B, -1, -1)
-                self.e_prompt.counter[self.task_id] += B
-            else:
+            # if self.training:
+            #     e_s = 1 - F.cosine_similarity(query.unsqueeze(1), self.e_prompt.key[self.task_id], dim = -1)
+            #     e_p = self.e_prompt.prompts[self.task_id].expand(B, -1, -1)
+            #     self.e_prompt.counter[self.task_id] += B
+            # else:
                 e_s, e_p = self.e_prompt(query)
         else:
             e_p = None

@@ -230,12 +230,6 @@ class _Trainer():
         else:
             pass
 
-        self.setup_distributed_dataset()
-        self.total_samples = len(self.train_dataset)
-
-        print(f"[1] Select a CIL method ({self.mode})")
-        self.setup_distributed_model()
-
         if self.rnd_seed is not None:
             random.seed(self.rnd_seed)
             np.random.seed(self.rnd_seed)
@@ -249,7 +243,13 @@ class _Trainer():
                 'You may see unexpected behavior when restarting '
                 'from checkpoints.')
         cudnn.benchmark = False
-    
+
+        self.setup_distributed_dataset()
+        self.total_samples = len(self.train_dataset)
+
+        print(f"[1] Select a CIL method ({self.mode})")
+        self.setup_distributed_model()
+
         print(f"[2] Incrementally training {self.n_tasks} tasks")
         task_records = defaultdict(list)
         eval_results = defaultdict(list)

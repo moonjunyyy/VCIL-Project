@@ -16,6 +16,11 @@ import datetime
 class Ours(_Trainer):
     def __init__(self, **kwargs):
         super(Ours, self).__init__(**kwargs)
+        
+        self.use_mask    = kwargs.get("use_mask")
+        self.use_dyna_exp    = kwargs.get("use_dyna_exp")
+        self.use_contrastiv  = kwargs.get("use_contrastiv")
+        self.use_last_layer  = kwargs.get("use_last_layer")
     
     def online_step(self, images, labels, idx):
         self.add_new_class(labels)
@@ -156,3 +161,10 @@ class Ours(_Trainer):
             f"N_Exposed {len(self.exposed_classes)} | "
             f"Counts {self.model_without_ddp.count.to(torch.int64).tolist()}"
         )
+
+    def setup_distributed_model(self):
+        super().setup_distributed_model()
+        self.model_without_ddp.use_mask = self.use_mask
+        self.model_without_ddp.use_contrastiv = self.use_contrastiv
+        self.model_without_ddp.use_dyna_exp = self.use_dyna_exp
+        self.model_without_ddp.use_last_layer = self.use_last_layer

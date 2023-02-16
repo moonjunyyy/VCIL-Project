@@ -85,7 +85,7 @@ class DualPrompt(_Trainer):
         self.add_new_class(labels)
         # train with augmented batches
         _loss, _acc, _iter = 0.0, 0.0, 0
-        for _ in range(int(self.online_iter) * self.temp_batchsize * self.world_size):
+        for _ in range(int(self.online_iter)):
             loss, acc = self.online_train([images.clone(), labels.clone()])
             _loss += loss
             _acc += acc
@@ -184,7 +184,7 @@ class DualPrompt(_Trainer):
             
     def online_before_task(self,train_loader):
         # Task-Free
-        self.model_without_ddp.convert_train_task(self.exposed_classes)
+        # self.model_without_ddp.convert_train_task(self.exposed_classes)
         pass
 
     def online_after_task(self, cur_iter):
