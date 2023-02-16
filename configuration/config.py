@@ -117,8 +117,23 @@ def base_parser():
     # MIR
     parser.add_argument('--mir_cands', type=int, default=50, help='# candidates to use for MIR')
     # Prompt-based (ViT)
+     # Ours
+    parser.add_argument('--use_mask', action='store_true', help='use mask for our method')
+    parser.add_argument('--use_contrastiv', action='store_true', help='use contrastive loss for our method')
+    parser.add_argument('--use_last_layer', action='store_true', help='use last layer for our method')
+    parser.add_argument('--use_dyna_exp', action='store_true', help='use dynamic expand for our method')
+    
+    parser.add_argument('--no-use_mask', dest='use_mask', action='store_false', help='use mask for our method')
+    parser.add_argument('--no-use_contrastiv', dest='use_contrastiv', action='store_false', help='use contrastive loss for our method')
+    parser.add_argument('--no-use_last_layer', dest='use_last_layer', action='store_false', help='use last layer for our method')
+    parser.add_argument('--no-use_dyna_exp', action='store_false', help='use dynamic expand for our method')
+    
     parser.add_argument('--selection_size', type=int, default=1, help='# candidates to use for ViT_Prompt')
-    parser.add_argument('--alpha', type=float, default=0.5, help='# candidates to use for ViT_Prompt')
+    parser.add_argument('--alpha', type=float, default=1., help='# candidates to use for STR hyperparameter')
+    parser.add_argument('--gamma', type=float, default=1., help='# candidates to use for STR hyperparameter')
+    parser.add_argument('--beta', type=float, default=0., help='# candidates to use for peeking into the updated head')
+    parser.add_argument('--charlie', type=float, default=0., help='# candidates to use for CP hyperparameter')
+    
 
     args = parser.parse_args()
     return args

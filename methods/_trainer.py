@@ -67,6 +67,10 @@ class _Trainer():
         #* for Prompt Based
         self.selection_size = kwargs.get("selection_size")
         self.alpha = kwargs.get("alpha")
+        self.gamma = kwargs.get("gamma")
+        self.beta = kwargs.get("beta")
+        self.charlie = kwargs.get("charlie")
+        
         
         self.eval_period     = kwargs.get("eval_period")
         self.temp_batchsize  = kwargs.get("temp_batchsize")
@@ -129,7 +133,7 @@ class _Trainer():
         }
 
         mean, std, n_classes, inp_size, _ = get_statistics(dataset=self.dataset)
-        if self.model_name == 'vit' or self.model_name == 'L2P' or self.model_name == 'ours' or self.model_name == 'DualPrompt':
+        if self.model_name == 'vit' or self.model_name == 'L2P' or self.model_name == 'ours' or self.model_name == 'ours_total' or self.model_name == 'DualPrompt':
             inp_size = 224    
         self.n_classes = n_classes
         self.inp_size = inp_size
@@ -253,19 +257,20 @@ class _Trainer():
         # #!-----------------------------------------------
         self.setup_distributed_model()
 
-        if self.rnd_seed is not None:
-            rnd_seed = self.rnd_seed
-            random.seed(rnd_seed)
-            torch.manual_seed(rnd_seed)
-            cudnn.deterministic = True
-            np.random.seed(self.rnd_seed)
-            print('You have chosen to seed training. '
-                'This will turn on the CUDNN deterministic setting, '
-                'which can slow down your training considerably! '
-                'You may see unexpected behavior when restarting '
-                'from checkpoints.')
-        cudnn.benchmark = False
-    
+        #!-------------------------------------------------------------------
+        # if self.rnd_seed is not None:
+        #     rnd_seed = self.rnd_seed
+        #     random.seed(rnd_seed)
+        #     torch.manual_seed(rnd_seed)
+        #     cudnn.deterministic = True
+        #     np.random.seed(self.rnd_seed)
+        #     print('You have chosen to seed training. '
+        #         'This will turn on the CUDNN deterministic setting, '
+        #         'which can slow down your training considerably! '
+        #         'You may see unexpected behavior when restarting '
+        #         'from checkpoints.')
+        # cudnn.benchmark = False
+        #!-------------------------------------------------------------------
         print(f"[2] Incrementally training {self.n_tasks} tasks")
         task_records = defaultdict(list)
         eval_results = defaultdict(list)

@@ -29,19 +29,35 @@ from methods.Finetuning import FT
 from methods.ewc import EWCpp
 from methods.ours import Ours
 from methods.ours_test import Ours_test
+from methods.ours_test import baseline
+from methods.ours_total import Ours_total
 from methods.dualprompt import DualPrompt
+
+import random
+import torch
+import numpy as np
 
 # torch.autograd.set_detect_anomaly(True)
 torch.backends.cudnn.enabled = False
-methods = { "er": ER, "clib":CLIB, 'L2P':L2P, 'rm':RM, 'Finetuning':FT, 'ewc++':EWCpp, 'ours':Ours, 'ours_test':Ours_test, 'DualPrompt':DualPrompt }
+methods = { "er": ER, "clib":CLIB, 'L2P':L2P, 'rm':RM, 'Finetuning':FT, 'ewc++':EWCpp, 'ours':Ours, 'ours_test':Ours_test, 'DualPrompt':DualPrompt, 'baseline':baseline,
+           'Ours_total':Ours_total}
 # torch.autograd.set_detect_anomaly(True)
-# os.environ["CUDA_LAUNCH_BLOCKING"]="1"
+os.environ["CUDA_LAUNCH_BLOCKING"]="1"
 # os.environ["TORCH_DISTRIBUTED_DEBUG"] = "DETAIL"
-
+# import torch.backends.cudnn as cudnn
 def main():
     # Get Configurations
     args = config.base_parser()
     print(args)
+    rnd_seed = args.rnd_seed
+    random.seed(rnd_seed)
+    torch.manual_seed(rnd_seed)
+    torch.backends.cudnn.deterministic = True
+    np.random.seed(rnd_seed)
+    torch.backends.cudnn.benchmark = False
+    torch.cuda.manual_seed(rnd_seed)
+    torch.cuda.manual_seed_all(rnd_seed) # if use multi-GPU
+    
     trainer = methods[args.mode](**vars(args))
     trainer.run()
 
