@@ -37,23 +37,55 @@ class RM(ER):
     def setup_distributed_dataset(self):
         super(RM, self).setup_distributed_dataset()
         self.loss_update_dataset = self.datasets[self.dataset](root=self.data_dir, train=True, download=True,
-                                     transform=transforms.Compose([transforms.Resize((self.inp_size,self.inp_size)),transforms.ToTensor()]))
+                                     transform=self.train_transform)
 
     def online_step(self, images, labels, idx):
         # image, label = sample
-        self.add_new_class(labels[0])
+        self.add_new_class(labels)
         self.memory_sampler  = MemoryBatchSampler(self.memory, self.memory_batchsize, self.temp_batchsize * self.online_iter * self.world_size)
         self.memory_dataloader   = DataLoader(self.train_dataset, batch_size=self.memory_batchsize, sampler=self.memory_sampler, num_workers=0, pin_memory=True)
         self.memory_provider     = iter(self.memory_dataloader)
         # train with augmented batches
         _loss, _acc, _iter = 0.0, 0.0, 0
-        for image, label in zip(images, labels):
-            loss, acc = self.online_train([image.clone(), label.clone()])
+        for _ in range(int(self.online_iter) * self.temp_batchsize * self.world_size):
+            loss, acc = self.online_train([images.clone(), labels.clone()])
             _loss += loss
             _acc += acc
             _iter += 1
-        self.update_memory(idx, labels[0])
+        self.update_memory(idx, labels)
         return _loss / _iter, _acc / _iter
+
+    def online_train(self, data):
+        self.model.train()
+        total_loss, total_correct, total_num_data = 0.0, 0.0, 0.0
+        x, y = data
+        for j in range(len(y)):
+            y[j] = self.exposed_classes.index(y[j].item())
+        if len(self.memory) > 0 and self.memory_batchsize > 0:
+            memory_images, memory_labels = next(self.memory_provider)
+            for i in range(len(memory_labels)):
+                memory_labels[i] = self.exposed_classes.index(memory_labels[i].item())
+            x = torch.cat([x, memory_images], dim=0)
+            y = torch.cat([y, memory_labels], dim=0)
+
+        x = x.to(self.device)
+        y = y.to(self.device)
+        x = self.train_transform(x)
+
+        self.optimizer.zero_grad()
+        logit, loss = self.model_forward(x,y)
+        _, preds = logit.topk(self.topk, 1, True, True)
+        
+        self.scaler.scale(loss).backward()
+        self.scaler.step(self.optimizer)
+        self.scaler.update()
+        self.update_schedule()
+
+        total_loss += loss.item()
+        total_correct += torch.sum(preds == y.unsqueeze(1)).item()
+        total_num_data += y.size(0)
+
+        return total_loss, total_correct/total_num_data
 
     def add_new_class(self, class_name):
         super(RM,self).add_new_class(class_name)

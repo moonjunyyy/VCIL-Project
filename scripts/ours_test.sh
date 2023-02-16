@@ -6,7 +6,7 @@
 #SBATCH --gres=gpu:1
 #SBATCH --cpus-per-gpu=4
 #SBATCH --mem-per-gpu=16G
-#SBATCH --time=14-0
+#SBATCH --time=7-0
 #SBATCH -o %x_%j.out
 #SBATCH -e %x_%j.err
 
@@ -26,7 +26,7 @@ master_addr=$(scontrol show hostnames "$SLURM_JOB_NODELIST" | head -n 1)
 export MASTER_ADDR=$master_addr
 echo "MASTER_ADDR="$MASTER_ADDR
 
-source /data/junyeong/init.sh
+source /data/moonjunyyy/init.sh
 conda activate iblurry
 
 conda --version
@@ -80,7 +80,7 @@ do
     --memory_size $MEM_SIZE $GPU_TRANSFORM --online_iter $ONLINE_ITER --data_dir /local_datasets \
     --note $NOTE --eval_period $EVAL_PERIOD --n_worker 4 --transforms autoaug --rnd_NM \
     --use_last_layer \
-    --use_contrastiv
-    #--use_mask \
+    --use_contrastiv \
+    --use_mask
     # --use_dyna_exp
 done

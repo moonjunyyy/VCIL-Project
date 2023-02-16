@@ -96,11 +96,12 @@ class EWCpp(ER):
             memory_images, memory_labels = next(self.memory_provider)
             x = torch.cat([x, memory_images], dim=0)
             y = torch.cat([y, memory_labels], dim=0)
-        for j in range(len(y)):
-            y[j] = self.exposed_classes.index(y[j].item())
+        # for j in range(len(y)):
+        #     y[j] = self.exposed_classes.index(y[j].item())
 
         x = x.to(self.device)
         y = y.to(self.device)
+        x = self.train_transform(x)
 
         self.optimizer.zero_grad()
         logit, loss = self.model_forward(x,y)

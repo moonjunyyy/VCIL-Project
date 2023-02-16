@@ -83,7 +83,7 @@ class Ours(nn.Module):
 
         self.register_buffer('count', torch.zeros(e_pool))
         # self.register_buffer('key', torch.randn(e_pool, self.backbone.embed_dim))
-        self.key     = nn.Parameter(torch.randn(e_pool, self.backbone.embed_dim), requires_grad=False)
+        self.key     = nn.Parameter(torch.randn(e_pool, self.backbone.embed_dim))
         self.mask    = nn.Parameter(torch.zeros(e_pool, self.class_num))
 
         if prompt_func == 'prompt_tuning':
