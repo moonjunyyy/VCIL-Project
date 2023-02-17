@@ -322,7 +322,10 @@ class Ours_total(_Trainer):
         #     loss = ce_loss + self.alpha*str_loss + self.charlie * cp_loss 
         # elif self.alpha>0:
         #     loss =str_loss
-        loss = ce_loss + self.alpha*str_loss + self.charlie * cp_loss 
+        if self.alpha >0. or self.charlie>0.:
+            loss = ce_loss + self.alpha*str_loss + self.charlie * cp_loss 
+        else:
+            loss = ce_loss
         return loss, ce_logit
     
     def setup_distributed_model(self):

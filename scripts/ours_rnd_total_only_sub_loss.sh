@@ -77,6 +77,6 @@ do
     --model_name $MODEL_NAME --opt_name $OPT_NAME --sched_name $SCHED_NAME \
     --lr $LR --batchsize $BATCHSIZE \
     --memory_size $MEM_SIZE $GPU_TRANSFORM --online_iter $ONLINE_ITER --data_dir /local_datasets \
-    --note $NOTE --eval_period $EVAL_PERIOD --n_worker 2 --rnd_NM --selection_size 1 --alpha 0.5 --gamma 1. --beta 0.5 --charlie 0.5 \
-    --no-use_last_layer --no-use_contrastiv --no-use_mask
+    --note $NOTE --eval_period $EVAL_PERIOD --n_worker 2 --rnd_NM --selection_size 1 --alpha 1. --gamma 1. --beta 0.5 --charlie 1. \
+    --use_last_layer --no-use_contrastiv --no-use_mask
 done
