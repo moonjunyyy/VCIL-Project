@@ -84,7 +84,7 @@ class L2P(_Trainer):
         self.add_new_class(labels)
         # train with augmented batches
         _loss, _acc, _iter = 0.0, 0.0, 0
-        for _ in range(int(self.online_iter) * self.temp_batchsize * self.world_size):
+        for _ in range(int(self.online_iter)):
             loss, acc = self.online_train([images.clone(), labels.clone()])
             _loss += loss
             _acc += acc

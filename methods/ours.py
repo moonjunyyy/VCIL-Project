@@ -54,7 +54,7 @@ class Ours(_Trainer):
         self.mask[:len(self.exposed_classes)] = 0
         if 'reset' in self.sched_name:
             self.update_schedule(reset=True)
-        self.model_without_ddp.set_exposed_classes(self.exposed_classes)
+        # self.model_without_ddp.set_exposed_classes(self.exposed_classes)
 
     def online_before_task(self, task_id):
         pass
@@ -90,7 +90,6 @@ class Ours(_Trainer):
 
     def model_forward(self, x, y):
         do_cutmix = self.cutmix and np.random.rand(1) < 0.5
-        # do_cutmix = False
         if do_cutmix:
             x, labels_a, labels_b, lam = cutmix_data(x=x, y=y, alpha=1.0)
             with torch.cuda.amp.autocast(enabled=self.use_amp):

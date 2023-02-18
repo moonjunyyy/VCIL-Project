@@ -38,7 +38,8 @@ class Ours(nn.Module):
                  pos_g_prompt   : Iterable[int] = (0,1),
                  len_g_prompt   : int   = 5,
                  pos_e_prompt   : Iterable[int] = (2,3,4),
-                 len_e_prompt   : int   = 5,
+                 len_e_prompt   : int   = 10,
+                 selection_size : int   = 1,
                  prompt_func    : str   = 'prompt_tuning',
                  task_num       : int   = 10,
                  class_num      : int   = 100,
@@ -61,6 +62,7 @@ class Ours(nn.Module):
         self.use_dyna_exp    = use_dyna_exp
         self.use_contrastiv  = use_contrastiv
         self.use_last_layer  = use_last_layer
+        self.selection_size  = selection_size
 
         self.add_module('backbone', timm.models.create_model(backbone_name, pretrained=True, num_classes=class_num,
                                                              drop_rate=0.,drop_path_rate=0.,drop_block_rate=None))
@@ -72,7 +74,7 @@ class Ours(nn.Module):
         self.register_buffer('pos_g_prompt', torch.tensor(pos_g_prompt, dtype=torch.int64))
         self.register_buffer('pos_e_prompt', torch.tensor(pos_e_prompt, dtype=torch.int64))
         self.register_buffer('similarity', torch.zeros(1))
-        self.register_buffer('mask', torch.zeros(class_num))
+        # self.register_buffer('mask', torch.zeros(class_num))
         
         self.len_g_prompt = len_g_prompt
         self.len_e_prompt = len_e_prompt
@@ -84,7 +86,7 @@ class Ours(nn.Module):
         self.register_buffer('count', torch.zeros(e_pool))
         # self.register_buffer('key', torch.randn(e_pool, self.backbone.embed_dim))
         self.key     = nn.Parameter(torch.randn(e_pool, self.backbone.embed_dim))
-        self.mask    = nn.Parameter(torch.zeros(e_pool, self.class_num))
+        self.mask    = nn.Parameter(torch.zeros(e_pool, self.class_num) - 1)
 
         if prompt_func == 'prompt_tuning':
             self.prompt_func = self.prompt_tuning
@@ -99,7 +101,6 @@ class Ours(nn.Module):
             self.e_size = 2 * self.e_length * self.len_e_prompt
             self.g_prompts = nn.Parameter(torch.randn(g_pool, self.g_size, self.backbone.embed_dim))
             self.e_prompts = nn.Parameter(torch.randn(e_pool, self.e_size, self.backbone.embed_dim))
-        # self.register_buffer('mask', torch.zeros(pool_size, self.class_num, requires_grad=True))
 
         self.exposed_classes = 0
     
@@ -117,10 +118,8 @@ class Ours(nn.Module):
                       **kwargs):
 
         B, N, C = x.size()
-        g_prompt = g_prompt.contiguous().view(B, self.g_length, self.len_g_prompt, C)
-        e_prompt = e_prompt.contiguous().view(B, self.e_length, self.len_e_prompt, C)
-        g_prompt = g_prompt + self.backbone.pos_embed[:,:1,:].unsqueeze(1).expand(B, self.g_length, self.len_g_prompt, C)
-        e_prompt = e_prompt + self.backbone.pos_embed[:,:1,:].unsqueeze(1).expand(B, self.e_length, self.len_e_prompt, C)
+        g_prompt = g_prompt.contiguous().view(B, -1, self.len_g_prompt, C)
+        e_prompt = e_prompt.contiguous().view(B, -1, self.len_e_prompt, C)
 
         for n, block in enumerate(self.backbone.blocks):
             pos_g = ((self.pos_g_prompt.eq(n)).nonzero()).squeeze()
@@ -141,8 +140,8 @@ class Ours(nn.Module):
                       **kwargs):
 
         B, N, C = x.size()
-        g_prompt = g_prompt.contiguous().view(B, 2 * self.g_length, self.len_g_prompt, C)
-        e_prompt = e_prompt.contiguous().view(B, 2 * self.e_length, self.len_e_prompt, C)
+        g_prompt = g_prompt.contiguous().view(B, -1, self.len_g_prompt, C)
+        e_prompt = e_prompt.contiguous().view(B, -1, self.len_e_prompt, C)
 
         for n, block in enumerate(self.backbone.blocks):
             xq = block.norm1(x)
@@ -196,7 +195,6 @@ class Ours(nn.Module):
                 if n == len(self.backbone.blocks) - 1 and not self.use_last_layer: break
                 query = block(query)
             query = query[:, 0]
-            # query = self.backbone.norm(query)[:, 0]
 
         similarity = 1 - F.cosine_similarity(query.unsqueeze(1), self.key, dim=-1)
         if self.use_contrastiv:
@@ -204,7 +202,6 @@ class Ours(nn.Module):
         if self.use_dyna_exp:
             if self.training:
                 key_range   = 3 / (self.count + 1)
-                # key_range   = 1 / ( self.count + 1).log()
                 in_range    = similarity < key_range
                 no_match    = (in_range.sum(-1) == 0).nonzero().squeeze()
                 if no_match.numel() != 0:
@@ -218,10 +215,10 @@ class Ours(nn.Module):
                     similarity = 1 - F.cosine_similarity(query.unsqueeze(1), self.key, dim=-1)
                     if self.use_contrastiv:
                         mass = self.count + 1
-        topk = similarity.topk(1, dim=1, largest=False)[1]
-        similarity = similarity[torch.arange(len(topk), device=topk.device), topk].squeeze().clone()
+        topk = similarity.topk(self.selection_size, dim=1, largest=False)[1]
+        similarity = similarity[torch.arange(topk.size(0), device=topk.device).unsqueeze(1).repeat(1,self.selection_size), topk].squeeze().clone()
         e_prompts = self.e_prompts[topk].squeeze().clone()
-        mask = self.mask[topk].squeeze().clone()
+        mask = self.mask[topk].mean(1).squeeze().clone()
 
         g_prompts = self.g_prompts[0].repeat(B, 1, 1)
         if self.training:
@@ -238,18 +235,17 @@ class Ours(nn.Module):
         if self.use_mask:
             mask = torch.sigmoid(mask)
             mask_prob = mask / mask.sum(dim=1, keepdim=True)
+            # self.mask_entropy_loss = (- mask_prob * (mask_prob + 1e-5).log()).mean()
             self.mask_entropy_loss = (- mask * (mask - 1)).mean()
         else:
             self.mask_entropy_loss = 0
 
         if self.use_contrastiv:
             key_wise_distance = 1 - F.cosine_similarity(self.key.unsqueeze(1), self.key, dim=-1)
+            # self.similarity_loss = -(key_wise_distance / mass).mean() + (similarity / mass[topk]).mean()
             self.similarity_loss = -((key_wise_distance / mass).exp().sum() / ((similarity / mass[topk]).exp().sum() + (key_wise_distance / mass).exp().sum()) + 1e-6).log()
         else:
             self.similarity_loss = similarity.mean()
-
-        # self.key_wise_distance = (self.key_wise_distance / mass).mean()
-        # self.key_wise_distance = (- (self.key_wise_distance + 1e-5).log()).mean()
 
         if self.use_mask:
             x = x * mask
@@ -266,4 +262,3 @@ class Ours(nn.Module):
 
     def get_count(self):
         return self.prompt.update()
-    

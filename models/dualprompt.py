@@ -98,8 +98,8 @@ class DualPrompt(nn.Module):
                  pos_g_prompt   : Iterable[int] = (0, 1),
                  len_g_prompt   : int   = 5,
                  pos_e_prompt   : Iterable[int] = (2,3,4),
-                 len_e_prompt   : int   = 20,
-                 prompt_func    : str   = 'prompt_tuning',
+                 len_e_prompt   : int   = 10,
+                 prompt_func    : str   = 'prefix_tuning',
                  task_num       : int   = 10,
                  class_num      : int   = 100,
                  lambd          : float = 1.0,
@@ -239,15 +239,9 @@ class DualPrompt(nn.Module):
 
         if self.g_prompt is not None:
             g_p = self.g_prompt.prompts[0].expand(B, -1, -1)
-            # g_s, g_p = self.g_prompt(query)
         else:
             g_p = None
         if self.e_prompt is not None:
-            # if self.training:
-            #     e_s = 1 - F.cosine_similarity(query.unsqueeze(1), self.e_prompt.key[self.task_id], dim = -1)
-            #     e_p = self.e_prompt.prompts[self.task_id].expand(B, -1, -1)
-            #     self.e_prompt.counter[self.task_id] += B
-            # else:
                 e_s, e_p = self.e_prompt(query)
         else:
             e_p = None
@@ -256,9 +250,6 @@ class DualPrompt(nn.Module):
         x = self.prompt_func(self.backbone.pos_drop(token_appended + self.backbone.pos_embed), g_p, e_p)
         x = self.backbone.norm(x)
         x = self.backbone.fc(x[:, 0])
-
-        # if self.training:
-        #     x = x + self.mask
 
         self.similarity = e_s.mean()
         return x
