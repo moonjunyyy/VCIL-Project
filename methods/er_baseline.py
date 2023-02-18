@@ -38,8 +38,6 @@ class ER(_Trainer):
         self.memory_dataloader   = DataLoader(self.train_dataset, batch_size=self.memory_batchsize, sampler=self.memory_sampler, num_workers=0)
         self.memory_provider     = iter(self.memory_dataloader)
         # train with augmented batches
-        for j in range(len(labels)):
-            labels[j] = self.exposed_classes.index(labels[j].item())
         _loss, _acc, _iter = 0.0, 0.0, 0
         for _ in range(int(self.online_iter) * self.temp_batchsize * self.world_size):
             loss, acc = self.online_train([images.clone(), labels.clone()])
@@ -104,6 +102,8 @@ class ER(_Trainer):
                 memory_labels[i] = self.exposed_classes.index(memory_labels[i].item())
             x = torch.cat([x, memory_images], dim=0)
             y = torch.cat([y, memory_labels], dim=0)
+        for j in range(len(labels)):
+            labels[j] = self.exposed_classes.index(labels[j].item())
 
         x = x.to(self.device)
         y = y.to(self.device)

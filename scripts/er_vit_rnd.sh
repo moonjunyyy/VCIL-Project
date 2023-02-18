@@ -54,9 +54,9 @@ elif [ "$DATASET" == "cifar100" ]; then
     BATCHSIZE=64; LR=3e-4 OPT_NAME="adam" SCHED_NAME="default"
 
 elif [ "$DATASET" == "tinyimagenet" ]; then
-    MEM_SIZE=4000 ONLINE_ITER=3
-    MODEL_NAME="resnet34" EVAL_PERIOD=100
-    BATCHSIZE=32; LR=3e-4 OPT_NAME="adam" SCHED_NAME="default"
+    MEM_SIZE=2000 ONLINE_ITER=3
+    MODEL_NAME="vit" EVAL_PERIOD=100
+    BATCHSIZE=64; LR=3e-4 OPT_NAME="adam" SCHED_NAME="default"
 
 elif [ "$DATASET" == "imagenet" ]; then
     N_TASKS=10 MEM_SIZE=20000 ONLINE_ITER=0.25

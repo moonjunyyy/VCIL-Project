@@ -4,7 +4,7 @@
 #SBATCH --nodes=1
 #SBATCH --gres=gpu:1
 #SBATCH --cpus-per-gpu=4
-#SBATCH --mem-per-gpu=48G
+#SBATCH --mem-per-gpu=16G
 #SBATCH --time=7-0
 #SBATCH -o %x_%j.log
 #SBATCH -e %x_%j.err
@@ -40,7 +40,7 @@ N=50
 M=10
 GPU_TRANSFORM="--gpu_transform"
 USE_AMP="--use_amp"
-SEEDS="4 5"
+SEEDS="1 2 3 4 5"
 VIT="True"
 OPT="adam"
 
@@ -55,9 +55,9 @@ elif [ "$DATASET" == "cifar100" ]; then
     BATCHSIZE=64; LR=3e-4 OPT_NAME=$OPT SCHED_NAME="default" MEMORY_EPOCH=256
 
 elif [ "$DATASET" == "tinyimagenet" ]; then
-    MEM_SIZE=4000 ONLINE_ITER=3
+    MEM_SIZE=2000 ONLINE_ITER=3
     MODEL_NAME="vit" EVAL_PERIOD=100
-    BATCHSIZE=32; LR= OPT_NAME=$OPT SCHED_NAME="default" MEMORY_EPOCH=256
+    BATCHSIZE=64; LR= OPT_NAME=$OPT SCHED_NAME="default" MEMORY_EPOCH=256
 
 elif [ "$DATASET" == "imagenet" ]; then
     N_TASKS=10 MEM_SIZE=20000 ONLINE_ITER=0.25

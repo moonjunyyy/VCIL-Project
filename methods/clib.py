@@ -66,7 +66,7 @@ class CLIB(ER):
         self.memory_provider     = iter(self.memory_dataloader)
         # train with augmented batches
         _loss, _acc, _iter = 0.0, 0.0, 0
-        for _ in range(int(self.online_iter)): # * self.temp_batchsize * self.world_size
+        for _ in range(int(self.online_iter) * self.temp_batchsize * self.world_size): # * self.temp_batchsize * self.world_size
             loss, acc = self.online_train([torch.empty(0), torch.empty(0)])
             _loss += loss
             _acc += acc

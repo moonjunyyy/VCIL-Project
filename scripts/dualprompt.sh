@@ -32,7 +32,7 @@ python --version
 # CIL CONFIG
 NOTE="DP_iblurry_cifar100_N50_M10_RND" # Short description of the experiment. (WARNING: logs/results with the same note will be overwritten!)
 MODE="DualPrompt"
-DATASET="cifar100" # cifar10, cifar100, tinyimagenet, imagenet
+DATASET="tinyimagenet" # cifar10, cifar100, tinyimagenet, imagenet
 N_TASKS=5
 N=50
 M=10
@@ -54,8 +54,8 @@ elif [ "$DATASET" == "cifar100" ]; then
 
 elif [ "$DATASET" == "tinyimagenet" ]; then
     MEM_SIZE=4000 ONLINE_ITER=3
-    MODEL_NAME="L2P" EVAL_PERIOD=1000
-    BATCHSIZE=32; LR=3e-4 OPT_NAME="adam" SCHED_NAME="default" MEMORY_EPOCH=256
+    MODEL_NAME="DualPrompt" EVAL_PERIOD=1000
+    BATCHSIZE=64; LR=5e-3 OPT_NAME="adam" SCHED_NAME="default" MEMORY_EPOCH=256
 
 elif [ "$DATASET" == "imagenet" ]; then
     N_TASKS=10 MEM_SIZE=20000 ONLINE_ITER=0.25
@@ -77,6 +77,6 @@ do
     --rnd_seed $RND_SEED \
     --model_name $MODEL_NAME --opt_name $OPT_NAME --sched_name $SCHED_NAME \
     --lr $LR --batchsize $BATCHSIZE --n_worker 4 \
-    --memory_size $MEM_SIZE $GPU_TRANSFORM --online_iter $ONLINE_ITER --data_dir ./data \
+    --memory_size $MEM_SIZE $GPU_TRANSFORM --online_iter $ONLINE_ITER --data_dir /local_datasets \
     --note $NOTE --eval_period $EVAL_PERIOD --transforms autoaug --memory_epoch $MEMORY_EPOCH --n_worker 4 --rnd_NM
 done

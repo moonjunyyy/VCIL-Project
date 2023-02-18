@@ -28,7 +28,7 @@ class FT(_Trainer):
         super(FT, self).__init__(*args, **kwargs)
     
     def online_step(self, images, labels, idx):
-        self.add_new_class(labels[0])
+        self.add_new_class(labels)
         # train with augmented batches
         _loss, _acc, _iter = 0.0, 0.0, 0
         for _ in range(int(self.online_iter) * self.temp_batchsize * self.world_size):
