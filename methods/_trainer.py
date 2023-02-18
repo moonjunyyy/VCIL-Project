@@ -70,6 +70,7 @@ class _Trainer():
         self.gamma = kwargs.get("gamma")
         self.beta = kwargs.get("beta")
         self.charlie = kwargs.get("charlie")
+        self.use_baseline = kwargs.get("use_baseline")
         
         
         self.eval_period     = kwargs.get("eval_period")

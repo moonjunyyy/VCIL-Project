@@ -128,6 +128,9 @@ def base_parser():
     parser.add_argument('--no-use_last_layer', dest='use_last_layer', action='store_false', help='use last layer for our method')
     parser.add_argument('--no-use_dyna_exp', action='store_false', help='use dynamic expand for our method')
     
+    parser.add_argument('--use_baseline', action='store_true', help='use mask for our method')
+    parser.add_argument('--no-use_baseline', dest='use_baseline', action='store_false', help='use mask for our method')
+    
     parser.add_argument('--selection_size', type=int, default=1, help='# candidates to use for ViT_Prompt')
     parser.add_argument('--alpha', type=float, default=1., help='# candidates to use for STR hyperparameter')
     parser.add_argument('--gamma', type=float, default=1., help='# candidates to use for STR hyperparameter')
