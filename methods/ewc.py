@@ -2,7 +2,7 @@
 # This code is referred by
 # https://github.com/GT-RIPL/Continual-Learning-Benchmark
 ################################
-
+import os
 import logging
 import random
 
@@ -94,10 +94,10 @@ class EWCpp(ER):
         x, y = data
         if len(self.memory) > 0 and self.memory_batchsize > 0:
             memory_images, memory_labels = next(self.memory_provider)
+            for i in range(len(memory_labels)):
+                memory_labels[i] = self.exposed_classes.index(memory_labels[i].item())
             x = torch.cat([x, memory_images], dim=0)
             y = torch.cat([y, memory_labels], dim=0)
-        for j in range(len(y)):
-            y[j] = self.exposed_classes.index(y[j].item())
 
         x = x.to(self.device)
         y = y.to(self.device)

@@ -126,6 +126,8 @@ def select_model(model_name, dataset, num_classes=None):
         opt["width"] = 400
     elif model_name == "vit":
         opt["depth"] = 12
+    elif model_name == "vit_finetune":
+        opt["depth"] = 12
     elif model_name == "L2P":
         opt["depth"] = 12
     elif model_name == "DualPrompt":
@@ -146,6 +148,10 @@ def select_model(model_name, dataset, num_classes=None):
                 p.requires_grad = True
             else:
                 p.requires_grad = False
+    elif model_name == "vit_finetune":
+        model = timm.create_model(
+                            "vit_base_patch16_224",pretrained=True,num_classes=num_classes,
+                            drop_rate=0.,drop_path_rate=0.,drop_block_rate=None,)
     elif model_name == "L2P":
         model = L2P(backbone_name="vit_base_patch16_224", class_num=num_classes)
     elif model_name == "DualPrompt":

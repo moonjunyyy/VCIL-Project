@@ -54,7 +54,7 @@ class Ours(_Trainer):
         self.mask[:len(self.exposed_classes)] = 0
         if 'reset' in self.sched_name:
             self.update_schedule(reset=True)
-        # self.model_without_ddp.set_exposed_classes(self.exposed_classes)
+        self.model_without_ddp.set_exposed_classes(self.exposed_classes)
 
     def online_before_task(self, task_id):
         pass

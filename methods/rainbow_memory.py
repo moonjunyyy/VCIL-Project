@@ -37,7 +37,7 @@ class RM(ER):
     def setup_distributed_dataset(self):
         super(RM, self).setup_distributed_dataset()
         self.loss_update_dataset = self.datasets[self.dataset](root=self.data_dir, train=True, download=True,
-                                     transform=self.train_transform)
+                                     transform=transforms.ToTensor())
 
     def online_step(self, images, labels, idx):
         # image, label = sample
@@ -155,6 +155,7 @@ class RM(ER):
 
                 x = image.to(self.device)
                 y = label.to(self.device)
+                x = self.train_transform(x)
 
                 self.optimizer.zero_grad()
 

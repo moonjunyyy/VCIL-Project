@@ -38,7 +38,7 @@ class Ours(nn.Module):
                  pos_g_prompt   : Iterable[int] = (0,1),
                  len_g_prompt   : int   = 5,
                  pos_e_prompt   : Iterable[int] = (2,3,4),
-                 len_e_prompt   : int   = 10,
+                 len_e_prompt   : int   = 20,
                  selection_size : int   = 1,
                  prompt_func    : str   = 'prompt_tuning',
                  task_num       : int   = 10,
@@ -108,8 +108,8 @@ class Ours(nn.Module):
     def set_exposed_classes(self, classes):
         len_classes = self.exposed_classes
         self.exposed_classes = len(classes)
-        self.mask.data[:,len_classes:self.exposed_classes] = 0
-        self.mask.data[:, self.exposed_classes:] = -torch.inf
+        # self.mask.data[:,len_classes:self.exposed_classes] = 0
+        # self.mask.data[:, self.exposed_classes:] = -torch.inf
     
     def prompt_tuning(self,
                       x        : torch.Tensor,
@@ -196,13 +196,13 @@ class Ours(nn.Module):
                 query = block(query)
             query = query[:, 0]
 
-        similarity = 1 - F.cosine_similarity(query.unsqueeze(1), self.key, dim=-1)
+        distance = 1 - F.cosine_similarity(query.unsqueeze(1), self.key, dim=-1)
         if self.use_contrastiv:
             mass = self.count + 1
         if self.use_dyna_exp:
             if self.training:
-                key_range   = 3 / (self.count + 1)
-                in_range    = similarity < key_range
+                key_range   = 500 / (self.count + 1)
+                in_range    = distance < key_range
                 no_match    = (in_range.sum(-1) == 0).nonzero().squeeze()
                 if no_match.numel() != 0:
                     if no_match.numel() == 1:
@@ -211,12 +211,16 @@ class Ours(nn.Module):
                         self.count = torch.cat((self.count, torch.zeros(no_match.shape[0], device=self.count.device)), dim=0)
                         self.key   = nn.Parameter(torch.cat((self.key, query[no_match].clone()), dim=0))
                         self.mask  = nn.Parameter(torch.cat((self.mask, torch.zeros(no_match.shape[0], self.class_num, device=self.mask.device)), dim=0))
-                        self.e_prompts = nn.Parameter(torch.cat((self.e_prompts, self.e_prompts[similarity[no_match].argmin(dim=-1)].clone()), dim=0))
-                    similarity = 1 - F.cosine_similarity(query.unsqueeze(1), self.key, dim=-1)
+                        self.e_prompts = nn.Parameter(torch.cat((self.e_prompts, self.e_prompts[distance[no_match].argmin(dim=-1)].clone()), dim=0))
+                    distance = 1 - F.cosine_similarity(query.unsqueeze(1), self.key, dim=-1)
+                    key_range   = 500 / (self.count + 1)
+                    out_range   = distance > key_range
+                    distance[out_range] = 2
                     if self.use_contrastiv:
                         mass = self.count + 1
-        topk = similarity.topk(self.selection_size, dim=1, largest=False)[1]
-        similarity = similarity[torch.arange(topk.size(0), device=topk.device).unsqueeze(1).repeat(1,self.selection_size), topk].squeeze().clone()
+        distance = distance * mass
+        topk = distance.topk(self.selection_size, dim=1, largest=False)[1]
+        distance = distance[torch.arange(topk.size(0), device=topk.device).unsqueeze(1).repeat(1,self.selection_size), topk].squeeze().clone()
         e_prompts = self.e_prompts[topk].squeeze().clone()
         mask = self.mask[topk].mean(1).squeeze().clone()
 
@@ -233,19 +237,23 @@ class Ours(nn.Module):
         x = self.backbone.fc(x)
 
         if self.use_mask:
+            # self.mask_l1_loss = mask.abs().mean()
             mask = torch.sigmoid(mask)
             mask_prob = mask / mask.sum(dim=1, keepdim=True)
             # self.mask_entropy_loss = (- mask_prob * (mask_prob + 1e-5).log()).mean()
             self.mask_entropy_loss = (- mask * (mask - 1)).mean()
+            mask = mask * 2.0
+            # self.mask_limit_loss = (mask.sum() - 10).abs()
         else:
             self.mask_entropy_loss = 0
 
         if self.use_contrastiv:
             key_wise_distance = 1 - F.cosine_similarity(self.key.unsqueeze(1), self.key, dim=-1)
-            # self.similarity_loss = -(key_wise_distance / mass).mean() + (similarity / mass[topk]).mean()
-            self.similarity_loss = -((key_wise_distance / mass).exp().sum() / ((similarity / mass[topk]).exp().sum() + (key_wise_distance / mass).exp().sum()) + 1e-6).log()
+            # self.similarity_loss = -((key_wise_distance / mass).exp().sum() / ((distance / mass[topk]).exp().sum() + (key_wise_distance / mass).exp().sum()) + 1e-6).log()
+            # self.similarity_loss = -(key_wise_distance / mass).mean() + (distance / mass[topk]).mean()
+            self.similarity_loss = -((key_wise_distance[topk] / mass[topk]).exp().sum() / ((distance / mass[topk]).exp().sum() + (key_wise_distance[topk] / mass[topk]).exp().sum()) + 1e-6).log()
         else:
-            self.similarity_loss = similarity.mean()
+            self.similarity_loss = distance.mean()
 
         if self.use_mask:
             x = x * mask
@@ -253,7 +261,11 @@ class Ours(nn.Module):
     
     def loss_fn(self, output, target):
         # B, C = output.size()
-        return F.cross_entropy(output, target.to(torch.int64)) + self.similarity_loss + self.mask_entropy_loss
+        # smooth_target = torch.zeros_like(output)
+        # smooth_target[:self.exposed_classes] = .1 / self.exposed_classes
+        # smooth_target[torch.arange(target.size(0), device=target.device),target] += .9
+        # return F.cross_entropy(output[:,:self.exposed_classes], smooth_target[:,:self.exposed_classes]) + self.similarity_loss #+ self.mask_entropy_loss # + self.mask_limit_loss
+        return F.cross_entropy(output, target) + self.similarity_loss #+ self.mask_entropy_loss # + self.mask_limit_loss
 
     def convert_train_task(self, task : torch.Tensor, **kwargs):
         self.mask += -torch.inf
