@@ -34,7 +34,7 @@ class TinyImageNet(ImageFolder):
             zip_ref = zipfile.ZipFile(fpath, 'r')
             zip_ref.extractall(os.path.join(self.root))
             zip_ref.close()
-            self.split()
+            # self.split()
 
         self.path = self.root + '/tiny-imagenet-200/'
         if train:

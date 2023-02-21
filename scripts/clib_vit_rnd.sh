@@ -51,7 +51,7 @@ elif [ "$DATASET" == "cifar100" ]; then
     BATCHSIZE=64; LR=3e-4 OPT_NAME="adam" SCHED_NAME="default" IMP_UPDATE_PERIOD=1
 
 elif [ "$DATASET" == "tinyimagenet" ]; then
-    MEM_SIZE=500 ONLINE_ITER=3
+    MEM_SIZE=2000 ONLINE_ITER=3
     MODEL_NAME="vit" EVAL_PERIOD=1000
     BATCHSIZE=64; LR=3e-4 OPT_NAME="adam" SCHED_NAME="default" IMP_UPDATE_PERIOD=1
 

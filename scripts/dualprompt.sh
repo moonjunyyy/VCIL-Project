@@ -38,7 +38,7 @@ N=50
 M=10
 GPU_TRANSFORM="--gpu_transform"
 USE_AMP="--use_amp"
-SEEDS="1 2 3 4 5"
+SEEDS="1"
 
 OPT="adam"
 
