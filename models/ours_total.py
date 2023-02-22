@@ -236,7 +236,7 @@ class Ours_total(nn.Module):
         x = self.backbone.fc(x)
 
         if self.use_mask:
-            mask = torch.sigmoid(mask)
+            mask = torch.sigmoid(mask) * 2.
             mask_prob = mask / mask.sum(dim=1, keepdim=True)
             self.mask_entropy_loss = (- mask * (mask - 1)).mean()
         else:

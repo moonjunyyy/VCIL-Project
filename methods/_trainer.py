@@ -63,11 +63,11 @@ class _Trainer():
         self.note    = kwargs.get("note")
         #* for Prompt Based
         self.selection_size = kwargs.get("selection_size")
-        self.alpha = kwargs.get("alpha")
-        self.gamma = kwargs.get("gamma")
-        self.beta = kwargs.get("beta")
-        self.charlie = kwargs.get("charlie")
-        self.use_baseline = kwargs.get("use_baseline")
+        # self.alpha = kwargs.get("alpha")
+        # self.gamma = kwargs.get("gamma")
+        # self.beta = kwargs.get("beta")
+        # self.charlie = kwargs.get("charlie")
+        # self.use_baseline = kwargs.get("use_baseline")
         
         
         self.eval_period     = kwargs.get("eval_period")
@@ -269,13 +269,18 @@ class _Trainer():
         for task_id in range(self.n_tasks):
             if self.mode == "joint" and task_id > 0:
                 return
+            
+            if task_id ==0 and not self.debug:
+                print()
+                self.train_data_config(self.n_tasks,self.train_dataset,self.train_sampler)
+            
             print("\n" + "#" * 50)
             print(f"# Task {task_id} iteration")
             print("#" * 50 + "\n")
             print("[2-1] Prepare a datalist for the current task")
             
             self.train_sampler.set_task(task_id)
-            self.online_before_task(task_id)
+            # self.online_before_task(task_id)
 
             self.online_before_task(task_id)          
             for i, (images, labels, idx) in enumerate(self.train_dataloader):

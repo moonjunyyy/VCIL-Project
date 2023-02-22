@@ -136,8 +136,6 @@ class Ours_total(_Trainer):
             # logit,feat = self.model(x)
             feat,mask = self.model.forward_features(x)
             ign_score,total_batch_g = self.get_score(ref_head=ref_fc,feat=feat,y=y,mask=mask)
-            # _get_loss(self,str_score,feat,y,total_batch_g)
-                                # _get_loss(self,x,y,feat,str_score,total_batch_g,mask):
             loss,logit = self._get_loss(x,y,feat,ign_score,total_batch_g,mask)
         return logit, loss
 
@@ -226,7 +224,7 @@ class Ours_total(_Trainer):
         ref_head.zero_grad()
         batch_loss = batch_criterion(tmp_logit,y)
         batch_loss.backward(retain_graph=True)
-        total_batch_g = ref_head.weight.grad.clone()  # C,dim
+        total_batch_g = ref_head.weight.grad[:len(self.exposed_classes)].clone()  # C,dim
         idx = torch.arange(len(y))
         batch_g=total_batch_g[y[idx]]    #B,dim
         ref_head.zero_grad()

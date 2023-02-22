@@ -74,9 +74,14 @@ class Ours(_Trainer):
         super(Ours, self).__init__(**kwargs)
         
         self.use_mask    = kwargs.get("use_mask")
-        self.use_dyna_exp    = kwargs.get("use_dyna_exp")
+        # self.use_dyna_exp    = kwargs.get("use_dyna_exp")
         self.use_contrastiv  = kwargs.get("use_contrastiv")
         self.use_last_layer  = kwargs.get("use_last_layer")
+        
+        self.alpha  = kwargs.get("alpha")
+        self.gamma  = kwargs.get("gamma")
+        self.use_base_CE = kwargs.get("use_base_ce")
+        self.sample_criterion = nn.CrossEntropyLoss(reduction='none')
     
     def online_step(self, images, labels, idx):
         self.add_new_class(labels)
@@ -93,33 +98,15 @@ class Ours(_Trainer):
         gc.collect()
         return _loss / _iter, _acc / _iter
 
-    # def add_new_class(self, class_name):
-    #     # For DDP, normally go into this function
-    #     # len_class = len(self.exposed_classes)
-    #     exposed_classes = []
-    #     for label in class_name:
-    #         if label.item() not in self.exposed_classes:
-    #             self.exposed_classes.append(label.item())
-    #     if self.distributed:
-    #         exposed_classes = torch.cat(self.all_gather(torch.tensor(self.exposed_classes, device=self.device))).cpu().tolist()
-    #         self.exposed_classes = []
-    #         for cls in exposed_classes:
-    #             if cls not in self.exposed_classes:
-    #                 self.exposed_classes.append(cls)
-    #     # self.memory.add_new_class(cls_list=self.exposed_classes)
-    #     self.mask[:len(self.exposed_classes)] = 0
-    #     if 'reset' in self.sched_name:
-    #         self.update_schedule(reset=True)
-    
-    
     def online_train(self, data):
         self.model.train()
         total_loss, total_correct, total_num_data = 0.0, 0.0, 0.0
         
         ref_fc = copy.deepcopy(self.model.backbone.fc)
+        ref_fc.eval()
         x, y = data
-        for j in range(len(y)):
-            y[j] = self.exposed_classes.index(y[j].item())
+        # for j in range(len(y)):
+        #     y[j] = self.exposed_classes.index(y[j].item())
 
         x = x.to(self.device)
         y = y.to(self.device)
@@ -142,19 +129,15 @@ class Ours(_Trainer):
 
         return total_loss, total_correct/total_num_data
 
-    def model_forward(self, x, y):
-        do_cutmix = self.cutmix and np.random.rand(1) < 0.5
-        if do_cutmix:
-            x, labels_a, labels_b, lam = cutmix_data(x=x, y=y, alpha=1.0)
-            with torch.cuda.amp.autocast(enabled=self.use_amp):
-                logit = self.model(x)
-                logit = logit + self.mask
-                loss = lam * self.criterion(logit, labels_a.to(torch.int64)) + (1 - lam) * self.criterion(logit, labels_b.to(torch.int64))
-        else:
-            with torch.cuda.amp.autocast(enabled=self.use_amp):
-                logit = self.model(x)
-                logit = logit + self.mask
-                loss = self.criterion(logit, y.to(torch.int64))
+    def model_forward(self, x, y, ref_fc):
+        with torch.cuda.amp.autocast(enabled=self.use_amp):
+            # logit = self.model(x)
+            # logit = logit + self.mask
+            # loss = self.criterion(logit, y.to(torch.int64))
+            feat,mask = self.model.forward_features(x)
+            ign_score,total_batch_g = self.get_score(ref_head=ref_fc,feat=feat,y=y,mask=mask)
+            loss,logit = self._get_loss(x,y,ign_score,total_batch_g,mask)
+            
         return logit, loss
 
     def online_evaluate(self, test_loader):
@@ -173,7 +156,7 @@ class Ours(_Trainer):
                 x = x.to(self.device)
                 y = y.to(self.device)
 
-                logit = self.model(x)
+                logit,_ = self.model(x)
                 logit = logit + self.mask
                 loss = self.sample_criterion(logit, y)
                 pred = torch.argmax(logit, dim=-1)
@@ -205,7 +188,8 @@ class Ours(_Trainer):
             
     def online_before_task(self,train_loader):
         # Task-Free
-        self.model_without_ddp.convert_train_task(self.exposed_classes)
+        # self.model_without_ddp.convert_train_task(self.exposed_classes)
+        pass
 
     def online_after_task(self, cur_iter):
         # self.model_without_ddp.convert_train_task(self.exposed_classes)
@@ -217,17 +201,16 @@ class Ours(_Trainer):
         
     
     
-    def _compute_grads_uncert(self,ref_head,feat,y):
+    def _compute_grads_uncert(self,ref_head,feat,y,mask):
         sample_criterion = nn.CrossEntropyLoss(reduction='none')
         batch_criterion = nn.CrossEntropyLoss()
         sample_g = []
         ref_head.zero_grad()
-        tmp_logit = ref_head(feat)[:,:len(self.exposed_classes)]
-    #     print('feats')
-    #     print(feat[:3]); print()
-    #     print('tmp_logit')
-    #     print(tmp_logit); print()
-
+        tmp_logit = ref_head(feat)
+        if self.use_mask:
+            tmp_logit = tmp_logit*mask
+        
+        tmp_logit = tmp_logit + self.mask
         p = torch.softmax(tmp_logit,dim=1)
         idx = torch.arange(len(y))
         uncert = 1. - p[idx,y[idx]].clone().detach() #B
@@ -248,14 +231,6 @@ class Ours(_Trainer):
         idx = torch.arange(len(y))
         batch_g=total_batch_g[y[idx]]    #B,dim
         ref_head.zero_grad()
-    #     del ref_head
-    #     print('uncertain')
-    #     print(uncert); print()
-    #     print('sample_g')
-    #     print(sample_g); print()
-    #     print('batch_g')
-    #     print(batch_g); print()
-        
         
         return uncert, sample_g, batch_g, total_batch_g
     
@@ -271,41 +246,12 @@ class Ours(_Trainer):
             minmax=None
         return minmax
     
-    # def _get_ignore(self,ref_head,feat,y):
-    #     uncert, sample_g, batch_g = self._compute_grads_uncert(ref_head,feat,y)
-    #     sample_l2norm = torch.norm(sample_g,p=2,dim=1)  # B
-    #     if sample_l2norm.sum().item() == 0: #all loss is zero case
-    #         return None,sample_g
-    #     batch_l2norm = torch.norm(batch_g,p=2,dim=1)    # B
-    #     uncert_soft = torch.softmax(uncert,dim=0)
-    #     ignore_score = torch.max((sample_l2norm-batch_l2norm),torch.zeros(1,device=self.device))
-    #     # ignore_score = 1. + torch.max((sample_l2norm/batch_l2norm),torch.zeros(1,device=self.device))
-    #     return ignore_score,sample_g,batch_g
-    
-    def _get_strength(self,ref_head,feat,y):
-        uncert, sample_g, batch_g,total_batch_g = self._compute_grads_uncert(ref_head,feat,y)
-        str_score = torch.max(1. - torch.cosine_similarity(sample_g,batch_g,dim=1),torch.zeros(1,device=self.device)) #B
-        str_score = self.min_max(str_score)
-        # print('str_score')
-        # print(str_score)
-        # str_l2norm = F.normalize(str_score,p=2.,dim=0)
-        # print('str_score_L2_norm')
-        # print(str_l2norm)
-        # str_soft = torch.softmax(str_score,dim=0)
-        # print('str_score_softmax')
-        # print(str_soft)
+    def _get_strength(self,ref_head,feat,y,mask):
+        uncert, sample_g, batch_g,total_batch_g = self._compute_grads_uncert(ref_head,feat,y,mask)
+        ign_score = torch.max(1. - torch.cosine_similarity(sample_g,batch_g,dim=1),torch.zeros(1,device=self.device)) #B
+        # str_score = self.min_max(str_score)
         
-        # print('str_score_minmax')
-        # print(str_minmax)
-        
-        # sample_l2norm = torch.norm(sample_g,p=2,dim=1)  # B
-        # if sample_l2norm.sum().item() == 0: #all loss is zero case
-        #     return None,sample_g
-        # batch_l2norm = torch.norm(batch_g,p=2,dim=1)    # B
-        # uncert_soft = torch.softmax(uncert,dim=0)
-        # ignore_score = torch.max((sample_l2norm-batch_l2norm),torch.zeros(1,device=self.device))
-        # ignore_score = 1. + torch.max((sample_l2norm/batch_l2norm),torch.zeros(1,device=self.device))
-        return str_score,sample_g,batch_g,total_batch_g
+        return ign_score,total_batch_g
     
 
     def _get_drift(self,y,sample_g):
@@ -316,13 +262,70 @@ class Ours(_Trainer):
         drift = 1 - torch.cosine_similarity(pre_wts,post_wts,dim=1) # B
         return drift
 
-    def get_score(self,ref_head,feat,y):
+    def get_score(self,ref_head,feat,y,mask):
         ign_feat = self.model.backbone.fc_norm(feat[:,0].clone().detach())
         
-        ignore_score,sample_g,batch_g,total_batch_g = self._get_strength(ref_head,ign_feat,y)
-        # drift_score = self._get_drift(y,sample_g)
+        ignore_score,total_batch_g = self._get_strength(ref_head,ign_feat,y,mask)
+        return ignore_score,total_batch_g
+    
+    def str_loss(self,logit,y,str_score):
+        log_p = F.log_softmax(logit,dim=1)
+        ce = F.nll_loss(log_p,y,reduction='none')
+        loss = (str_score**self.gamma)*ce
         
-        return ignore_score,sample_g,batch_g,total_batch_g
+        return loss
+    def cp_loss(self,feat,y,total_batch_g,mask):
+        peeking_w = self.model.backbone.fc.weight - self.lr*self.beta*total_batch_g    #* B,dim
+        
+        peeking_feat = self.model.backbone.fc_norm(feat[:,0])
+        
+        #todo bias 까지 고려하는것도 해보기!
+        peeking_logit = F.linear(peeking_feat,weight=peeking_w,bias=None)
+        if self.use_mask:
+            peeking_logit = peeking_logit*mask
+        cp_loss = self.sample_criterion(peeking_logit+self.mask,y)
+        
+        return cp_loss
+    
+    def _get_loss(self,x,y,str_score,total_batch_g,mask):
+        #*#########################################################################
+        #* CE_loss (masking / Compensation)
+        # ce_logit = self.model.forward_head(feat,mask,mass,similarity,topk)
+        ce_logit,ce_feat = self.model(x)
+        ce_logit = ce_logit + self.mask
+        if self.use_base_CE:
+            loss = self.criterion(ce_logit, y.to(torch.int64))
+        else:
+            loss = torch.zeros(1,device=self.device)
+        
+        #*#########################################################################
+        #* strength_loss
+        if str_score != None and self.alpha != 0.:
+            ign_feat = self.model.backbone.fc_norm(ce_feat[:,0])
+            ign_logit = self.model.backbone.fc(ign_feat)
+            if self.use_mask:
+                ign_logit = ign_logit*mask
+            str_loss = self.str_loss(ign_logit+self.mask, y, str_score)
+            loss += self.alpha*str_loss.mean()
+        elif str_score == None and self.alpha > 0.:   #* non ignore
+            ign_feat = self.model.backbone.fc_norm(ce_feat[:,0])
+            ign_logit = self.model.backbone.fc(ign_feat) + self.mask
+            loss += self.alpha*self.sample_criterion(ign_logit, y).mean()
+        else:   #* for the baseline
+            # loss += torch.zeros(1,device=self.device)
+            pass
+        
+        #*########################################################################
+        #* compensation_loss
+        # if self.charlie > 0.:
+        #     cp_loss = self.cp_loss(ce_feat,y,total_batch_g,mask)
+        #     cp_loss = cp_loss.mean()
+        # else:
+        #     cp_loss = torch.zeros(1,device=self.device)
+        #*########################################################################
+        
+        # loss = ce_loss + self.alpha*str_loss
+        return loss, ce_logit
     
     def report_training(self, sample_num, train_loss, train_acc):
         print(
@@ -339,5 +342,5 @@ class Ours(_Trainer):
         super().setup_distributed_model()
         self.model_without_ddp.use_mask = self.use_mask
         self.model_without_ddp.use_contrastiv = self.use_contrastiv
-        self.model_without_ddp.use_dyna_exp = self.use_dyna_exp
+        # self.model_without_ddp.use_dyna_exp = self.use_dyna_exp
         self.model_without_ddp.use_last_layer = self.use_last_layer
