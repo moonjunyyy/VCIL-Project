@@ -41,8 +41,7 @@ class CUB200(Dataset):
             tar_ref = tarfile.open(os.path.join(self.root, 'CUB_200_2011.tgz'), 'r')
             tar_ref.extractall(self.root)
             tar_ref.close()
-            self.split()
-
+    
         self.dataset = ImageFolder(self.root + '/CUB200-2011/images', transforms.ToTensor() if transform is None else transform, target_transform)
         len_train    = int(len(self.dataset) * 0.8)
         len_val      = len(self.dataset) - len_train
