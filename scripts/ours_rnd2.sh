@@ -1,6 +1,6 @@
 #!/bin/bash
 
-#SBATCH -J Ours_Siblurry_Mask_and_IGN_Loss_alpha_0.2
+#SBATCH -J Ours_Siblurry_Mask_and_IGN_Loss_alpha_0.5
 #SBATCH -p batch_agi
 #SBATCH -w agi2
 #SBATCH --nodes=1
@@ -31,7 +31,7 @@ conda --version
 python --version
 
 # CIL CONFIG
-NOTE="Ours_Siblurry_new_Mask_and_IGN_loss" # Short description of the experiment. (WARNING: logs/results with the same note will be overwritten!)
+NOTE="Ours_Siblurry_new_Mask_and_IGN_loss_0.5" # Short description of the experiment. (WARNING: logs/results with the same note will be overwritten!)
 MODE="ours"
 DATASET="cifar100" # cifar10, cifar100, tinyimagenet, imagenet
 N_TASKS=5
@@ -79,7 +79,7 @@ do
     --lr $LR --batchsize $BATCHSIZE \
     --memory_size $MEM_SIZE $GPU_TRANSFORM --online_iter $ONLINE_ITER --data_dir /local_datasets \
     --note $NOTE --eval_period $EVAL_PERIOD --n_worker 4 --transforms autoaug --rnd_NM \
-    --alpha 0.2 --gamma 1. --use_base_ce \
+    --alpha 0.5 --gamma 1. --use_base_ce \
     --no-use_last_layer \
     --use_contrastiv \
     --use_mask

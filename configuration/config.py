@@ -132,7 +132,7 @@ def base_parser():
     parser.add_argument('--no-use_base_ce', dest='use_baseline', action='store_false', help='use mask for our method')
     
     parser.add_argument('--selection_size', type=int, default=1, help='# candidates to use for ViT_Prompt')
-    parser.add_argument('--alpha', type=float, default=1., help='# candidates to use for STR hyperparameter')
+    parser.add_argument('--alpha', type=float, default=0., help='# candidates to use for STR hyperparameter')
     parser.add_argument('--gamma', type=float, default=1., help='# candidates to use for STR hyperparameter')
     # parser.add_argument('--beta', type=float, default=0., help='# candidates to use for peeking into the updated head')
     # parser.add_argument('--charlie', type=float, default=0., help='# candidates to use for CP hyperparameter')

@@ -294,7 +294,7 @@ class Ours(_Trainer):
         ce_logit,ce_feat = self.model(x)
         ce_logit = ce_logit + self.mask
         if self.use_base_CE:
-            loss = self.criterion(ce_logit, y.to(torch.int64))
+            loss = (1.-self.alpha)*self.criterion(ce_logit, y.to(torch.int64))
         else:
             loss = torch.zeros(1,device=self.device)
         
