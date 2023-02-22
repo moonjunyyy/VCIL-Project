@@ -138,5 +138,11 @@ def base_parser():
     parser.add_argument('--charlie', type=float, default=0., help='# candidates to use for CP hyperparameter')
     
 
+    # Ours
+    parser.add_argument('--use_mask', action='store_true', help='use mask for our method')
+    parser.add_argument('--use_contrastiv', action='store_true', help='use contrastive loss for our method')
+    parser.add_argument('--use_last_layer', action='store_true', help='use last layer for our method')
+    parser.add_argument('--use_dyna_exp', action='store_true', help='use dynamic expand for our method')
+
     args = parser.parse_args()
     return args

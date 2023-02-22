@@ -70,22 +70,20 @@ def vit_base_patch16_224(pretrained=False, **kwargs):
     return model
 
 class Ours(_Trainer):
-    def __init__(self, *args, **kwargs):
-        super(Ours, self).__init__(*args, **kwargs)
+    def __init__(self, **kwargs):
+        super(Ours, self).__init__(**kwargs)
         
-        if 'imagenet' in self.dataset:
-            self.lr_gamma = 0.99995
-        else:
-            self.lr_gamma = 0.9999
-        
-        self.class_mask = None
-        self.class_mask_dict={}
-        self.sample_criterion = nn.CrossEntropyLoss(reduction='none')
+        self.use_mask    = kwargs.get("use_mask")
+        self.use_dyna_exp    = kwargs.get("use_dyna_exp")
+        self.use_contrastiv  = kwargs.get("use_contrastiv")
+        self.use_last_layer  = kwargs.get("use_last_layer")
     
     def online_step(self, images, labels, idx):
         self.add_new_class(labels)
         # train with augmented batches
         _loss, _acc, _iter = 0.0, 0.0, 0
+        for j in range(len(labels)):
+            labels[j] = self.exposed_classes.index(labels[j].item())
         for _ in range(int(self.online_iter)):
             loss, acc = self.online_train([images.clone(), labels.clone()])
             _loss += loss
@@ -144,13 +142,19 @@ class Ours(_Trainer):
 
         return total_loss, total_correct/total_num_data
 
-    def model_forward(self, x, y,ref_fc):
-        with torch.cuda.amp.autocast(enabled=self.use_amp):
-            feat = self.model(x,only_feat=True)
-            # print("x",x.shape)
-            # print("feat:",feat.shape)
-            ign_score,sample_g,batch_g,total_batch_g = self.get_score(ref_head=ref_fc,feat=feat,y=y)
-            loss,logit = self._get_loss(ign_score,feat,y,sample_g,batch_g,total_batch_g)
+    def model_forward(self, x, y):
+        do_cutmix = self.cutmix and np.random.rand(1) < 0.5
+        if do_cutmix:
+            x, labels_a, labels_b, lam = cutmix_data(x=x, y=y, alpha=1.0)
+            with torch.cuda.amp.autocast(enabled=self.use_amp):
+                logit = self.model(x)
+                logit = logit + self.mask
+                loss = lam * self.criterion(logit, labels_a.to(torch.int64)) + (1 - lam) * self.criterion(logit, labels_b.to(torch.int64))
+        else:
+            with torch.cuda.amp.autocast(enabled=self.use_amp):
+                logit = self.model(x)
+                logit = logit + self.mask
+                loss = self.criterion(logit, y.to(torch.int64))
         return logit, loss
 
     def online_evaluate(self, test_loader):
@@ -320,91 +324,20 @@ class Ours(_Trainer):
         
         return ignore_score,sample_g,batch_g,total_batch_g
     
-    #* for ignore problem
-    def str_loss(self,logit,y,str_score):
-        # targets = F.one_hot(y,len(self.exposed_classes))
-        # gamma=1.
-        log_p = F.log_softmax(logit,dim=1)
-        ce = F.nll_loss(log_p,y,reduction='none')
-        loss = (str_score**self.gamma)*ce
-        
-        return loss
-        
-    #* for drift problem
-    def cp_loss(self,feat,y,batch_g,total_batch_g):
-        # idx = torch.arange(len(y))
-        # sample_w = self.model.backbone.fc.weight[y]
-        # print("sample_w:",sample_w.shape)
-        
-        sample_b = self.model.backbone.fc.bias[y]
-        # next_w = sample_w.clone().detach() - self.lr*sample_g
-        peeking_w = self.model.backbone.fc.weight[:len(self.exposed_classes)] - self.lr*self.beta*total_batch_g    #* B,dim
-        # peeking_b = sample_b - self.lr*self.beta*batch_g
-        # print("peeking_w:",peeking_w.shape)
-        # ce_logit = self.model.backbone.forward_head(feat)[:,:len(self.exposed_classes)]
-        
-        # ign_feat = self.model.backbone.fc_norm(feat[:,0])
-        # #* 원래는 Head는 학습X !!
-        # #* ign_logit = ref_head(ign_feat)[:,:len(self.exposed_classes)]
-        # ign_logit = self.model.backbone.fc(ign_feat)[:,:len(self.exposed_classes)]
-        
-        peeking_feat = self.model.backbone.fc_norm(feat.clone().detach()[:,0])
-        
-        #todo bias 까지 고려하는것도 해보기!
-        peeking_logit = F.linear(peeking_feat,weight=peeking_w,bias=None)
-        # peeking_logit = F.linear(peeking_feat,weight=peeking_w,bias=None)
-        # print('peeking_logit:',peeking_logit.shape)
-        # peeking_logit += self.mask
-        # print('y',y.shape)
-        # print('y:',y)
-        cp_loss = self.sample_criterion(peeking_logit,y)
-        #* peeking_logit = torch.softmax(peeking_logit,dim=1)
-        #* cp_loss = (torch.sum(-torch.log(peeking_logit+ 1e-8), 1))
-        
-        
-        return cp_loss
+    def report_training(self, sample_num, train_loss, train_acc):
+        print(
+            f"Train | Sample # {sample_num} | train_loss {train_loss:.4f} | train_acc {train_acc:.4f} | "
+            f"lr {self.optimizer.param_groups[0]['lr']:.6f} | "
+            f"running_time {datetime.timedelta(seconds=int(time.time() - self.start_time))} | "
+            f"ETA {datetime.timedelta(seconds=int((time.time() - self.start_time) * (self.total_samples-sample_num) / sample_num))} | "
+            f"N_Prompts {self.model_without_ddp.e_prompts.size(0)} | "
+            f"N_Exposed {len(self.exposed_classes)} | "
+            f"Counts {self.model_without_ddp.count.to(torch.int64).tolist()}"
+        )
 
-
-    def _get_loss(self,str_score,feat,y,sample_g,batch_g,total_batch_g):
-        # for p in ref_head.parameters():
-        #     p.requires_grad = False
-        #*#########################################################################
-        #* strength_loss
-        if str_score != None:
-            ign_feat = self.model.backbone.fc_norm(feat[:,0])
-            #* 원래는 Head는 학습X !!
-            #* ign_logit = ref_head(ign_feat)[:,:len(self.exposed_classes)]
-            ign_logit = self.model.backbone.fc(ign_feat)[:,:len(self.exposed_classes)]
-            # ign_logit = ign_logit*(1/ign_score[:,None])
-            str_loss = self.str_loss(ign_logit, y, str_score)
-            str_loss = str_loss.mean() + self.model._get_sim()
-        else:
-            # logit = self.model(x)
-            # logit += self.mask
-            ce_feat = self.model.backbone.fc_norm(feat[:,0])
-            logit = self.model.backbone.fc(ce_feat) + self.mask
-            str_loss = self.sample_criterion(logit, y).mean() + self.model._get_sim()
-        #     str_loss = torch.zeros(1,device=self.device)
-        
-    #     print('ignore_score')
-    #     print(ign_score)
-    #     print('ignore_loss:',ignore_loss)
-        
-        #*########################################################################
-        #* compensation_loss
-        if self.beta > 0.:
-            cp_loss = self.cp_loss(feat,y,batch_g,total_batch_g)
-            cp_loss = cp_loss.mean()
-        else:
-            cp_loss = torch.zeros(1,device=self.device)
-        # cp_loss = self.cp_loss(y,sample_g,batch_g)
-        # cp_loss = cp_loss.mean()
-        #*########################################################################
-        #* CE_loss
-        ce_logit = self.model.backbone.forward_head(feat)[:,:len(self.exposed_classes)]
-        # ce_loss = self.sample_criterion(ce_logit, y)
-        # ce_loss = ce_loss.mean() + self.model._get_sim()
-        #? alpha -> str_loss / beta -> cp_loss
-        loss = self.alpha*str_loss + self.charlie * cp_loss 
-        # print(f"ignore: {alpha*ignore_loss.item():.4f} drift:{(1-alpha)*drift_loss.item():.4f} loss: {loss.item():.4f}")
-        return loss, ce_logit
+    def setup_distributed_model(self):
+        super().setup_distributed_model()
+        self.model_without_ddp.use_mask = self.use_mask
+        self.model_without_ddp.use_contrastiv = self.use_contrastiv
+        self.model_without_ddp.use_dyna_exp = self.use_dyna_exp
+        self.model_without_ddp.use_last_layer = self.use_last_layer

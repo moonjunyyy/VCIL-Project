@@ -13,7 +13,6 @@ import numpy as np
 import torch
 from randaugment import RandAugment
 from torch import nn
-from torch.utils.tensorboard import SummaryWriter
 from torch.utils.data import DataLoader
 from torchvision import transforms
 from utils.onlinesampler import OnlineSampler, OnlineTestSampler
@@ -21,8 +20,6 @@ from utils.augment import Cutout
 from utils.data_loader import get_statistics
 from datasets import *
 from utils.train_utils import select_model, select_optimizer, select_scheduler
-import copy
-
 from utils.memory import Memory
 
 ########################################################################################################################
@@ -134,9 +131,8 @@ class _Trainer():
         }
 
         mean, std, n_classes, inp_size, _ = get_statistics(dataset=self.dataset)
-        models_224 = ['vit', 'L2P', 'DualPrompt', 'ours', 'ours_total']
-        # if self.model_name == 'vit' or self.model_name == 'L2P' or self.model_name == 'ours' or self.model_name == 'ours_total' or self.model_name == 'DualPrompt':
-        if self.model_name in models_224:
+        if self.model_name in ['vit', 'vit_finetune', 'L2P', 'ours', 'DualPrompt']:
+            print(self.model_name)
             inp_size = 224    
         self.n_classes = n_classes
         self.inp_size = inp_size
@@ -149,12 +145,10 @@ class _Trainer():
             train_transform.append(Cutout(size=16))
             if self.gpu_transform:
                 self.gpu_transform = False
-                # self.logger.warning("cutout not supported on GPU!")
         if "randaug" in self.transforms:
             train_transform.append(RandAugment())
             if self.gpu_transform:
                 self.gpu_transform = False
-                # self.logger.warning("randaug not supported on GPU!")
         if "autoaug" in self.transforms:
             if 'cifar' in self.dataset:
                 train_transform.append(transforms.AutoAugment(transforms.AutoAugmentPolicy('cifar10')))
@@ -182,17 +176,12 @@ class _Trainer():
         _r = dist.get_rank() if self.distributed else None       # means that it is not distributed
         _w = dist.get_world_size() if self.distributed else None # means that it is not distributed
 
-        self.train_dataset   = self.datasets[self.dataset](root=self.data_dir, train=True,  download=True, 
-                                                      transform=transforms.ToTensor())
+        self.train_dataset   = self.datasets[self.dataset](root=self.data_dir, train=True,  download=True, transform=transforms.ToTensor())
         self.online_iter_dataset = OnlineIterDataset(self.train_dataset, 1)
         self.test_dataset    = self.datasets[self.dataset](root=self.data_dir, train=False, download=True, transform=self.test_transform)
-
         self.train_sampler   = OnlineSampler(self.online_iter_dataset, self.n_tasks, self.m, self.n, self.rnd_seed, 0, self.rnd_NM, _w, _r)
-        # self.train_sampler   = OnlineSampler(self.train_dataset, self.n_tasks, self.m, self.n, self.rnd_seed, 0, self.rnd_NM, _w, _r)
         self.test_sampler    = OnlineTestSampler(self.test_dataset, [], _w, _r)
-
         self.train_dataloader    = DataLoader(self.online_iter_dataset, batch_size=self.temp_batchsize, sampler=self.train_sampler, num_workers=self.n_worker)
-        # self.train_dataloader    = DataLoader(self.train_dataset, batch_size=self.temp_batchsize, sampler=self.train_sampler, num_workers=self.n_worker)
         
         self.mask = torch.zeros(self.n_classes, device=self.device) - torch.inf
         self.seen = 0
@@ -203,7 +192,6 @@ class _Trainer():
         print("Building model...")
         self.model = select_model(self.model_name, self.dataset, self.n_classes,self.selection_size).to(self.device)
         self.scaler = torch.cuda.amp.GradScaler(enabled=self.use_amp)
-        # self.writer = SummaryWriter(f"{self.log_path}/tensorboard/{self.dataset}/{self.note}/seed_{self.rnd_seed}")
         
         self.model.to(self.device)
         self.model_without_ddp = self.model
@@ -251,29 +239,26 @@ class _Trainer():
         else:
             pass
 
+        if self.rnd_seed is not None:
+            random.seed(self.rnd_seed)
+            np.random.seed(self.rnd_seed)
+            torch.manual_seed(self.rnd_seed)
+            torch.cuda.manual_seed(self.rnd_seed)
+            torch.cuda.manual_seed_all(self.rnd_seed) # if use multi-GPU
+            cudnn.deterministic = True
+            print('You have chosen to seed training. '
+                'This will turn on the CUDNN deterministic setting, '
+                'which can slow down your training considerably! '
+                'You may see unexpected behavior when restarting '
+                'from checkpoints.')
+        cudnn.benchmark = False
+
         self.setup_distributed_dataset()
         self.total_samples = len(self.train_dataset)
 
         print(f"[1] Select a CIL method ({self.mode})")
-        # #!-----------------------------------------------
-        # print(self.train_dataset.classes)
-        # #!-----------------------------------------------
         self.setup_distributed_model()
 
-        #!-------------------------------------------------------------------
-        # if self.rnd_seed is not None:
-        #     rnd_seed = self.rnd_seed
-        #     random.seed(rnd_seed)
-        #     torch.manual_seed(rnd_seed)
-        #     cudnn.deterministic = True
-        #     np.random.seed(self.rnd_seed)
-        #     print('You have chosen to seed training. '
-        #         'This will turn on the CUDNN deterministic setting, '
-        #         'which can slow down your training considerably! '
-        #         'You may see unexpected behavior when restarting '
-        #         'from checkpoints.')
-        # cudnn.benchmark = False
-        #!-------------------------------------------------------------------
         print(f"[2] Incrementally training {self.n_tasks} tasks")
         task_records = defaultdict(list)
         eval_results = defaultdict(list)
@@ -284,39 +269,17 @@ class _Trainer():
         for task_id in range(self.n_tasks):
             if self.mode == "joint" and task_id > 0:
                 return
-            # #todo ==================================================
-            if task_id ==0 and not self.debug:
-                print()
-                self.train_data_config(self.n_tasks,self.train_dataset,self.train_sampler)
-                
-            # #todo ==================================================
             print("\n" + "#" * 50)
             print(f"# Task {task_id} iteration")
             print("#" * 50 + "\n")
             print("[2-1] Prepare a datalist for the current task")
             
-            # if task_id ==0:
-            #     self.train_data_config(self.n_tasks,self.train_dataset,self.train_sampler)
-            #     print()
-            # self.train_sampler.set_task(task_id)
-            # self.current_task_data(self.train_dataloader)
-            
             self.train_sampler.set_task(task_id)
-            # self.current_task_data(self.train_dataloader)
             self.online_before_task(task_id)
-            
-            # if task_id ==0:
-            #     self.train_data_config(self.n_tasks,self.train_dataset,self.train_sampler)
-            # print()
-            self.train_sampler.set_task(task_id)
-            # self.current_task_data(self.train_dataloader)
-            
-            # self.train_sampler.set_task(task_id)
-            # self.current_task_data(self.train_dataloader)
 
             self.online_before_task(task_id)          
             for i, (images, labels, idx) in enumerate(self.train_dataloader):
-                if self.debug and (i+1)*self.temp_batchsize >= 110:
+                if self.debug and (i+1) * self.temp_batchsize >= 500:
                     break
                 samples_cnt += images.size(0) * self.world_size
                 loss, acc = self.online_step(images, labels, idx)
@@ -326,7 +289,6 @@ class _Trainer():
                     with torch.no_grad():
                         test_sampler = OnlineTestSampler(self.test_dataset, self.exposed_classes)
                         test_dataloader = DataLoader(self.test_dataset, batch_size=self.batchsize*2, sampler=test_sampler, num_workers=self.n_worker)
-                        # test_dataloader = DataLoader(self.test_dataset, batch_size=512, sampler=test_sampler, num_workers=self.n_worker)
                         eval_dict = self.online_evaluate(test_dataloader)
                         if self.distributed:
                             eval_dict =  torch.tensor([eval_dict['avg_loss'], eval_dict['avg_acc'], *eval_dict['cls_acc']], device=self.device)
@@ -343,7 +305,6 @@ class _Trainer():
             
             test_sampler = OnlineTestSampler(self.test_dataset, self.exposed_classes)
             test_dataloader = DataLoader(self.test_dataset, batch_size=self.batchsize*2, sampler=test_sampler, num_workers=self.n_worker)
-            # self.test_data_config(test_dataloader,task_id)
             eval_dict = self.online_evaluate(test_dataloader)
             #! after training done
             self.report_test(num_eval, eval_dict["avg_loss"], eval_dict['avg_acc'])
@@ -360,7 +321,6 @@ class _Trainer():
             task_records["cls_acc"].append(eval_dict["cls_acc"])
 
             print("[2-5] Report task result")
-            # self.writer.add_scalar("Metrics/TaskAcc", task_acc, task_id)
         if self.is_main_process():        
             np.save(f"{self.log_path}/logs/{self.dataset}/{self.note}/seed_{self.rnd_seed}.npy", task_records["task_acc"])
 
@@ -389,8 +349,6 @@ class _Trainer():
             print(f"="*24)
         
     def add_new_class(self, class_name):
-        # For DDP, normally go into this function
-        # len_class = len(self.exposed_classes)
         exposed_classes = []
         for label in class_name:
             if label.item() not in self.exposed_classes:

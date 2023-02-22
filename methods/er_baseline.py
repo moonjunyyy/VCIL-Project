@@ -34,12 +34,12 @@ class ER(_Trainer):
     def online_step(self, images, labels, idx):
         # image, label = sample
         self.add_new_class(labels)
+        for j in range(len(labels)):
+            labels[j] = self.exposed_classes.index(labels[j].item())
         self.memory_sampler  = MemoryBatchSampler(self.memory, self.memory_batchsize, self.temp_batchsize * self.online_iter * self.world_size)
         self.memory_dataloader   = DataLoader(self.train_dataset, batch_size=self.memory_batchsize, sampler=self.memory_sampler, num_workers=0)
         self.memory_provider     = iter(self.memory_dataloader)
         # train with augmented batches
-        for j in range(len(labels)):
-            labels[j] = self.exposed_classes.index(labels[j].item())
         _loss, _acc, _iter = 0.0, 0.0, 0
         for _ in range(int(self.online_iter) * self.temp_batchsize * self.world_size):
             loss, acc = self.online_train([images.clone(), labels.clone()])

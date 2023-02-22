@@ -184,10 +184,10 @@ class DualPrompt(_Trainer):
             
     def online_before_task(self,train_loader):
         # Task-Free
-        self.model_without_ddp.convert_train_task(self.exposed_classes)
+        # self.model_without_ddp.convert_train_task(self.exposed_classes)
+        pass
 
     def online_after_task(self, cur_iter):
-        # self.model_without_ddp.convert_train_task(self.exposed_classes)
         pass
 
     def reset_opt(self):
