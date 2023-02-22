@@ -1,6 +1,6 @@
 #!/bin/bash
 
-#SBATCH -J Baseline_Siblurry_Test
+#SBATCH -J Ours_Siblurry_ign_loss_wo_CE
 #SBATCH -p batch_agi
 #SBATCH -w agi2
 #SBATCH --nodes=1
@@ -31,15 +31,15 @@ conda --version
 python --version
 
 # CIL CONFIG
-NOTE="Base_Siblurry_cifar100_N50_M10_update_TEST" # Short description of the experiment. (WARNING: logs/results with the same note will be overwritten!)
-MODE="ours_test"
+NOTE="Ours_Siblurry_withoutCE_IGN" # Short description of the experiment. (WARNING: logs/results with the same note will be overwritten!)
+MODE="ours"
 DATASET="cifar100" # cifar10, cifar100, tinyimagenet, imagenet
 N_TASKS=5
 N=50
 M=10
 GPU_TRANSFORM="--gpu_transform"
 USE_AMP="--use_amp"
-SEEDS="1 2"
+SEEDS="1 2 3 4 5"
 # SEEDS="1"
 
 
@@ -77,5 +77,6 @@ do
     --model_name $MODEL_NAME --opt_name $OPT_NAME --sched_name $SCHED_NAME \
     --lr $LR --batchsize $BATCHSIZE \
     --memory_size $MEM_SIZE $GPU_TRANSFORM --online_iter $ONLINE_ITER --data_dir /local_datasets \
-    --note $NOTE --eval_period $EVAL_PERIOD --n_worker 2 --rnd_NM --selection_size 1 --alpha 1
+    --note $NOTE --eval_period $EVAL_PERIOD --n_worker 2 --rnd_NM --selection_size 1 --alpha 0.8 --gamma 1. --beta 0. --charlie 0. \
+    --no-use_last_layer --no-use_contrastiv --no-use_mask --no-use_baseline
 done

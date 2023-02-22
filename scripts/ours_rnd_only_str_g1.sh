@@ -1,6 +1,6 @@
 #!/bin/bash
 
-#SBATCH -J Ours_total_only_sub_loss
+#SBATCH -J Ours_Siblurry_loss_update_only_str_gamma_1.5
 #SBATCH -p batch_agi
 #SBATCH -w agi2
 #SBATCH --nodes=1
@@ -31,15 +31,15 @@ conda --version
 python --version
 
 # CIL CONFIG
-NOTE="ours_total" # Short description of the experiment. (WARNING: logs/results with the same note will be overwritten!)
-MODE="Ours_total"
+NOTE="Ours_Siblurry_cifar100_N50_M10_update1_3" # Short description of the experiment. (WARNING: logs/results with the same note will be overwritten!)
+MODE="ours"
 DATASET="cifar100" # cifar10, cifar100, tinyimagenet, imagenet
 N_TASKS=5
 N=50
 M=10
 GPU_TRANSFORM="--gpu_transform"
 USE_AMP="--use_amp"
-SEEDS="1 2 3 4 5"
+SEEDS="2 4 5 1 3"
 # SEEDS="1"
 
 
@@ -50,7 +50,7 @@ if [ "$DATASET" == "cifar10" ]; then
 
 elif [ "$DATASET" == "cifar100" ]; then
     MEM_SIZE=2000 ONLINE_ITER=3
-    MODEL_NAME="ours_total" EVAL_PERIOD=1000
+    MODEL_NAME="ours" EVAL_PERIOD=1000
     BATCHSIZE=64; LR=3e-2 OPT_NAME="adam" SCHED_NAME="default"
 
 elif [ "$DATASET" == "tinyimagenet" ]; then
@@ -77,6 +77,5 @@ do
     --model_name $MODEL_NAME --opt_name $OPT_NAME --sched_name $SCHED_NAME \
     --lr $LR --batchsize $BATCHSIZE \
     --memory_size $MEM_SIZE $GPU_TRANSFORM --online_iter $ONLINE_ITER --data_dir /local_datasets \
-    --note $NOTE --eval_period $EVAL_PERIOD --n_worker 2 --rnd_NM --selection_size 1 --alpha 1. --gamma 1. --beta 0.5 --charlie 1. \
-    --use_last_layer --no-use_contrastiv --no-use_mask
+    --note $NOTE --eval_period $EVAL_PERIOD --n_worker 2 --rnd_NM --selection_size 1 --alpha 1. --gamma 1.5
 done

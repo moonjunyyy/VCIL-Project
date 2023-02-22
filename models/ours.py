@@ -126,7 +126,8 @@ class Ours(nn.Module):
             param.requires_grad = False
         self.backbone.fc.weight.requires_grad = True
         self.backbone.fc.bias.requires_grad   = True
-
+        print("fc_weight")
+        print(self.backbone.fc.weight.shape)
         self.tasks = []
        
         self.len_g_prompt = len_g_prompt
@@ -146,6 +147,13 @@ class Ours(nn.Module):
             self.e_prompt = None if len(pos_e_prompt) == 0 else Prompt(e_pool, self.selection_size, 2 * self.e_length * self.len_e_prompt, self.backbone.num_features, batchwise_selection = False)
 
         else: raise ValueError('Unknown prompt_func: {}'.format(prompt_func))
+        
+        print("g_prompt")
+        print("g_prompt_prompts:",self.g_prompt.prompts.shape)
+        print("g_prompt_key:",self.g_prompt.key.shape)
+        print("e_prompt")
+        print("e_prompt_prompts:",self.e_prompt.prompts.shape)
+        print("e_prompt_key:",self.e_prompt.key.shape)
         
         self.task_num = task_num
         self.task_id = -1 # if _convert_train_task is not called, task will undefined
@@ -227,7 +235,7 @@ class Ours(nn.Module):
         return x
 
     def forward(self, inputs, only_feat = False) :
-        
+        self.backbone.eval()
         with torch.no_grad():
             x = self.backbone.patch_embed(inputs)
             B, N, D = x.size()
@@ -270,28 +278,27 @@ class Ours(nn.Module):
 
     def convert_train_task(self, task : torch.Tensor, **kwargs):
     
-        task = torch.tensor(task,dtype=torch.float)
-        flag = -1
-        for n, t in enumerate(self.tasks):
-            if torch.equal(t, task):
-                flag = n
-                break
-        if flag == -1:
-            self.tasks.append(task)
-            self.task_id = len(self.tasks) - 1
-            if self.training:
-                if self.task_id != 0:
-                    with torch.no_grad():
-                        # self.e_prompt.prompts[self.task_id] = self.e_prompt.prompts[self.task_id - 1].detach().clone()
-                        # self.e_prompt.key[self.task_id] = self.e_prompt.key[self.task_id - 1].detach().clone()
-                        self.e_prompt.prompts[self.task_id] = self.e_prompt.prompts[self.task_id - 1].clone()
-                        self.e_prompt.key[self.task_id] = self.e_prompt.key[self.task_id - 1].clone()
-        else :
-            self.task_id = flag
+        # task = torch.tensor(task,dtype=torch.float)
+        # flag = -1
+        # for n, t in enumerate(self.tasks):
+        #     if torch.equal(t, task):
+        #         flag = n
+        #         break
+        # if flag == -1:
+        #     self.tasks.append(task)
+        #     self.task_id = len(self.tasks) - 1
+        #     if self.training:
+        #         if self.task_id != 0:
+        #             with torch.no_grad():
+        #                 # self.e_prompt.prompts[self.task_id] = self.e_prompt.prompts[self.task_id - 1].detach().clone()
+        #                 # self.e_prompt.key[self.task_id] = self.e_prompt.key[self.task_id - 1].detach().clone()
+        #                 self.e_prompt.prompts[self.task_id] = self.e_prompt.prompts[self.task_id - 1].clone()
+        #                 self.e_prompt.key[self.task_id] = self.e_prompt.key[self.task_id - 1].clone()
+        # else :
+        #     self.task_id = flag
 
-        # self.mask += -torch.inf
-        # self.mask[task] = 0
-        # return
+        self.mask += -torch.inf
+        self.mask[task] = 0
         
     def get_count(self):
         return self.e_prompt.update()

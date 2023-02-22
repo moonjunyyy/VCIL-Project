@@ -248,7 +248,7 @@ class Ours_total(_Trainer):
     def _get_strength(self,ref_head,feat,y,mask):
         uncert, sample_g, batch_g,total_batch_g = self._compute_grads_uncert(ref_head,feat,y,mask)
         str_score = torch.max(1. - torch.cosine_similarity(sample_g,batch_g,dim=1),torch.zeros(1,device=self.device)) #B
-        str_score = self.min_max(str_score)
+        # str_score = self.min_max(str_score)
         return str_score,total_batch_g
     
 
@@ -293,22 +293,25 @@ class Ours_total(_Trainer):
         #*#########################################################################
         #* CE_loss (masking / main)
         # ce_logit = self.model.forward_head(feat,mask,mass,similarity,topk)
-        ce_logit = self.model(x)
+        ce_logit,ce_feat = self.model(x)
         ce_logit = ce_logit + self.mask
-        ce_loss = self.criterion(ce_logit, y.to(torch.int64))
-        # ce_logit = ce_logit + self.mask
-        # ce_loss = self.criterion(ce_logit, y.to(torch.int64))
+        #! for the str ablation
+        if self.use_baseline:
+            ce_loss = self.criterion(ce_logit, y.to(torch.int64))
+        else:
+            ce_loss = torch.zeros(1,device=self.device)
+        
         #*#########################################################################
         #* strength_loss
         if str_score != None and self.alpha > 0.:
-            ign_feat = self.model.backbone.fc_norm(feat[:,0])
+            ign_feat = self.model.backbone.fc_norm(ce_feat[:,0])
             ign_logit = self.model.backbone.fc(ign_feat)
             if self.use_mask:
                 ign_logit = ign_logit*mask
             str_loss = self.str_loss(ign_logit+self.mask, y, str_score)
             str_loss = str_loss.mean()
         elif str_score == None and self.alpha > 0.:   #* non ignore
-            ign_feat = self.model.backbone.fc_norm(feat[:,0])
+            ign_feat = self.model.backbone.fc_norm(ce_feat[:,0])
             ign_logit = self.model.backbone.fc(ign_feat) + self.mask
             str_loss = self.sample_criterion(ign_logit, y).mean()
         else:   #* for the baseline
@@ -317,20 +320,17 @@ class Ours_total(_Trainer):
         #*########################################################################
         #* compensation_loss
         if self.charlie > 0.:
-            cp_loss = self.cp_loss(feat,y,total_batch_g,mask)
+            cp_loss = self.cp_loss(ce_feat,y,total_batch_g,mask)
             cp_loss = cp_loss.mean()
         else:
             cp_loss = torch.zeros(1,device=self.device)
         #*########################################################################
         
-        # if self.alpha == 0. and self.charlie == 0.: #* masking or baseline
+        # if self.use_baseline:
+        #     loss = ce_loss
+        # else:
         #     loss = ce_loss + self.alpha*str_loss + self.charlie * cp_loss 
-        # elif self.alpha>0:
-        #     loss =str_loss
-        if self.use_baseline:
-            loss = ce_loss
-        else:
-            loss = ce_loss + self.alpha*str_loss + self.charlie * cp_loss 
+        loss = ce_loss + self.alpha*str_loss + self.charlie * cp_loss 
         return loss, ce_logit
     
     def setup_distributed_model(self):

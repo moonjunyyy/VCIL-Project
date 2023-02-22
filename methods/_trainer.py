@@ -134,7 +134,9 @@ class _Trainer():
         }
 
         mean, std, n_classes, inp_size, _ = get_statistics(dataset=self.dataset)
-        if self.model_name == 'vit' or self.model_name == 'L2P' or self.model_name == 'ours' or self.model_name == 'ours_total' or self.model_name == 'DualPrompt':
+        models_224 = ['vit', 'L2P', 'DualPrompt', 'ours', 'ours_total']
+        # if self.model_name == 'vit' or self.model_name == 'L2P' or self.model_name == 'ours' or self.model_name == 'ours_total' or self.model_name == 'DualPrompt':
+        if self.model_name in models_224:
             inp_size = 224    
         self.n_classes = n_classes
         self.inp_size = inp_size

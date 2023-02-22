@@ -1,6 +1,6 @@
 #!/bin/bash
 
-#SBATCH -J Ours_Siblurry_gamma1_beta0.5
+#SBATCH -J Ours_Siblurry_gamma0.8_beta0.5
 #SBATCH -p batch_agi
 #SBATCH -w agi2
 #SBATCH --nodes=1
@@ -31,7 +31,7 @@ conda --version
 python --version
 
 # CIL CONFIG
-NOTE="Ours_Siblurry_cifar100_N50_M10_New_loss" # Short description of the experiment. (WARNING: logs/results with the same note will be overwritten!)
+NOTE="Ours_Siblurry_G0.8beta0.5" # Short description of the experiment. (WARNING: logs/results with the same note will be overwritten!)
 MODE="ours"
 DATASET="cifar100" # cifar10, cifar100, tinyimagenet, imagenet
 N_TASKS=5
@@ -77,5 +77,5 @@ do
     --model_name $MODEL_NAME --opt_name $OPT_NAME --sched_name $SCHED_NAME \
     --lr $LR --batchsize $BATCHSIZE \
     --memory_size $MEM_SIZE $GPU_TRANSFORM --online_iter $ONLINE_ITER --data_dir /local_datasets \
-    --note $NOTE --eval_period $EVAL_PERIOD --n_worker 2 --rnd_NM --selection_size 1 --alpha 1. --gamma 1. --beta 0.5 --charlie 1.
+    --note $NOTE --eval_period $EVAL_PERIOD --n_worker 2 --rnd_NM --selection_size 1 --alpha 1. --gamma 0.8 --beta 0.5 --charlie 1.
 done

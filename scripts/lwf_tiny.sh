@@ -1,6 +1,6 @@
 #!/bin/bash
 
-#SBATCH --job-name lwf_cifar100_N50_M10_rnd_kd_0.02_M500_taskfree
+#SBATCH --job-name lwf_tiny_i_Blurry
 #SBATCH -p batch_agi
 #SBATCH -w agi2
 #SBATCH --nodes=1
@@ -32,10 +32,10 @@ conda activate torch38gpu
 conda --version
 python --version
 # CIL CONFIG
-MODE="lwf++"
-NOTE="lwf_Siblurry_cifar100_N50_M10_rnd_kd0.02_M500_taskfree" # Short description of the experiment. (WARNING: logs/results with the same note will be overwritten!)
+MODE="lwf"
+NOTE="lwf_tiny" # Short description of the experiment. (WARNING: logs/results with the same note will be overwritten!)
 
-DATASET="cifar100" # cifar10, cifar100, tinyimagenet, imagenet
+DATASET="tinyimagenet" # cifar10, cifar100, tinyimagenet, imagenet
 N_TASKS=5
 N=50
 M=10
@@ -52,13 +52,13 @@ if [ "$DATASET" == "cifar10" ]; then
 
 elif [ "$DATASET" == "cifar100" ]; then
     MEM_SIZE=500 ONLINE_ITER=3
-    MODEL_NAME="resnet34" EVAL_PERIOD=100
-    BATCHSIZE=64; LR=3e-4 OPT_NAME=$OPT SCHED_NAME="default" MEMORY_EPOCH=256
+    MODEL_NAME="vit" EVAL_PERIOD=1000
+    BATCHSIZE=64; LR=5e-3 OPT_NAME=$OPT SCHED_NAME="default" MEMORY_EPOCH=256
 
 elif [ "$DATASET" == "tinyimagenet" ]; then
-    MEM_SIZE=4000 ONLINE_ITER=3
-    MODEL_NAME="vit" EVAL_PERIOD=100
-    BATCHSIZE=32; LR=3e-4 OPT_NAME=$OPT SCHED_NAME="default" MEMORY_EPOCH=256
+    MEM_SIZE=500 ONLINE_ITER=3
+    MODEL_NAME="vit" EVAL_PERIOD=1000
+    BATCHSIZE=64; LR=5e-3 OPT_NAME=$OPT SCHED_NAME="default" MEMORY_EPOCH=256
 
 elif [ "$DATASET" == "imagenet" ]; then
     N_TASKS=10 MEM_SIZE=20000 ONLINE_ITER=0.25
@@ -81,5 +81,5 @@ do
     --model_name $MODEL_NAME --opt_name $OPT_NAME --sched_name $SCHED_NAME \
     --lr $LR --batchsize $BATCHSIZE \
     --memory_size $MEM_SIZE $GPU_TRANSFORM --online_iter $ONLINE_ITER --data_dir /local_datasets/ \
-    --note $NOTE --eval_period $EVAL_PERIOD --memory_epoch $MEMORY_EPOCH --n_worker 4 --rnd_NM
+    --note $NOTE --eval_period $EVAL_PERIOD --memory_epoch $MEMORY_EPOCH --n_worker 2
 done

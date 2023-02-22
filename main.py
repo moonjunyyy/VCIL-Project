@@ -27,6 +27,7 @@ from methods.L2P import L2P
 from methods.rainbow_memory import RM
 from methods.Finetuning import FT
 from methods.ewc import EWCpp
+from methods.lwf import LwF
 from methods.ours import Ours
 from methods.ours_test import Ours_test
 from methods.ours_test import baseline
@@ -39,7 +40,9 @@ import numpy as np
 
 # torch.autograd.set_detect_anomaly(True)
 torch.backends.cudnn.enabled = False
-methods = { "er": ER, "clib":CLIB, 'L2P':L2P, 'rm':RM, 'Finetuning':FT, 'ewc++':EWCpp, 'ours':Ours, 'ours_test':Ours_test, 'DualPrompt':DualPrompt, 'baseline':baseline,
+methods = { "er": ER, "clib":CLIB, 'L2P':L2P, 'rm':RM, 'Finetuning':FT, 'ewc++':EWCpp,
+           'lwf':LwF,
+           'ours':Ours, 'ours_test':Ours_test, 'DualPrompt':DualPrompt, 'baseline':baseline,
            'Ours_total':Ours_total}
 # torch.autograd.set_detect_anomaly(True)
 os.environ["CUDA_LAUNCH_BLOCKING"]="1"

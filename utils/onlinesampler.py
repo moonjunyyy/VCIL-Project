@@ -84,8 +84,13 @@ class OnlineSampler(Sampler):
             else:
                 self.disjoint_classes = [[] for _ in range(num_tasks)]
 
-            self.blurry_classes     = class_order[self.disjoint_num:self.disjoint_num + self.blurry_num]
-            self.blurry_classes     = self.blurry_classes.reshape(num_tasks, -1).tolist()
+            if self.blurry_num > 0:
+                self.blurry_slice = [0] + torch.randint(0, self.blurry_num, (num_tasks - 1,), generator=self.generator).sort().values.tolist() + [self.blurry_num]
+                self.blurry_classes = [class_order[self.disjoint_num + self.blurry_slice[i]:self.disjoint_num + self.blurry_slice[i + 1]].tolist() for i in range(num_tasks)]
+            else:
+                self.blurry_classes = [[] for _ in range(num_tasks)]
+            # self.blurry_classes     = class_order[self.disjoint_num:self.disjoint_num + self.blurry_num]
+            # self.blurry_classes     = self.blurry_classes.reshape(num_tasks, -1).tolist()
 
             print("disjoint classes: ", self.disjoint_classes)
             print("blurry classes: ", self.blurry_classes)

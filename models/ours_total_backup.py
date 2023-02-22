@@ -38,7 +38,7 @@ class Ours_total(nn.Module):
                  pos_g_prompt   : Iterable[int] = (0,1),
                  len_g_prompt   : int   = 5,
                  pos_e_prompt   : Iterable[int] = (2,3,4),
-                 len_e_prompt   : int   = 20,
+                 len_e_prompt   : int   = 5,
                  prompt_func    : str   = 'prompt_tuning',
                  task_num       : int   = 10,
                  class_num      : int   = 100,
@@ -304,7 +304,7 @@ class Ours_total(nn.Module):
         x = self.prompt_func(self.backbone.pos_drop(token_appended + self.backbone.pos_embed), g_prompts, e_prompts)
         feat = self.backbone.norm(x)
         
-        return feat, mask
+        return feat, mask, mass,similarity,topk
     
     def forward_head(self,feat,mask,mass,similarity,topk):
         x = self.backbone.fc_norm(feat[:, 0])
@@ -312,7 +312,7 @@ class Ours_total(nn.Module):
 
         if self.use_mask:
             mask = torch.sigmoid(mask)
-            # mask_prob = mask / mask.sum(dim=1, keepdim=True)
+            mask_prob = mask / mask.sum(dim=1, keepdim=True)
             self.mask_entropy_loss = (- mask * (mask - 1)).mean()
         else:
             self.mask_entropy_loss = 0

@@ -1,6 +1,6 @@
 #!/bin/bash
 
-#SBATCH -J Ours_total_Baseline
+#SBATCH -J Ours_total_Baseline_new
 #SBATCH -p batch_agi
 #SBATCH -w agi2
 #SBATCH --nodes=1
@@ -51,7 +51,7 @@ if [ "$DATASET" == "cifar10" ]; then
 elif [ "$DATASET" == "cifar100" ]; then
     MEM_SIZE=2000 ONLINE_ITER=3
     MODEL_NAME="ours_total" EVAL_PERIOD=1000
-    BATCHSIZE=64; LR=3e-2 OPT_NAME="adam" SCHED_NAME="default"
+    BATCHSIZE=64; LR=5e-3 OPT_NAME="adam" SCHED_NAME="default"
 
 elif [ "$DATASET" == "tinyimagenet" ]; then
     MEM_SIZE=4000 ONLINE_ITER=3
@@ -77,6 +77,6 @@ do
     --model_name $MODEL_NAME --opt_name $OPT_NAME --sched_name $SCHED_NAME \
     --lr $LR --batchsize $BATCHSIZE \
     --memory_size $MEM_SIZE $GPU_TRANSFORM --online_iter $ONLINE_ITER --data_dir /local_datasets \
-    --note $NOTE --eval_period $EVAL_PERIOD --n_worker 2 --rnd_NM --selection_size 1 --alpha 0. --gamma 1. --beta 0.5 --charlie 0. \
-    --use_last_layer --no-use_contrastiv --no-use_mask
+    --note $NOTE --eval_period $EVAL_PERIOD --n_worker 2 --rnd_NM --selection_size 1 --alpha 0.0 --gamma 0. --beta 0. --charlie 0. \
+    --use_last_layer --no-use_contrastiv --no-use_mask --use_baseline
 done
