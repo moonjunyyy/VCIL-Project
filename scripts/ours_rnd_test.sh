@@ -1,6 +1,6 @@
 #!/bin/bash
 
-#SBATCH -J Baseline_Siblurry_only_mask_without_contrastive
+#SBATCH -J Ours_rnd_test
 #SBATCH -p batch_agi
 #SBATCH -w agi2
 #SBATCH --nodes=1
@@ -31,8 +31,8 @@ conda --version
 python --version
 
 # CIL CONFIG
-NOTE="Baseline_Siblurry_new" # Short description of the experiment. (WARNING: logs/results with the same note will be overwritten!)
-MODE="ours"
+NOTE="Ours_rnd_test" # Short description of the experiment. (WARNING: logs/results with the same note will be overwritten!)
+MODE="ours_test"
 DATASET="cifar100" # cifar10, cifar100, tinyimagenet, imagenet
 N_TASKS=5
 N=50
@@ -80,8 +80,8 @@ do
     --memory_size $MEM_SIZE $GPU_TRANSFORM --online_iter $ONLINE_ITER --data_dir /local_datasets \
     --note $NOTE --eval_period $EVAL_PERIOD --n_worker 4 --transforms autoaug --rnd_NM \
     --alpha 0. --gamma 0. --use_base_ce \
-    --no-use_last_layer \
+    --use_last_layer \
     --no-use_contrastiv \
-    --use_mask
+    --no-use_mask
     
 done

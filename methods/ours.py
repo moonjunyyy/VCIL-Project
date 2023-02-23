@@ -294,7 +294,7 @@ class Ours(_Trainer):
         ce_logit,ce_feat = self.model(x)
         ce_logit = ce_logit + self.mask
         if self.use_base_CE:
-            loss = (1.-self.alpha)*self.criterion(ce_logit, y.to(torch.int64))
+            loss = (1. - self.alpha)*self.criterion(ce_logit, y.to(torch.int64))
         else:
             loss = torch.zeros(1,device=self.device)
         
@@ -307,10 +307,12 @@ class Ours(_Trainer):
                 ign_logit = ign_logit*mask
             str_loss = self.str_loss(ign_logit+self.mask, y, str_score)
             loss += self.alpha*str_loss.mean()
-        elif str_score == None and self.alpha > 0.:   #* non ignore
+        elif str_score == None and self.alpha != 0.:   #* non ignore
             ign_feat = self.model.backbone.fc_norm(ce_feat[:,0])
             ign_logit = self.model.backbone.fc(ign_feat) + self.mask
-            loss += self.alpha*self.sample_criterion(ign_logit, y).mean()
+            if self.use_mask:
+                ign_logit = ign_logit*mask
+            loss += self.alpha*self.sample_criterion(ign_logit+self.mask, y).mean()
         else:   #* for the baseline
             # loss += torch.zeros(1,device=self.device)
             pass

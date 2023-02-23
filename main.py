@@ -29,7 +29,7 @@ from methods.Finetuning import FT
 from methods.ewc import EWCpp
 from methods.lwf import LwF
 from methods.ours import Ours
-from methods.ours_test import Ours_test
+from methods.ours_new import Ours_test
 from methods.ours_test import baseline
 from methods.ours_total import Ours_total
 from methods.dualprompt import DualPrompt
@@ -37,7 +37,7 @@ import random
 import numpy as np
 
 # torch.backends.cudnn.enabled = False
-methods = { "er": ER, "clib":CLIB, 'L2P':L2P, 'rm':RM, 'Finetuning':FT, 'ewc++':EWCpp, 'ours':Ours, 'DualPrompt':DualPrompt }
+methods = { "er": ER, "clib":CLIB, 'L2P':L2P, 'rm':RM, 'Finetuning':FT, 'ewc++':EWCpp, 'ours':Ours, 'ours_test':Ours_test, 'DualPrompt':DualPrompt }
 # torch.autograd.set_detect_anomaly(True)
 # os.environ["CUDA_LAUNCH_BLOCKING"]="1"
 # os.environ["TORCH_DISTRIBUTED_DEBUG"] = "DETAIL"
