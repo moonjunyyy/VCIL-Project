@@ -34,7 +34,7 @@ python --version
 # CIL CONFIG
 NOTE="EWC_iblurry_cifar100_N50_M10_RND" # Short description of the experiment. (WARNING: logs/results with the same note will be overwritten!)
 MODE="ewc++"
-DATASET="tinyimagenet" # cifar10, cifar100, tinyimagenet, imagenet
+DATASET="cifar100" # cifar10, cifar100, tinyimagenet, imagenet
 N_TASKS=5
 N=50
 M=10
@@ -54,7 +54,7 @@ elif [ "$DATASET" == "cifar100" ]; then
     BATCHSIZE=64; LR=3e-4 OPT_NAME="adam" SCHED_NAME="default"
 
 elif [ "$DATASET" == "tinyimagenet" ]; then
-    MEM_SIZE=2000 ONLINE_ITER=3
+    MEM_SIZE=500 ONLINE_ITER=3
     MODEL_NAME="vit" EVAL_PERIOD=1000
     BATCHSIZE=64; LR=3e-4 OPT_NAME="adam" SCHED_NAME="default"
 

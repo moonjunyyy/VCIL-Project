@@ -119,7 +119,8 @@ class _Trainer():
         "tinyimagenet": TinyImageNet,
         "notmnist": NotMNIST,
         "cub200": CUB200,
-        "imagenet": ImageNet
+        "imagenet": ImageNet,
+        "imagenet-r": Imagenet_R,
         }
 
         mean, std, n_classes, inp_size, _ = get_statistics(dataset=self.dataset)

@@ -32,36 +32,30 @@ python --version
 # CIL CONFIG
 NOTE="DP_iblurry_cifar100_N50_M10_RND" # Short description of the experiment. (WARNING: logs/results with the same note will be overwritten!)
 MODE="DualPrompt"
-DATASET="tinyimagenet" # cifar10, cifar100, tinyimagenet, imagenet
+DATASET="cifar100" # cifar10, cifar100, tinyimagenet, imagenet
 N_TASKS=5
 N=50
 M=10
 GPU_TRANSFORM="--gpu_transform"
 USE_AMP="--use_amp"
-SEEDS="1"
+SEEDS="1 2 3 4 5"
 
 OPT="adam"
 
-if [ "$DATASET" == "cifar10" ]; then
-    MEM_SIZE=500 ONLINE_ITER=1
-    MODEL_NAME="L2P" EVAL_PERIOD=1000
-    BATCHSIZE=32; LR=3e-4 OPT_NAME="adam" SCHED_NAME="default" MEMORY_EPOCH=256
-
-elif [ "$DATASET" == "cifar100" ]; then
+if [ "$DATASET" == "cifar100" ]; then
     MEM_SIZE=2000 ONLINE_ITER=3
     MODEL_NAME="DualPrompt" EVAL_PERIOD=1000
     BATCHSIZE=64; LR=5e-3 OPT_NAME="adam" SCHED_NAME="default" MEMORY_EPOCH=256
 
 elif [ "$DATASET" == "tinyimagenet" ]; then
-    MEM_SIZE=4000 ONLINE_ITER=3
+    MEM_SIZE=2000 ONLINE_ITER=3
     MODEL_NAME="DualPrompt" EVAL_PERIOD=1000
     BATCHSIZE=64; LR=5e-3 OPT_NAME="adam" SCHED_NAME="default" MEMORY_EPOCH=256
 
-elif [ "$DATASET" == "imagenet" ]; then
-    N_TASKS=10 MEM_SIZE=20000 ONLINE_ITER=0.25
-    MODEL_NAME="L2P" EVAL_PERIOD=1000
-    BATCHSIZE=256; LR=0.03 OPT_NAME="adam" SCHED_NAME="default" MEMORY_EPOCH=100
-    BATCHSIZE=256; LR=0.05 OPT_NAME=$OPT SCHED_NAME="multistep" MEMORY_EPOCH=100
+elif [ "$DATASET" == "imagenet-r" ]; then
+    MEM_SIZE=2000 ONLINE_ITER=3
+    MODEL_NAME="DualPrompt" EVAL_PERIOD=1000
+    BATCHSIZE=64; LR=5e-3 OPT_NAME="adam" SCHED_NAME="default" MEMORY_EPOCH=100
 
 else
     echo "Undefined setting"

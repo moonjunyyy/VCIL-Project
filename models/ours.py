@@ -218,7 +218,8 @@ class Ours(nn.Module):
                     distance[out_range] = 2
                     if self.use_contrastiv:
                         mass = self.count + 1
-        distance = distance * mass
+        if self.use_contrastiv:
+            distance = distance * mass
         topk = distance.topk(self.selection_size, dim=1, largest=False)[1]
         distance = distance[torch.arange(topk.size(0), device=topk.device).unsqueeze(1).repeat(1,self.selection_size), topk].squeeze().clone()
         e_prompts = self.e_prompts[topk].squeeze().clone()
@@ -249,9 +250,9 @@ class Ours(nn.Module):
 
         if self.use_contrastiv:
             key_wise_distance = 1 - F.cosine_similarity(self.key.unsqueeze(1), self.key, dim=-1)
-            # self.similarity_loss = -((key_wise_distance / mass).exp().sum() / ((distance / mass[topk]).exp().sum() + (key_wise_distance / mass).exp().sum()) + 1e-6).log()
+            self.similarity_loss = -((key_wise_distance / mass).exp().sum() / ((distance / mass[topk]).exp().sum() + (key_wise_distance / mass).exp().sum()) + 1e-6).log()
             # self.similarity_loss = -(key_wise_distance / mass).mean() + (distance / mass[topk]).mean()
-            self.similarity_loss = -((key_wise_distance[topk] / mass[topk]).exp().sum() / ((distance / mass[topk]).exp().sum() + (key_wise_distance[topk] / mass[topk]).exp().sum()) + 1e-6).log()
+            # self.similarity_loss = -((key_wise_distance[topk] / mass[topk]).exp().sum() / ((distance / mass[topk]).exp().sum() + (key_wise_distance[topk] / mass[topk]).exp().sum()) + 1e-6).log()
         else:
             self.similarity_loss = distance.mean()
 
