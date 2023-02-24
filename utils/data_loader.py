@@ -15,10 +15,18 @@ from time import perf_counter
 logger = logging.getLogger()
 
 class ImageDataset(Dataset):
-    def __init__(self, data_list : List[torch.Tensor], dataset: str, transform=None, cls_list=None, data_dir=None,
+    def __init__(self, data, transform=None, cls_list=None, data_dir=None,
                  preload=False, device=None, transform_on_gpu=False):
-        self.data_list = data_list
-        self.dataset = dataset
+        inputs,gt = data
+        self.images, self.labels = [], []
+        for x,y in zip(inputs,gt):
+            self.images.append(x)
+            self.labels.append(y)
+        
+        
+        
+        
+        # self.dataset = dataset
         self.transform = transform
         self.cls_list = cls_list
         self.data_dir = data_dir
@@ -27,36 +35,35 @@ class ImageDataset(Dataset):
         self.transform_on_gpu = transform_on_gpu
 
     def __len__(self):
-        return len(self.data_list)
+        return len(self.labels)
 
     def __getitem__(self, idx):
-        return self.data_list[idx]
+        return self.images[idx], self.labels[idx]
+    # def get_image_class(self, y):
+    #     res_list = []
+    #     for i in range(len(self.data_list)):
+    #         if self.data_list[i]["label"] == y:
+    #             res_list.append(self.data_list[i])
+    #     return res_list
 
-    def get_image_class(self, y):
-        res_list = []
-        for i in range(len(self.data_list)):
-            if self.data_list[i]["label"] == y:
-                res_list.append(self.data_list[i])
-        return res_list
+    # def generate_idx(self, batch_size):
+    #     arr = np.arange(len(self.data_list))
+    #     np.random.shuffle(arr)
+    #     if batch_size >= len(arr):
+    #         return [arr]
+    #     else:
+    #         return np.split(arr, np.arange(batch_size, len(arr), batch_size))
 
-    def generate_idx(self, batch_size):
-        arr = np.arange(len(self.data_list))
-        np.random.shuffle(arr)
-        if batch_size >= len(arr):
-            return [arr]
-        else:
-            return np.split(arr, np.arange(batch_size, len(arr), batch_size))
-
-    def get_data_gpu(self, indices):
-        images = []
-        labels = []
-        data = {}
-        for i in indices:
-            images.append(self.transform(transforms.ToPILImage()(self.data_list[i]['image'].to(self.device))))
-            labels.append(self.data_list[i]['label'])
-        data['image'] = torch.stack(images)
-        data['label'] = torch.LongTensor(labels)
-        return data
+    # def get_data_gpu(self, indices):
+    #     images = []
+    #     labels = []
+    #     data = {}
+    #     for i in indices:
+    #         images.append(self.transform(transforms.ToPILImage()(self.data_list[i]['image'].to(self.device))))
+    #         labels.append(self.data_list[i]['label'])
+    #     data['image'] = torch.stack(images)
+    #     data['label'] = torch.LongTensor(labels)
+    #     return data
 
 class StreamDataset(Dataset):
     def __init__(self, sample, transform :Optional[Callable]=None, cls_list=None):

@@ -158,6 +158,8 @@ class L2P(nn.Module):
         prompts = prompts + self.backbone.pos_embed[:,0].clone().expand(self.selection_size * self.prompt_len, -1)
         x = self.backbone.pos_drop(token_appended + self.backbone.pos_embed)
         x = torch.cat((x[:,0].unsqueeze(1), prompts, x[:,1:]), dim=1)
+        
+        
         x = self.backbone.blocks(x)
         x = self.backbone.norm(x)
         x = x[:, 1:self.selection_size * self.prompt_len + 1].clone()

@@ -1,13 +1,14 @@
 #!/bin/bash
 
-#SBATCH -J DP_iblurry_cifar100_N50_M10_RND
+#SBATCH -J DP_Si_id_X_prefix
+#SBATCH -p batch_agi
+#SBATCH  -w agi2
 #SBATCH --nodes=1
 #SBATCH --gres=gpu:1
 #SBATCH --cpus-per-gpu=4
 #SBATCH --mem-per-gpu=16G
 #SBATCH -t 7-0
 #SBATCH -o %x_%j.log
-#SBATCH -e %x_%j.err
 
 date
 ulimit -n 65536
@@ -23,8 +24,8 @@ master_addr=$(scontrol show hostnames "$SLURM_JOB_NODELIST" | head -n 1)
 export MASTER_ADDR=$master_addr
 echo "MASTER_ADDR="$MASTER_ADDR
 
-source /data/moonjunyyy/init.sh
-conda activate iblurry
+source /data/keonhee/init.sh
+conda activate torch38gpu
 
 conda --version
 python --version

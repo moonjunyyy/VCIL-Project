@@ -1,8 +1,8 @@
 #!/bin/bash
 
-#SBATCH -J New_L2P_iblurry_cifar100_N70_M10
+#SBATCH -J New_L2P_Siblurry_cifar100_N30_M10
 #SBATCH -p batch_agi
-#SBATCH  -w agi2
+#SBATCH  -w agi1
 #SBATCH --nodes=1
 #SBATCH --gres=gpu:1
 #SBATCH --cpus-per-gpu=4
@@ -31,11 +31,11 @@ conda --version
 python --version
 
 # CIL CONFIG
-NOTE="L2P_iblurry_cifar100_N70_M10" # Short description of the experiment. (WARNING: logs/results with the same note will be overwritten!)
+NOTE="L2P_iblurry_cifar100_N30_M10" # Short description of the experiment. (WARNING: logs/results with the same note will be overwritten!)
 MODE="L2P"
 DATASET="cifar100" # cifar10, cifar100, tinyimagenet, imagenet
 N_TASKS=5
-N=70
+N=30
 M=10
 GPU_TRANSFORM="--gpu_transform"
 USE_AMP="--use_amp"
@@ -79,5 +79,5 @@ do
     --model_name $MODEL_NAME --opt_name $OPT_NAME --sched_name $SCHED_NAME \
     --lr $LR --batchsize $BATCHSIZE \
     --memory_size $MEM_SIZE $GPU_TRANSFORM --online_iter $ONLINE_ITER --data_dir /local_datasets \
-    --note $NOTE --eval_period $EVAL_PERIOD --memory_epoch $MEMORY_EPOCH --n_worker 2
+    --note $NOTE --eval_period $EVAL_PERIOD --memory_epoch $MEMORY_EPOCH --n_worker 2 --rnd_NM
 done

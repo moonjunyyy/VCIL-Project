@@ -122,18 +122,18 @@ class DualPrompt(_Trainer):
         return total_loss, total_correct/total_num_data
 
     def model_forward(self, x, y):
-        do_cutmix = self.cutmix and np.random.rand(1) < 0.5
-        if do_cutmix:
-            x, labels_a, labels_b, lam = cutmix_data(x=x, y=y, alpha=1.0)
-            with torch.cuda.amp.autocast(enabled=self.use_amp):
-                logit = self.model(x)
-                logit += self.mask
-                loss = lam * self.criterion(logit, labels_a) + (1 - lam) * self.criterion(logit, labels_b)
-        else:
-            with torch.cuda.amp.autocast(enabled=self.use_amp):
-                logit = self.model(x)
-                logit += self.mask
-                loss = self.criterion(logit, y)
+        # do_cutmix = self.cutmix and np.random.rand(1) < 0.5
+        # if do_cutmix:
+        #     x, labels_a, labels_b, lam = cutmix_data(x=x, y=y, alpha=1.0)
+        #     with torch.cuda.amp.autocast(enabled=self.use_amp):
+        #         logit = self.model(x)
+        #         logit += self.mask
+        #         loss = lam * self.criterion(logit, labels_a) + (1 - lam) * self.criterion(logit, labels_b)
+        # else:
+        with torch.cuda.amp.autocast(enabled=self.use_amp):
+            logit = self.model(x)
+            logit += self.mask
+            loss = self.criterion(logit, y)
         return logit, loss
 
     def online_evaluate(self, test_loader):

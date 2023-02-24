@@ -89,7 +89,7 @@ class RM(ER):
 
     def add_new_class(self, class_name):
         super(RM,self).add_new_class(class_name)
-        self.reset_opt()
+        # self.reset_opt()
 
     def update_memory(self, index, label):
         # Update memory
@@ -111,12 +111,11 @@ class RM(ER):
                 self.memory.replace_data([x,y])
 
     def online_before_task(self, cur_iter):
-        self.reset_opt()
+        # self.reset_opt()
         self.scheduler = optim.lr_scheduler.LambdaLR(self.optimizer, lambda iter: 1)
 
     def online_after_task(self, cur_iter):
         self.model.train()
-        self.reset_opt()
         # self.optimizer = select_optimizer(self.opt_name,self.lr,self.model)
         # self.scheduler = optim.lr_scheduler.CosineAnnealingWarmRestarts(
         #         self.optimizer, T_0=1, T_mult=2, eta_min=self.lr * 0.01
@@ -136,6 +135,8 @@ class RM(ER):
             self.scheduler = optim.lr_scheduler.CosineAnnealingWarmRestarts(
                 self.optimizer, T_0=1, T_mult=2, eta_min=self.lr * 0.01
             )
+        self.memory_sampler = MemoryOrderedSampler(self.memory, self.batchsize, 1)
+        self.memory_dataloader = DataLoader(self.train_dataset, batch_size=self.batchsize, sampler=self.memory_sampler, num_workers=4, pin_memory=True)
         for epoch in range(n_epoch):
             self.model.train()
             self.memory_sampler = MemoryOrderedSampler(self.memory, self.batchsize, len(self.memory) // self.batchsize)
@@ -151,7 +152,7 @@ class RM(ER):
                 self.scheduler.step()
             total_loss, correct, num_data = 0.0, 0.0, 0.0
 
-            for i, (image, label) in enumerate(self.memory_dataloader):
+            for n_batches, (image, label) in enumerate(self.memory_dataloader):
 
                 x = image.to(self.device)
                 y = label.to(self.device)
@@ -162,30 +163,31 @@ class RM(ER):
                 logit, loss = self.model_forward(x, y)
                 _, preds = logit.topk(self.topk, 1, True, True)
 
-                if self.use_amp:
-                    self.scaler.scale(loss).backward()
-                    self.scaler.unscale_(self.optimizer)
-                    torch.nn.utils.clip_grad_norm_(self.model.parameters(), 10)
-                    self.scaler.step(self.optimizer)
-                    self.scaler.update()
-                else:
-                    loss.backward()
-                    torch.nn.utils.clip_grad_norm_(self.model.parameters(), 10)
-                    self.optimizer.step()
+                self.scaler.scale(loss).backward()
+                # self.scaler.unscale_(self.optimizer)
+                # torch.nn.utils.clip_grad_norm_(self.model.parameters(), 10)
+                self.scaler.step(self.optimizer)
+                self.scaler.update()
+                # if self.use_amp:
+                #     self.scaler.scale(loss).backward()
+                #     self.scaler.unscale_(self.optimizer)
+                #     torch.nn.utils.clip_grad_norm_(self.model.parameters(), 10)
+                #     self.scaler.step(self.optimizer)
+                #     self.scaler.update()
+                # else:
+                #     loss.backward()
+                #     torch.nn.utils.clip_grad_norm_(self.model.parameters(), 10)
+                #     self.optimizer.step()
                 total_loss += loss.item()
                 correct += torch.sum(preds == y.unsqueeze(1)).item()
                 num_data += y.size(0)
                 
             n_batches = len(self.memory_dataloader)
             train_loss, train_acc = total_loss / n_batches, correct / num_data
-            logger.info(
-                f"Task {cur_iter} | Epoch {epoch + 1}/{n_epoch} | train_loss {train_loss:.4f} | train_acc {train_acc:.4f} | "
-                f"lr {self.optimizer.param_groups[0]['lr']:.4f}"
-            )
+            print(f"Task {cur_iter} | Epoch {epoch + 1}/{n_epoch} | train_loss {train_loss:.4f} | train_acc {train_acc:.4f} | lr {self.optimizer.param_groups[0]['lr']:.4f}")
 
     def uncertainty_sampling(self, samples, num_class):
         """uncertainty based sampling
-
         Args:
             samples ([list]): [training_list + memory_list]
         """

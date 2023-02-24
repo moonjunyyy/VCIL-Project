@@ -11,6 +11,7 @@ from models.vit import _create_vision_transformer
 from models.L2P import L2P
 from models.dualprompt import DualPrompt
 from models.ours import Ours
+from models.ours_total import Ours_total
 
 default_cfgs['vit_base_patch16_224'] = _cfg(
         url='https://storage.googleapis.com/vit_models/imagenet21k/ViT-B_16.npz',
@@ -47,26 +48,6 @@ def select_optimizer(opt_name, lr, model):
         raise NotImplementedError("Please select the opt_name [adam, sgd]")
     return opt
 
-# def select_optimizer_with_extern_params(opt_name, lr, model, extern_param=None):
-
-    # if opt_name == "adam":
-    #     params = [param for name, param in extern_param.named_parameters() if 'fc.' not in name]
-    #     opt = optim.Adam(params, lr=lr, weight_decay=0)
-    #     opt.add_param_group({'params': model.fc.parameters()})
-    # elif opt_name == "radam":
-    #     params = [param for name, param in extern_param.named_parameters() if 'fc.' not in name]
-    #     opt = torch_optimizer.RAdam(params, lr=lr, weight_decay=0.00001)
-    #     opt.add_param_group({'params': model.fc.parameters()})
-    # elif opt_name == "sgd":
-    #     params = [param for name, param in extern_param.named_parameters() if 'fc.' not in name]
-    #     opt = optim.SGD(
-    #         params, lr=lr, momentum=0.9, nesterov=True, weight_decay=1e-4
-    #     )
-    #     opt.add_param_group({'params': model.fc.parameters()})
-    # else:
-    #     raise NotImplementedError("Please select the opt_name [adam, sgd]")
-    # return opt
-
 def select_scheduler(sched_name, opt, hparam=None):
     if "exp" in sched_name:
         scheduler = optim.lr_scheduler.ExponentialLR(opt, gamma=hparam)
@@ -82,8 +63,8 @@ def select_scheduler(sched_name, opt, hparam=None):
         scheduler = optim.lr_scheduler.LambdaLR(opt, lambda iter: 1)
     return scheduler
 
-def select_model(model_name, dataset, num_classes=None):
-
+def select_model(model_name, dataset, num_classes=None,selection_size=None):
+    
     opt = edict(
         {
             "depth": 18,
@@ -132,7 +113,7 @@ def select_model(model_name, dataset, num_classes=None):
         opt["depth"] = 12
     elif model_name == "DualPrompt":
         opt["depth"] = 12
-    elif model_name == "ours":
+    elif model_name == "ours" or "ours_total":
         opt["depth"] = 12
     else:
         raise NotImplementedError(
@@ -157,7 +138,9 @@ def select_model(model_name, dataset, num_classes=None):
     elif model_name == "DualPrompt":
         model = DualPrompt(backbone_name="vit_base_patch16_224", class_num=num_classes)
     elif model_name == "ours":
-        model = Ours(backbone_name="vit_base_patch16_224", class_num=num_classes)
+        model = Ours(backbone_name="vit_base_patch16_224", class_num=num_classes, selection_size = selection_size)
+    elif model_name == "ours_total":
+        model = Ours_total(backbone_name="vit_base_patch16_224", class_num=num_classes, selection_size = selection_size)
     # elif model_name == "resnet18":
     #     model = timm.create_model('resnet18', num_classes=num_classes)
     # elif model_name == "resnet32":

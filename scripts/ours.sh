@@ -5,9 +5,9 @@
 #SBATCH --nodes=1
 #SBATCH --gres=gpu:1
 #SBATCH --cpus-per-gpu=4
-#SBATCH --mem-per-gpu=48G
+#SBATCH --mem-per-gpu=16G
 #SBATCH --time=7-0
-#SBATCH -o %x_%j.log
+#SBATCH -o %x_%j.out
 #SBATCH -e %x_%j.err
 
 date
@@ -17,6 +17,7 @@ ulimit -n 65536
 ### change WORLD_SIZE as gpus/node * num_nodes
 export MASTER_PORT=$(($RANDOM+32769))
 export WORLD_SIZE=$SLURM_NNODES
+# export WORLD_SIZE=1
 
 ### get the first node name as master address - customized for vgg slurm
 ### e.g. master(gnodee[2-5],gnoded1) == gnodee2
@@ -51,7 +52,7 @@ if [ "$DATASET" == "cifar10" ]; then
 elif [ "$DATASET" == "cifar100" ]; then
     MEM_SIZE=2000 ONLINE_ITER=3
     MODEL_NAME="ours" EVAL_PERIOD=1000
-    BATCHSIZE=16; LR=3e-2 OPT_NAME="adam" SCHED_NAME="default"
+    BATCHSIZE=64; LR=5e-3 OPT_NAME="adam" SCHED_NAME="default"
 
 elif [ "$DATASET" == "tinyimagenet" ]; then
     MEM_SIZE=4000 ONLINE_ITER=3
@@ -77,5 +78,9 @@ do
     --model_name $MODEL_NAME --opt_name $OPT_NAME --sched_name $SCHED_NAME \
     --lr $LR --batchsize $BATCHSIZE \
     --memory_size $MEM_SIZE $GPU_TRANSFORM --online_iter $ONLINE_ITER --data_dir /local_datasets \
-    --note $NOTE --eval_period $EVAL_PERIOD --n_worker 4
+    --note $NOTE --eval_period $EVAL_PERIOD --n_worker 4 --transforms autoaug --rnd_NM \
+    --use_last_layer \
+    --use_contrastiv \
+    --use_mask
+    # --use_dyna_exp
 done

@@ -8,7 +8,6 @@
 #SBATCH --mem-per-gpu=32G
 #SBATCH --time=3-0
 #SBATCH -o %x_%j.log
-#SBATCH -e %x_%j.err
 
 date
 ulimit -n 65536
@@ -24,8 +23,8 @@ master_addr=$(scontrol show hostnames "$SLURM_JOB_NODELIST" | head -n 1)
 export MASTER_ADDR=$master_addr
 echo "MASTER_ADDR="$MASTER_ADDR
 
-source /data/junyeong/init.sh
-conda activate iblurry
+source /data/keonhee/init.sh
+conda activate torch38gpu
 
 conda --version
 python --version

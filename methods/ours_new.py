@@ -69,9 +69,9 @@ def vit_base_patch16_224(pretrained=False, **kwargs):
     model = _create_vision_transformer('vit_base_patch16_224', pretrained=pretrained, **model_kwargs)
     return model
 
-class Ours(_Trainer):
+class Ours_test(_Trainer):
     def __init__(self, **kwargs):
-        super(Ours, self).__init__(**kwargs)
+        super(Ours_test, self).__init__(**kwargs)
         
         self.use_mask    = kwargs.get("use_mask")
         # self.use_dyna_exp    = kwargs.get("use_dyna_exp")

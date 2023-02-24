@@ -60,16 +60,16 @@ class Prompt(nn.Module):
         self.register_buffer('counter',   torch.zeros(pool_size))
     
     def forward(self, query : torch.Tensor, **kwargs):
+
         B, D = query.shape
         assert D == self.dimention, f'Query dimention {D} does not match prompt dimention {self.dimention}'
         # Select prompts
         match = 1 - F.cosine_similarity(query.unsqueeze(1), self.key, dim=-1)
-        # match = 1 - F.cosine_similarity(query.unsqueeze(1), self.key, dim=-1)
-        if self.training and self._diversed_selection:
-            topk = match * F.normalize(self.frequency, p=1, dim=-1)
-        else:
-            topk = match
-        _ ,topk = topk.topk(self.selection_size, dim=-1, largest=False, sorted=True)
+        # if self.training and self._diversed_selection:
+        #     topk = match * F.normalize(self.frequency, p=1, dim=-1)
+        # else:
+            # topk = match
+        _ ,topk = match.topk(self.selection_size, dim=-1, largest=False, sorted=True)
         # Batch-wise prompt selection
         if self._batchwise_selection:
             idx, counts = topk.unique(sorted=True, return_counts=True)
@@ -93,17 +93,18 @@ class Prompt(nn.Module):
         else:
             return counter
 
-class DualPrompt(nn.Module):
+class Ours(nn.Module):
     def __init__(self,
                  pos_g_prompt   : Iterable[int] = (0, 1),
                  len_g_prompt   : int   = 5,
                  pos_e_prompt   : Iterable[int] = (2,3,4),
-                 len_e_prompt   : int   = 20,
+                 len_e_prompt   : int   = 5,
                  prompt_func    : str   = 'prompt_tuning',
                  task_num       : int   = 10,
                  class_num      : int   = 100,
                  lambd          : float = 1.0,
                  backbone_name  : str   = None,
+                 selection_size = None,
                  **kwargs):
         super().__init__()
 
@@ -117,33 +118,42 @@ class DualPrompt(nn.Module):
         
         self.lambd      = lambd
         self.class_num  = class_num
+        
+        self.selection_size = selection_size
 
         self.add_module('backbone', timm.create_model(backbone_name, pretrained=True, num_classes=class_num))
         for name, param in self.backbone.named_parameters():
             param.requires_grad = False
         self.backbone.fc.weight.requires_grad = True
         self.backbone.fc.bias.requires_grad   = True
-
+        print("fc_weight")
+        print(self.backbone.fc.weight.shape)
         self.tasks = []
-
+       
         self.len_g_prompt = len_g_prompt
         self.len_e_prompt = len_e_prompt
         g_pool = 1
         e_pool = task_num
         self.g_length = len(pos_g_prompt) if pos_g_prompt else 0
         self.e_length = len(pos_e_prompt) if pos_e_prompt else 0
-        
         if prompt_func == 'prompt_tuning':
             self.prompt_func = self.prompt_tuning
             self.g_prompt = None if len(pos_g_prompt) == 0 else Prompt(g_pool, 1, self.g_length * self.len_g_prompt, self.backbone.num_features, batchwise_selection = False)
-            self.e_prompt = None if len(pos_e_prompt) == 0 else Prompt(e_pool, 1, self.e_length * self.len_e_prompt, self.backbone.num_features, batchwise_selection = False)
+            self.e_prompt = None if len(pos_e_prompt) == 0 else Prompt(e_pool, self.selection_size, self.e_length * self.len_e_prompt, self.backbone.num_features, batchwise_selection = False)
 
         elif prompt_func == 'prefix_tuning':
             self.prompt_func = self.prefix_tuning
             self.g_prompt = None if len(pos_g_prompt) == 0 else Prompt(g_pool, 1, 2 * self.g_length * self.len_g_prompt, self.backbone.num_features, batchwise_selection = False)
-            self.e_prompt = None if len(pos_e_prompt) == 0 else Prompt(e_pool, 1, 2 * self.e_length * self.len_e_prompt, self.backbone.num_features, batchwise_selection = False)
+            self.e_prompt = None if len(pos_e_prompt) == 0 else Prompt(e_pool, self.selection_size, 2 * self.e_length * self.len_e_prompt, self.backbone.num_features, batchwise_selection = False)
 
         else: raise ValueError('Unknown prompt_func: {}'.format(prompt_func))
+        
+        print("g_prompt")
+        print("g_prompt_prompts:",self.g_prompt.prompts.shape)
+        print("g_prompt_key:",self.g_prompt.key.shape)
+        print("e_prompt")
+        print("e_prompt_prompts:",self.e_prompt.prompts.shape)
+        print("e_prompt_key:",self.e_prompt.key.shape)
         
         self.task_num = task_num
         self.task_id = -1 # if _convert_train_task is not called, task will undefined
@@ -156,9 +166,9 @@ class DualPrompt(nn.Module):
 
         B, N, C = x.size()
         g_prompt = g_prompt.contiguous().view(B, self.g_length, self.len_g_prompt, C)
-        e_prompt = e_prompt.contiguous().view(B, self.e_length, self.len_e_prompt, C)
+        e_prompt = e_prompt.contiguous().view(B, self.e_length, self.len_e_prompt*self.selection_size, C)
         g_prompt = g_prompt + self.backbone.pos_embed[:,:1,:].unsqueeze(1).expand(B, self.g_length, self.len_g_prompt, C)
-        e_prompt = e_prompt + self.backbone.pos_embed[:,:1,:].unsqueeze(1).expand(B, self.e_length, self.len_e_prompt, C)
+        e_prompt = e_prompt + self.backbone.pos_embed[:,:1,:].unsqueeze(1).expand(B, self.e_length, self.len_e_prompt*self.selection_size, C)
 
         for n, block in enumerate(self.backbone.blocks):
             pos_g = ((self.pos_g_prompt.eq(n)).nonzero()).squeeze()
@@ -169,9 +179,8 @@ class DualPrompt(nn.Module):
             if pos_e.numel() != 0:
                 x = torch.cat((x, e_prompt[:, pos_e]), dim = 1)
             x = block(x)
-            x = x[:, :N, :]
+            # x = x[:, :N, :]
         return x
-    
     
     def prefix_tuning(self,
                       x        : torch.Tensor,
@@ -182,8 +191,11 @@ class DualPrompt(nn.Module):
         B, N, C = x.size()
         g_prompt = g_prompt.contiguous().view(B, 2 * self.g_length, self.len_g_prompt, C)
         e_prompt = e_prompt.contiguous().view(B, 2 * self.e_length, self.len_e_prompt, C)
+        # g_prompt = g_prompt + self.backbone.pos_embed[:,:1,:].unsqueeze(1).expand(B, 2 * self.g_length, self.len_g_prompt, C)
+        # e_prompt = e_prompt + self.backbone.pos_embed[:,:1,:].unsqueeze(1).expand(B, 2 * self.e_length, self.len_e_prompt, C)
 
         for n, block in enumerate(self.backbone.blocks):
+
             xq = block.norm1(x)
             xk = xq.clone()
             xv = xq.clone()
@@ -222,7 +234,8 @@ class DualPrompt(nn.Module):
 
         return x
 
-    def forward(self, inputs : torch.Tensor) :
+    def forward(self, inputs, only_feat = False) :
+        self.backbone.eval()
         with torch.no_grad():
             x = self.backbone.patch_embed(inputs)
             B, N, D = x.size()
@@ -235,45 +248,57 @@ class DualPrompt(nn.Module):
 
         if self.g_prompt is not None:
             g_p = self.g_prompt.prompts[0].expand(B, -1, -1)
+            # g_s, g_p = self.g_prompt(query)
         else:
             g_p = None
         if self.e_prompt is not None:
-                e_s, e_p = self.e_prompt(query)
+            # if self.training:
+            #     e_s = 1 - F.cosine_similarity(query.unsqueeze(1), self.e_prompt.key[self.task_id], dim = -1)
+            #     e_p = self.e_prompt.prompts[self.task_id].expand(B, -1, -1)
+            #     self.e_prompt.counter[self.task_id] += B
+            # else:
+            #     e_s, e_p = self.e_prompt(query,self.task_id+1)
+            e_s, e_p = self.e_prompt(query)
         else:
             e_p = None
             e_s = 0
 
         x = self.prompt_func(self.backbone.pos_drop(token_appended + self.backbone.pos_embed), g_p, e_p)
         x = self.backbone.norm(x)
-        x = self.backbone.fc(x[:, 0])
+        # feat = self.backbone.fc_norm(x)
+        
+        if only_feat:
+            return x
+        feat = self.backbone.fc_norm(x)
+        x = self.backbone.fc(feat[:, 0])
+
 
         self.similarity = e_s.mean()
         return x
 
     def convert_train_task(self, task : torch.Tensor, **kwargs):
     
-        task = torch.tensor(task,dtype=torch.float)
-        flag = -1
-        for n, t in enumerate(self.tasks):
-            if torch.equal(t, task):
-                flag = n
-                break
-        if flag == -1:
-            self.tasks.append(task)
-            self.task_id = len(self.tasks) - 1
-            if self.training:
-                if self.task_id != 0:
-                    with torch.no_grad():
-                        # self.e_prompt.prompts[self.task_id] = self.e_prompt.prompts[self.task_id - 1].detach().clone()
-                        # self.e_prompt.key[self.task_id] = self.e_prompt.key[self.task_id - 1].detach().clone()
-                        self.e_prompt.prompts[self.task_id] = self.e_prompt.prompts[self.task_id - 1].clone()
-                        self.e_prompt.key[self.task_id] = self.e_prompt.key[self.task_id - 1].clone()
-        else :
-            self.task_id = flag
+        # task = torch.tensor(task,dtype=torch.float)
+        # flag = -1
+        # for n, t in enumerate(self.tasks):
+        #     if torch.equal(t, task):
+        #         flag = n
+        #         break
+        # if flag == -1:
+        #     self.tasks.append(task)
+        #     self.task_id = len(self.tasks) - 1
+        #     if self.training:
+        #         if self.task_id != 0:
+        #             with torch.no_grad():
+        #                 # self.e_prompt.prompts[self.task_id] = self.e_prompt.prompts[self.task_id - 1].detach().clone()
+        #                 # self.e_prompt.key[self.task_id] = self.e_prompt.key[self.task_id - 1].detach().clone()
+        #                 self.e_prompt.prompts[self.task_id] = self.e_prompt.prompts[self.task_id - 1].clone()
+        #                 self.e_prompt.key[self.task_id] = self.e_prompt.key[self.task_id - 1].clone()
+        # else :
+        #     self.task_id = flag
 
-        # self.mask += -torch.inf
-        # self.mask[task] = 0
-        return
+        self.mask += -torch.inf
+        self.mask[task] = 0
         
     def get_count(self):
         return self.e_prompt.update()
@@ -281,3 +306,6 @@ class DualPrompt(nn.Module):
     def loss_fn(self, output, target):
         B, C = output.size()
         return F.cross_entropy(output, target) + self.lambd * self.similarity
+    
+    def _get_sim(self):
+        return self.lambd*self.similarity

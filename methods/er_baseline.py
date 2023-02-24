@@ -28,7 +28,7 @@ def cycle(iterable):
             yield i
 
 class ER(_Trainer):
-    def __init__(self, *args, **kwargs) -> None:
+    def __init__(self, *args, **kwargs):
         super(ER, self).__init__(*args, **kwargs)
 
     def online_step(self, images, labels, idx):

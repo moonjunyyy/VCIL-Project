@@ -22,7 +22,7 @@ logger = logging.getLogger()
 writer = SummaryWriter("tensorboard")
 
 class CLIB(ER):
-    def __init__(self, *args, **kwargs) -> None:
+    def __init__(self, *args, **kwargs):
         super(CLIB, self).__init__(*args, **kwargs)
         self.loss = torch.empty((0,))
         self.dropped_idx = []

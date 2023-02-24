@@ -27,7 +27,6 @@ import copy
 import time
 import datetime
 
-import gc
 import numpy as np
 import pandas as pd
 import torch
@@ -40,8 +39,6 @@ from methods._trainer import _Trainer
 
 from utils.data_loader import ImageDataset, StreamDataset, MemoryDataset, cutmix_data, get_statistics
 from utils.train_utils import select_model, select_optimizer, select_scheduler
-
-from utils.memory import MemoryBatchSampler, MemoryOrderedSampler
 
 import timm
 from timm.models import create_model
@@ -70,7 +67,7 @@ def vit_base_patch16_224(pretrained=False, **kwargs):
     model = _create_vision_transformer('vit_base_patch16_224', pretrained=pretrained, **model_kwargs)
     return model
 
-class L2P(ER):
+class L2P(_Trainer):
     def __init__(self, *args, **kwargs):
         super(L2P, self).__init__(*args, **kwargs)
         
@@ -83,33 +80,25 @@ class L2P(ER):
         # self.class_mask_dict={}
     
     def online_step(self, images, labels, idx):
-        self.add_new_class(labels)
+        self.add_new_class(labels[0])
         # train with augmented batches
         _loss, _acc, _iter = 0.0, 0.0, 0
-        for _ in range(int(self.online_iter)):
-            loss, acc = self.online_train([images.clone(), labels.clone()])
+        for image, label in zip(images, labels):
+            loss, acc = self.online_train([image.clone(), label.clone()])
             _loss += loss
             _acc += acc
             _iter += 1
-        del(images, labels)
-        gc.collect()
         return _loss / _iter, _acc / _iter
 
     def online_train(self, data):
         self.model.train()
         total_loss, total_correct, total_num_data = 0.0, 0.0, 0.0
         x, y = data
-            
-        # if len(self.memory) > 0 and self.memory_batchsize > 0:
-        #     memory_images, memory_labels = next(self.memory_provider)
-        #     x = torch.cat([x, memory_images], dim=0)
-        #     y = torch.cat([y, memory_labels], dim=0)
         for j in range(len(y)):
             y[j] = self.exposed_classes.index(y[j].item())
+
         x = x.to(self.device)
         y = y.to(self.device)
-
-        x = self.train_transform(x)
 
         self.optimizer.zero_grad()
         logit, loss = self.model_forward(x,y)
@@ -127,10 +116,18 @@ class L2P(ER):
         return total_loss, total_correct/total_num_data
 
     def model_forward(self, x, y):
-        with torch.cuda.amp.autocast(enabled=self.use_amp):
-            logit = self.model(x)
-            logit += self.mask
-            loss = self.criterion(logit, y)
+        do_cutmix = self.cutmix and np.random.rand(1) < 0.5
+        if do_cutmix:
+            x, labels_a, labels_b, lam = cutmix_data(x=x, y=y, alpha=1.0)
+            with torch.cuda.amp.autocast(enabled=self.use_amp):
+                logit = self.model(x)
+                logit += self.mask
+                loss = lam * self.criterion(logit, labels_a) + (1 - lam) * self.criterion(logit, labels_b)
+        else:
+            with torch.cuda.amp.autocast(enabled=self.use_amp):
+                logit = self.model(x)
+                logit += self.mask
+                loss = self.criterion(logit, y)
         return logit, loss
 
     def online_evaluate(self, test_loader):
