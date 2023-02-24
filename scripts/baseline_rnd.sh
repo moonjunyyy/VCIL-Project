@@ -1,6 +1,6 @@
 #!/bin/bash
 
-#SBATCH -J Baseline_Siblurry
+#SBATCH -J Baseline_Siblurry_with_Contrastive
 #SBATCH -p batch_agi
 #SBATCH -w agi2
 #SBATCH --nodes=1
@@ -81,7 +81,7 @@ do
     --note $NOTE --eval_period $EVAL_PERIOD --n_worker 4 --transforms autoaug --rnd_NM \
     --alpha 0. --gamma 0. --use_base_ce \
     --use_last_layer \
-    --no-use_contrastiv \
+    --use_contrastiv \
     --no-use_mask
     
 done

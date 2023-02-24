@@ -137,7 +137,7 @@ class Ours_test(_Trainer):
             # loss = self.criterion(logit, y.to(torch.int64))
             feat,mask = self.model.forward_features(x)
             ign_score,total_batch_g,cp_score = self.get_score(ref_head=ref_fc,feat=feat,y=y,mask=mask)
-            loss,logit = self._get_loss(x,y,ign_score,feat,mask,cp_score)
+            loss,logit = self._get_loss(x,y,ign_score,total_batch_g,mask,cp_score)
             
         return logit, loss
 
@@ -308,11 +308,11 @@ class Ours_test(_Trainer):
         
         return cp_loss
     
-    def _get_loss(self,x,y,str_score,ce_feat,mask,cp_score):
+    def _get_loss(self,x,y,str_score,total_batch_g,mask,cp_score):
         #*#########################################################################
         #* CE_loss (masking / Compensation)
         # ce_logit = self.model.forward_head(feat,mask,mass,similarity,topk)
-        ce_logit,_ = self.model(x)
+        ce_logit,ce_feat = self.model(x)
         # ce_logit = ce_logit + self.mask
         
         
@@ -332,9 +332,7 @@ class Ours_test(_Trainer):
         if str_score != None and self.alpha != 0.:
             if self.use_CP_CE:
                 ce_feat = ce_feat[:,0]*cp_score[:,None]
-                ign_feat = self.model.backbone.fc_norm(ce_feat)
-            else:
-                ign_feat = self.model.backbone.fc_norm(ce_feat[:,0])
+            ign_feat = self.model.backbone.fc_norm(ce_feat[:,0])
             ign_logit = self.model.backbone.fc(ign_feat)
             if self.use_mask:
                 ign_logit = ign_logit*mask
@@ -351,6 +349,14 @@ class Ours_test(_Trainer):
         else:   #* for the baseline
             # loss += torch.zeros(1,device=self.device)
             pass
+        
+        #*########################################################################
+        #* compensation_loss
+        # if self.charlie > 0.:
+        #     cp_loss = self.cp_loss(ce_feat,y,total_batch_g,mask)
+        #     cp_loss = cp_loss.mean()
+        # else:
+        #     cp_loss = torch.zeros(1,device=self.device)
         #*########################################################################
         
         # loss = ce_loss + self.alpha*str_loss

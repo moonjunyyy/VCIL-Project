@@ -81,6 +81,7 @@ class Ours(_Trainer):
         self.alpha  = kwargs.get("alpha")
         self.gamma  = kwargs.get("gamma")
         self.use_base_CE = kwargs.get("use_base_ce")
+        self.use_CP_CE = kwargs.get("use_compensation_ce")
         self.sample_criterion = nn.CrossEntropyLoss(reduction='none')
     
     def online_step(self, images, labels, idx):
@@ -135,8 +136,8 @@ class Ours(_Trainer):
             # logit = logit + self.mask
             # loss = self.criterion(logit, y.to(torch.int64))
             feat,mask = self.model.forward_features(x)
-            ign_score,total_batch_g = self.get_score(ref_head=ref_fc,feat=feat,y=y,mask=mask)
-            loss,logit = self._get_loss(x,y,ign_score,total_batch_g,mask)
+            ign_score,total_batch_g,cp_score = self.get_score(ref_head=ref_fc,feat=feat,y=y,mask=mask)
+            loss,logit = self._get_loss(x,y,ign_score,feat,mask,cp_score)
             
         return logit, loss
 
@@ -145,7 +146,8 @@ class Ours(_Trainer):
         correct_l = torch.zeros(self.n_classes)
         num_data_l = torch.zeros(self.n_classes)
         label = []
-
+        # ref_fc = copy.deepcopy(self.model.backbone.fc)
+        # ref_fc.eval()
         self.model.eval()
         with torch.no_grad():
             for i, data in enumerate(test_loader):
@@ -157,6 +159,10 @@ class Ours(_Trainer):
                 y = y.to(self.device)
 
                 logit,_ = self.model(x)
+                # if self.use_CP_CE:
+                #     feat,mask = self.model.forward_features(x)
+                #     ign_score,total_batch_g,cp_score = self.get_score(ref_head=ref_fc,feat=feat,y=y,mask=mask)
+                #     pass
                 logit = logit + self.mask
                 loss = self.sample_criterion(logit, y)
                 pred = torch.argmax(logit, dim=-1)
@@ -186,7 +192,18 @@ class Ours(_Trainer):
         else:
             self.scheduler.step()
             
-    def online_before_task(self,train_loader):
+    def online_before_task(self,task_id):
+        # head_wts =[]
+        # extractor_wts = []
+        # for name, param in self.model.named_parameters():
+        #     if "fc." in name:
+        #         head_wts.append(param)
+        #     else:
+        #         extractor_wts.append(param)
+        
+        # if task_id == 0:
+        #     self.optimizer = optim.Adam([{"params":extractor_wts}, {"params":head_wts,"weight_decay":1e-3}],
+        #                                  lr=self.lr)
         # Task-Free
         # self.model_without_ddp.convert_train_task(self.exposed_classes)
         pass
@@ -251,22 +268,25 @@ class Ours(_Trainer):
         ign_score = torch.max(1. - torch.cosine_similarity(sample_g,batch_g,dim=1),torch.zeros(1,device=self.device)) #B
         # str_score = self.min_max(str_score)
         
-        return ign_score,total_batch_g
+        return ign_score,total_batch_g,sample_g
     
 
-    def _get_drift(self,y,sample_g):
+    def _get_compensation(self,y,mask,sample_g):
         idx = torch.arange(len(y))
-        pre_wts = self.model.backbone.fc.weight[y[idx]].clone().detach()
-    #     with torch.no_grad():
-        post_wts = pre_wts-sample_g
-        drift = 1 - torch.cosine_similarity(pre_wts,post_wts,dim=1) # B
-        return drift
+        head_wts = self.model.backbone.fc.weight[y[idx]].clone().detach()
+        # post_wts = head_wts-sample_g
+        cp_score = torch.max(1 - torch.cosine_similarity(head_wts,sample_g,dim=1), torch.ones(1,device=self.device))# B
+        # print("cp_score")
+        # print(cp_score.shape)
+        # print(cp_score)
+        return cp_score
 
     def get_score(self,ref_head,feat,y,mask):
         ign_feat = self.model.backbone.fc_norm(feat[:,0].clone().detach())
         
-        ignore_score,total_batch_g = self._get_strength(ref_head,ign_feat,y,mask)
-        return ignore_score,total_batch_g
+        ignore_score,total_batch_g,sample_g = self._get_strength(ref_head,ign_feat,y,mask)
+        cp_score= self._get_compensation(y,mask,sample_g)
+        return ignore_score,total_batch_g,cp_score
     
     def str_loss(self,logit,y,str_score):
         log_p = F.log_softmax(logit,dim=1)
@@ -274,6 +294,7 @@ class Ours(_Trainer):
         loss = (str_score**self.gamma)*ce
         
         return loss
+    
     def cp_loss(self,feat,y,total_batch_g,mask):
         peeking_w = self.model.backbone.fc.weight - self.lr*self.beta*total_batch_g    #* B,dim
         
@@ -287,27 +308,41 @@ class Ours(_Trainer):
         
         return cp_loss
     
-    def _get_loss(self,x,y,str_score,total_batch_g,mask):
+    def _get_loss(self,x,y,str_score,ce_feat,mask,cp_score):
         #*#########################################################################
         #* CE_loss (masking / Compensation)
         # ce_logit = self.model.forward_head(feat,mask,mass,similarity,topk)
-        ce_logit,ce_feat = self.model(x)
-        ce_logit = ce_logit + self.mask
+        ce_logit,_ = self.model(x)
+        # ce_logit = ce_logit + self.mask
+        
+        
         if self.use_base_CE:
-            loss = (1. - self.alpha)*self.criterion(ce_logit, y.to(torch.int64))
+            loss = (1.-self.alpha)*self.criterion(ce_logit, y.to(torch.int64))
+        # elif self.use_CP_CE:
+        #     ce_feat = self.model.backbone.fc_norm(ce_feat[:,0]*cp_score[:,None])
+        #     ce_logit = self.model.backbone.fc(ce_feat)
+        #     if self.use_mask:
+        #         ce_logit = ce_logit*mask
+            loss = (1.-self.alpha)*self.criterion(ce_logit, y.to(torch.int64))
         else:
             loss = torch.zeros(1,device=self.device)
         
         #*#########################################################################
         #* strength_loss
         if str_score != None and self.alpha != 0.:
-            ign_feat = self.model.backbone.fc_norm(ce_feat[:,0])
+            if self.use_CP_CE:
+                ce_feat = ce_feat[:,0]*cp_score[:,None]
+                ign_feat = self.model.backbone.fc_norm(ce_feat)
+            else:
+                ign_feat = self.model.backbone.fc_norm(ce_feat[:,0])
             ign_logit = self.model.backbone.fc(ign_feat)
             if self.use_mask:
                 ign_logit = ign_logit*mask
             str_loss = self.str_loss(ign_logit+self.mask, y, str_score)
             loss += self.alpha*str_loss.mean()
         elif str_score == None and self.alpha != 0.:   #* non ignore
+            if self.use_CP_CE:
+                ce_feat = self.model.backbone.fc_norm(ce_feat[:,0]*cp_score[:,None])
             ign_feat = self.model.backbone.fc_norm(ce_feat[:,0])
             ign_logit = self.model.backbone.fc(ign_feat) + self.mask
             if self.use_mask:
@@ -316,14 +351,6 @@ class Ours(_Trainer):
         else:   #* for the baseline
             # loss += torch.zeros(1,device=self.device)
             pass
-        
-        #*########################################################################
-        #* compensation_loss
-        # if self.charlie > 0.:
-        #     cp_loss = self.cp_loss(ce_feat,y,total_batch_g,mask)
-        #     cp_loss = cp_loss.mean()
-        # else:
-        #     cp_loss = torch.zeros(1,device=self.device)
         #*########################################################################
         
         # loss = ce_loss + self.alpha*str_loss

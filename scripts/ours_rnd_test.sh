@@ -1,6 +1,6 @@
 #!/bin/bash
 
-#SBATCH -J Ours_rnd_test
+#SBATCH -J Ours_rnd_test_new
 #SBATCH -p batch_agi
 #SBATCH -w agi2
 #SBATCH --nodes=1
@@ -79,8 +79,8 @@ do
     --lr $LR --batchsize $BATCHSIZE \
     --memory_size $MEM_SIZE $GPU_TRANSFORM --online_iter $ONLINE_ITER --data_dir /local_datasets \
     --note $NOTE --eval_period $EVAL_PERIOD --n_worker 4 --transforms autoaug --rnd_NM \
-    --alpha 0. --gamma 0. --use_base_ce \
-    --use_last_layer \
+    --alpha 0.5 --gamma 2. --use_base_ce --use_compensation_ce \
+    --no-use_last_layer \
     --no-use_contrastiv \
     --no-use_mask
     
