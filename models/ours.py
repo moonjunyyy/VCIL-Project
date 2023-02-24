@@ -251,8 +251,6 @@ class Ours(nn.Module):
 
         if self.use_contrastiv:
             key_wise_distance = 1 - F.cosine_similarity(self.key.unsqueeze(1), self.key, dim=-1)
-            # self.similarity_loss = -((key_wise_distance / mass).exp().sum() / ((distance / mass[topk]).exp().sum() + (key_wise_distance / mass).exp().sum()) + 1e-6).log()
-            # self.similarity_loss = -(key_wise_distance / mass).mean() + (distance / mass[topk]).mean()
             self.similarity_loss = -((key_wise_distance[topk] / mass[topk]).exp().sum() / ((distance / mass[topk]).exp().sum() + (key_wise_distance[topk] / mass[topk]).exp().sum()) + 1e-6).log()
         else:
             self.similarity_loss = distance.mean()

@@ -311,18 +311,9 @@ class Ours(_Trainer):
     def _get_loss(self,x,y,str_score,ce_feat,mask,cp_score):
         #*#########################################################################
         #* CE_loss (masking / Compensation)
-        # ce_logit = self.model.forward_head(feat,mask,mass,similarity,topk)
         ce_logit,_ = self.model(x)
-        # ce_logit = ce_logit + self.mask
-        
         
         if self.use_base_CE:
-            loss = (1.-self.alpha)*self.criterion(ce_logit, y.to(torch.int64))
-        # elif self.use_CP_CE:
-        #     ce_feat = self.model.backbone.fc_norm(ce_feat[:,0]*cp_score[:,None])
-        #     ce_logit = self.model.backbone.fc(ce_feat)
-        #     if self.use_mask:
-        #         ce_logit = ce_logit*mask
             loss = (1.-self.alpha)*self.criterion(ce_logit, y.to(torch.int64))
         else:
             loss = torch.zeros(1,device=self.device)
