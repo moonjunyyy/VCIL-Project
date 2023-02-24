@@ -74,7 +74,6 @@ class Ours(_Trainer):
         super(Ours, self).__init__(**kwargs)
         
         self.use_mask    = kwargs.get("use_mask")
-        # self.use_dyna_exp    = kwargs.get("use_dyna_exp")
         self.use_contrastiv  = kwargs.get("use_contrastiv")
         self.use_last_layer  = kwargs.get("use_last_layer")
         
@@ -106,8 +105,6 @@ class Ours(_Trainer):
         ref_fc = copy.deepcopy(self.model.backbone.fc)
         ref_fc.eval()
         x, y = data
-        # for j in range(len(y)):
-        #     y[j] = self.exposed_classes.index(y[j].item())
 
         x = x.to(self.device)
         y = y.to(self.device)
@@ -132,12 +129,9 @@ class Ours(_Trainer):
 
     def model_forward(self, x, y, ref_fc):
         with torch.cuda.amp.autocast(enabled=self.use_amp):
-            # logit = self.model(x)
-            # logit = logit + self.mask
-            # loss = self.criterion(logit, y.to(torch.int64))
-            feat,mask = self.model.forward_features(x)
-            ign_score,total_batch_g,cp_score = self.get_score(ref_head=ref_fc,feat=feat,y=y,mask=mask)
-            loss,logit = self._get_loss(x,y,ign_score,feat,mask,cp_score)
+            feat, mask = self.model.forward_features(x)
+            ign_score, total_batch_g, cp_score = self.get_score(ref_head=ref_fc,feat=feat,y=y,mask=mask)
+            loss, logit = self._get_loss(x,y,ign_score,feat,mask,cp_score)
             
         return logit, loss
 
@@ -193,30 +187,14 @@ class Ours(_Trainer):
             self.scheduler.step()
             
     def online_before_task(self,task_id):
-        # head_wts =[]
-        # extractor_wts = []
-        # for name, param in self.model.named_parameters():
-        #     if "fc." in name:
-        #         head_wts.append(param)
-        #     else:
-        #         extractor_wts.append(param)
-        
-        # if task_id == 0:
-        #     self.optimizer = optim.Adam([{"params":extractor_wts}, {"params":head_wts,"weight_decay":1e-3}],
-        #                                  lr=self.lr)
-        # Task-Free
-        # self.model_without_ddp.convert_train_task(self.exposed_classes)
         pass
 
     def online_after_task(self, cur_iter):
-        # self.model_without_ddp.convert_train_task(self.exposed_classes)
         pass
 
     def reset_opt(self):
         self.optimizer = select_optimizer(self.opt_name, self.lr, self.model, True)
         self.scheduler = select_scheduler(self.sched_name, self.optimizer, self.lr_gamma)
-        
-    
     
     def _compute_grads_uncert(self,ref_head,feat,y,mask):
         sample_criterion = nn.CrossEntropyLoss(reduction='none')
