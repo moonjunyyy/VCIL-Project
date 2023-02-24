@@ -11,7 +11,6 @@ from models.vit import _create_vision_transformer
 from models.L2P import L2P
 from models.dualprompt import DualPrompt
 from models.ours import Ours
-from models.ours_total import Ours_total
 
 default_cfgs['vit_base_patch16_224'] = _cfg(
         url='https://storage.googleapis.com/vit_models/imagenet21k/ViT-B_16.npz',
@@ -113,7 +112,7 @@ def select_model(model_name, dataset, num_classes=None,selection_size=None):
         opt["depth"] = 12
     elif model_name == "DualPrompt":
         opt["depth"] = 12
-    elif model_name == "ours" or "ours_total":
+    elif model_name == "ours":
         opt["depth"] = 12
     else:
         raise NotImplementedError(

@@ -71,7 +71,6 @@ class CLIB(ER):
             _loss += loss
             _acc += acc
             _iter += 1
-        self.samplewise_loss_update()
         del(images, labels)
         gc.collect()
         return _loss / _iter, _acc / _iter
@@ -129,6 +128,7 @@ class CLIB(ER):
         self.scaler.step(self.optimizer)
         self.scaler.update()
 
+        self.samplewise_loss_update()
         self.update_schedule()
 
         total_loss += loss.item()
@@ -225,7 +225,6 @@ class CLIB(ER):
                     self.memory.update_loss_history(loss, self.loss, ema_ratio=ema_ratio, dropped_idx=self.memory_dropped_idx)
                     self.memory_dropped_idx = []
                 self.loss = loss
-
 
     def samplewise_loss_update(self, ema_ratio=0.90, batchsize=512):
         self.imp_update_counter += 1
