@@ -13,6 +13,7 @@ from .TinyImageNet import TinyImageNet
 from .MNIST import MNIST
 from .FashionMNIST import FashionMNIST
 from .OnlineIterDataset import OnlineIterDataset
+from .Imagenet_R import Imagenet_R
 from torchvision.datasets import CIFAR10, CIFAR100, ImageNet
 
 __all__ = [
@@ -27,6 +28,7 @@ __all__ = [
     "MNIST",
     "FashionMNIST",
     "ImageNet",
+    "Imagenet_R",
     # "grayCUB200",
     # "grayFlowers102",
     # "graySVHN",

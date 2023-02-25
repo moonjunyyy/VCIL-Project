@@ -199,28 +199,28 @@ class Ours(nn.Module):
         distance = 1 - F.cosine_similarity(query.unsqueeze(1), self.key, dim=-1)
         if self.use_contrastiv:
             mass = self.count + 1
-        else:
-            mass =1.
-        # if self.use_dyna_exp:
-        #     if self.training:
-        #         key_range   = 500 / (self.count + 1)
-        #         in_range    = distance < key_range
-        #         no_match    = (in_range.sum(-1) == 0).nonzero().squeeze()
-        #         if no_match.numel() != 0:
-        #             if no_match.numel() == 1:
-        #                 no_match = no_match.unsqueeze(0)
-        #             with torch.no_grad():
-        #                 self.count = torch.cat((self.count, torch.zeros(no_match.shape[0], device=self.count.device)), dim=0)
-        #                 self.key   = nn.Parameter(torch.cat((self.key, query[no_match].clone()), dim=0))
-        #                 self.mask  = nn.Parameter(torch.cat((self.mask, torch.zeros(no_match.shape[0], self.class_num, device=self.mask.device)), dim=0))
-        #                 self.e_prompts = nn.Parameter(torch.cat((self.e_prompts, self.e_prompts[distance[no_match].argmin(dim=-1)].clone()), dim=0))
-        #             distance = 1 - F.cosine_similarity(query.unsqueeze(1), self.key, dim=-1)
-        #             key_range   = 500 / (self.count + 1)
-        #             out_range   = distance > key_range
-        #             distance[out_range] = 2
-        #             if self.use_contrastiv:
-        #                 mass = self.count + 1
-        distance = distance * mass
+
+        if self.use_dyna_exp:
+            if self.training:
+                key_range   = 500 / (self.count + 1)
+                in_range    = distance < key_range
+                no_match    = (in_range.sum(-1) == 0).nonzero().squeeze()
+                if no_match.numel() != 0:
+                    if no_match.numel() == 1:
+                        no_match = no_match.unsqueeze(0)
+                    with torch.no_grad():
+                        self.count = torch.cat((self.count, torch.zeros(no_match.shape[0], device=self.count.device)), dim=0)
+                        self.key   = nn.Parameter(torch.cat((self.key, query[no_match].clone()), dim=0))
+                        self.mask  = nn.Parameter(torch.cat((self.mask, torch.zeros(no_match.shape[0], self.class_num, device=self.mask.device)), dim=0))
+                        self.e_prompts = nn.Parameter(torch.cat((self.e_prompts, self.e_prompts[distance[no_match].argmin(dim=-1)].clone()), dim=0))
+                    distance = 1 - F.cosine_similarity(query.unsqueeze(1), self.key, dim=-1)
+                    key_range   = 500 / (self.count + 1)
+                    out_range   = distance > key_range
+                    distance[out_range] = 2
+                    if self.use_contrastiv:
+                        mass = self.count + 1
+        if self.use_contrastiv:
+            distance = distance * mass
         topk = distance.topk(self.selection_size, dim=1, largest=False)[1]
         distance = distance[torch.arange(topk.size(0), device=topk.device).unsqueeze(1).repeat(1,self.selection_size), topk].squeeze().clone()
         e_prompts = self.e_prompts[topk].squeeze().clone()
