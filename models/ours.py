@@ -204,7 +204,7 @@ class Ours(nn.Module):
         
         if self.use_contrastiv:
             key_wise_distance = F.cosine_similarity(self.key.unsqueeze(1), self.key, dim=-1)
-            self.similarity_loss = -((key_wise_distance[topk] / mass[topk]).exp().sum() / ((distance / mass[topk]).exp().sum() + (key_wise_distance[topk] / mass[topk]).exp().sum()) + 1e-6).log()
+            self.similarity_loss = -((key_wise_distance[topk] / mass[topk]).exp().mean() / ((distance / mass[topk]).exp().mean() + (key_wise_distance[topk] / mass[topk]).exp().mean()) + 1e-6).log()
         else:
             self.similarity_loss = distance.mean()
 
@@ -219,16 +219,18 @@ class Ours(nn.Module):
         mask = torch.sigmoid(mask)*2.
         return feature, mask
     
-    def forward_head(self, feature : torch.Tensor, mask : torch.Tensor, **kwargs) -> torch.Tensor:
+    def forward_head(self, feature : torch.Tensor, **kwargs) -> torch.Tensor:
         x = self.backbone.fc_norm(feature)
         x = self.backbone.fc(x)
-        if self.use_mask:
-            x = x * mask
+        # if self.use_mask:
+        #     x = x * mask
         return x
     
     def forward(self, inputs : torch.Tensor, **kwargs) -> torch.Tensor:
         x, mask = self.forward_features(inputs, **kwargs)
-        x = self.forward_head(x, mask, **kwargs)
+        x = self.forward_head(x, **kwargs)
+        if self.use_mask:
+            x = x * mask
         return x
 
     def loss_fn(self, output, target):

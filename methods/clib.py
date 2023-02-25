@@ -232,15 +232,20 @@ class CLIB(ER):
             if len(self.memory) > 0:
                 self.model.eval()
                 with torch.no_grad():
-                    logit = []
-                    label = []
+                    # logit = []
+                    # label = []
+                    loss = []
                     with torch.cuda.amp.autocast(enabled=self.use_amp):
                         for i in range(0, math.ceil(len(self.memory) / batchsize)):
-                            logit.append(self.model(torch.cat(self.memory.images[i*batchsize:min((i+1)*batchsize, len(self.memory)):self.world_size]).to(self.device)) + self.mask)
-                            label.append(self.memory.labels[i*batchsize:min((i+1)*batchsize, len(self.memory)):self.world_size].to(self.device))
-                        logits = torch.cat(logit)
-                        labels = torch.cat(label)
-                    loss = F.cross_entropy(logits, labels.to(torch.int64), reduction='none')
+                            # logit.append(self.model(torch.cat(self.memory.images[i*batchsize:min((i+1)*batchsize, len(self.memory)):self.world_size]).to(self.device)) + self.mask)
+                            # label.append(self.memory.labels[i*batchsize:min((i+1)*batchsize, len(self.memory)):self.world_size].to(self.device))
+                        # logits = torch.cat(logit)
+                        # labels = torch.cat(label)
+                            logit = self.model(torch.cat(self.memory.images[i*batchsize:min((i+1)*batchsize, len(self.memory)):self.world_size]).to(self.device)) + self.mask
+                            label = self.memory.labels[i*batchsize:min((i+1)*batchsize, len(self.memory)):self.world_size].to(self.device)
+                            loss.append(F.cross_entropy(logit, label.to(torch.int64), reduction='none'))
+                    loss = torch.cat(loss)
+                    # loss = F.cross_entropy(logits, labels.to(torch.int64), reduction='none')
                     if self.distributed:
                         loss = torch.cat(self.all_gather(loss), dim=-1).flatten()
                     loss = loss.cpu()

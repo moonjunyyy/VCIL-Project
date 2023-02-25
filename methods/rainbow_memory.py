@@ -156,6 +156,8 @@ class RM(ER):
 
                 x = image.to(self.device)
                 y = label.to(self.device)
+                for j in range(len(y)):
+                    y[j] = self.exposed_classes.index(y[j].item())
                 x = self.train_transform(x)
 
                 self.optimizer.zero_grad()
@@ -164,20 +166,9 @@ class RM(ER):
                 _, preds = logit.topk(self.topk, 1, True, True)
 
                 self.scaler.scale(loss).backward()
-                # self.scaler.unscale_(self.optimizer)
-                # torch.nn.utils.clip_grad_norm_(self.model.parameters(), 10)
                 self.scaler.step(self.optimizer)
                 self.scaler.update()
-                # if self.use_amp:
-                #     self.scaler.scale(loss).backward()
-                #     self.scaler.unscale_(self.optimizer)
-                #     torch.nn.utils.clip_grad_norm_(self.model.parameters(), 10)
-                #     self.scaler.step(self.optimizer)
-                #     self.scaler.update()
-                # else:
-                #     loss.backward()
-                #     torch.nn.utils.clip_grad_norm_(self.model.parameters(), 10)
-                #     self.optimizer.step()
+                
                 total_loss += loss.item()
                 correct += torch.sum(preds == y.unsqueeze(1)).item()
                 num_data += y.size(0)

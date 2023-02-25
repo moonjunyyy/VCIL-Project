@@ -81,6 +81,8 @@ do
     --note $NOTE --eval_period $EVAL_PERIOD --n_worker 4 --transforms autoaug --rnd_NM \
     --use_last_layer \
     --use_contrastiv \
-    --use_mask
+    --use_mask \
+    --gamma 2.0 \
+    --alpha 0.5 \
     # --use_dyna_exp
 done

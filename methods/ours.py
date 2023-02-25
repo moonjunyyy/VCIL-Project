@@ -62,7 +62,6 @@ class Ours(_Trainer):
         self.gamma  = kwargs.get("gamma")
         self.use_base_CE = kwargs.get("use_base_ce")
         self.use_CP_CE = kwargs.get("use_compensation_ce")
-        self.sample_criterion = nn.CrossEntropyLoss(reduction='none')
     
     def online_step(self, images, labels, idx):
         self.add_new_class(labels)
@@ -109,7 +108,9 @@ class Ours(_Trainer):
     def model_forward(self, x, y):
         with torch.cuda.amp.autocast(enabled=self.use_amp):
             feature, mask = self.model_without_ddp.forward_features(x)
-            logit = self.model_without_ddp.forward_head(feature, mask)
+            logit = self.model_without_ddp.forward_head(feature)
+            if self.use_mask:
+                logit = logit * mask
             logit = logit + self.mask
             loss = self.loss_fn(feature, mask, y)
         return logit, loss
@@ -131,7 +132,7 @@ class Ours(_Trainer):
 
                 logit = self.model(x)
                 logit = logit + self.mask
-                loss = self.sample_criterion(logit, y)
+                loss = F.cross_entropy(logit, y)
                 pred = torch.argmax(logit, dim=-1)
                 _, preds = logit.topk(self.topk, 1, True, True)
                 total_correct += torch.sum(preds == y.unsqueeze(1)).item()
@@ -169,12 +170,12 @@ class Ours(_Trainer):
         self.optimizer = select_optimizer(self.opt_name, self.lr, self.model, True)
         self.scheduler = select_scheduler(self.sched_name, self.optimizer, self.lr_gamma)
 
-    def _compute_grads(self, feature, y, mask):
+    def _compute_grads(self, feature, y):
         head = copy.deepcopy(self.model_without_ddp.backbone.fc)
         head.zero_grad()
         logit = head(feature.detach())
-        if self.use_mask:
-            logit = logit * mask
+        # if self.use_mask:
+        #     logit = logit * mask
         logit = logit + self.mask
         
         sample_loss = F.cross_entropy(logit, y, reduction='none')
@@ -204,19 +205,25 @@ class Ours(_Trainer):
         cps_score = torch.max(1 - torch.cosine_similarity(head_w, sample_g, dim=1), torch.ones(1, device=self.device)) # B
         return cps_score
 
-    def _get_score(self, feat, y, mask):
-        sample_grad, batch_grad = self._compute_grads(feat, y, mask)
+    def _get_score(self, feat, y):
+        sample_grad, batch_grad = self._compute_grads(feat, y)
         ign_score = self._get_ignore(sample_grad, batch_grad)
         cps_score = self._get_compensation(y, sample_grad)
         return ign_score, cps_score
     
     def loss_fn(self, feature, mask, y):
-        ign_score, cps_score = self._get_score(feature, y, mask)
-        
-        logit = self.model_without_ddp.forward_head(feature * cps_score.unsqueeze(1), mask)
+        logit = self.model_without_ddp.forward_head(feature)
+        logit = logit * mask
+        logit = logit + self.mask
+        mask_loss = F.cross_entropy(logit, y)
+
+        ign_score, cps_score = self._get_score(feature, y)
+        logit = self.model_without_ddp.forward_head(feature * cps_score.unsqueeze(1))
+        logit = logit * mask
+        logit = logit + self.mask
         loss = F.cross_entropy(logit, y, reduction='none')
         loss = (ign_score ** self.gamma) * loss
-        return loss.mean() + self.model_without_ddp.get_similarity_loss()
+        return mask_loss + loss.mean() + self.model_without_ddp.get_similarity_loss()
     
     def report_training(self, sample_num, train_loss, train_acc):
         print(

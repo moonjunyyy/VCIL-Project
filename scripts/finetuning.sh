@@ -44,22 +44,17 @@ SEEDS="4 5"
 VIT="True"
 OPT="adam"
 
-if [ "$DATASET" == "cifar10" ]; then
-    MEM_SIZE=500 ONLINE_ITER=1
-    MODEL_NAME="vit" EVAL_PERIOD=100
-    BATCHSIZE=16; LR=3e-4 OPT_NAME=$OPT SCHED_NAME="default" MEMORY_EPOCH=256
-
-elif [ "$DATASET" == "cifar100" ]; then
+if [ "$DATASET" == "cifar100" ]; then
     MEM_SIZE=2000 ONLINE_ITER=3
-    MODEL_NAME="vit" EVAL_PERIOD=1000
+    MODEL_NAME="vit_finetune" EVAL_PERIOD=1000
     BATCHSIZE=64; LR=3e-4 OPT_NAME=$OPT SCHED_NAME="default" MEMORY_EPOCH=256
 
 elif [ "$DATASET" == "tinyimagenet" ]; then
     MEM_SIZE=4000 ONLINE_ITER=3
-    MODEL_NAME="vit" EVAL_PERIOD=100
+    MODEL_NAME="vit_finetune" EVAL_PERIOD=100
     BATCHSIZE=32; LR= OPT_NAME=$OPT SCHED_NAME="default" MEMORY_EPOCH=256
 
-elif [ "$DATASET" == "imagenet" ]; then
+elif [ "$DATASET" == "imagenet-r" ]; then
     N_TASKS=10 MEM_SIZE=20000 ONLINE_ITER=0.25
     MODEL_NAME="vit" EVAL_PERIOD=1000
     BATCHSIZE=256; LR= OPT_NAME=$OPT SCHED_NAME="multistep" MEMORY_EPOCH=100
