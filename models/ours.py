@@ -181,7 +181,7 @@ class Ours(nn.Module):
             x = x + block.drop_path2(block.ls2(block.mlp(block.norm2(x))))
         return x
 
-    def forward(self, inputs : torch.Tensor, **kwargs) -> torch.Tensor:
+    def forward(self, inputs : torch.Tensor, **kwargs):
         self.backbone.eval()
         with torch.no_grad():
             x = self.backbone.patch_embed(inputs)
@@ -197,30 +197,11 @@ class Ours(nn.Module):
             query = query[:, 0]
 
         distance = 1 - F.cosine_similarity(query.unsqueeze(1), self.key, dim=-1)
+        
         if self.use_contrastiv:
             mass = self.count + 1
-
-        if self.use_dyna_exp:
-            if self.training:
-                key_range   = 500 / (self.count + 1)
-                in_range    = distance < key_range
-                no_match    = (in_range.sum(-1) == 0).nonzero().squeeze()
-                if no_match.numel() != 0:
-                    if no_match.numel() == 1:
-                        no_match = no_match.unsqueeze(0)
-                    with torch.no_grad():
-                        self.count = torch.cat((self.count, torch.zeros(no_match.shape[0], device=self.count.device)), dim=0)
-                        self.key   = nn.Parameter(torch.cat((self.key, query[no_match].clone()), dim=0))
-                        self.mask  = nn.Parameter(torch.cat((self.mask, torch.zeros(no_match.shape[0], self.class_num, device=self.mask.device)), dim=0))
-                        self.e_prompts = nn.Parameter(torch.cat((self.e_prompts, self.e_prompts[distance[no_match].argmin(dim=-1)].clone()), dim=0))
-                    distance = 1 - F.cosine_similarity(query.unsqueeze(1), self.key, dim=-1)
-                    key_range   = 500 / (self.count + 1)
-                    out_range   = distance > key_range
-                    distance[out_range] = 2
-                    if self.use_contrastiv:
-                        mass = self.count + 1
-        if self.use_contrastiv:
             distance = distance * mass
+            
         topk = distance.topk(self.selection_size, dim=1, largest=False)[1]
         distance = distance[torch.arange(topk.size(0), device=topk.device).unsqueeze(1).repeat(1,self.selection_size), topk].squeeze().clone()
         e_prompts = self.e_prompts[topk].squeeze().clone()
@@ -239,15 +220,9 @@ class Ours(nn.Module):
         x = self.backbone.fc(x)
 
         if self.use_mask:
-            # self.mask_l1_loss = mask.abs().mean()
             mask = torch.sigmoid(mask)
             mask_prob = mask / mask.sum(dim=1, keepdim=True)
-            # self.mask_entropy_loss = (- mask_prob * (mask_prob + 1e-5).log()).mean()
-            # self.mask_entropy_loss = (- mask * (mask - 1)).mean()
             mask = mask * 2.0
-            # self.mask_limit_loss = (mask.sum() - 10).abs()
-        # else:
-        #     self.mask_entropy_loss = 0
 
         if self.use_contrastiv:
             key_wise_distance = 1 - F.cosine_similarity(self.key.unsqueeze(1), self.key, dim=-1)
@@ -293,25 +268,12 @@ class Ours(nn.Module):
 
         x = self.prompt_func(self.backbone.pos_drop(token_appended + self.backbone.pos_embed), g_prompts, e_prompts)
         feat = self.backbone.norm(x)
-        
-        # if self.use_mask:
         mask = torch.sigmoid(mask)*2.
             
-        
         return feat,mask
     
     def loss_fn(self, output, target):
-        # B, C = output.size()
-        # smooth_target = torch.zeros_like(output)
-        # smooth_target[:self.exposed_classes] = .1 / self.exposed_classes
-        # smooth_target[torch.arange(target.size(0), device=target.device),target] += .9
-        # return F.cross_entropy(output[:,:self.exposed_classes], smooth_target[:,:self.exposed_classes]) + self.similarity_loss #+ self.mask_entropy_loss # + self.mask_limit_loss
         return F.cross_entropy(output, target) + self.similarity_loss #+ self.mask_entropy_loss # + self.mask_limit_loss
-
-    # def convert_train_task(self, task : torch.Tensor, **kwargs):
-    #     self.mask += -torch.inf
-    #     self.mask[task] = 0
-    #     return
 
     def get_count(self):
         return self.prompt.update()
