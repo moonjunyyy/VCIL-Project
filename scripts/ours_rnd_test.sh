@@ -1,6 +1,6 @@
 #!/bin/bash
 
-#SBATCH -J Ours_rnd_test_new
+#SBATCH -J Ours_Mem_500
 #SBATCH -p batch_agi
 #SBATCH -w agi2
 #SBATCH --nodes=1
@@ -31,7 +31,7 @@ conda --version
 python --version
 
 # CIL CONFIG
-NOTE="Ours_rnd_test" # Short description of the experiment. (WARNING: logs/results with the same note will be overwritten!)
+NOTE="Ours_rnd_test_M" # Short description of the experiment. (WARNING: logs/results with the same note will be overwritten!)
 MODE="ours_test"
 DATASET="cifar100" # cifar10, cifar100, tinyimagenet, imagenet
 N_TASKS=5
@@ -49,7 +49,7 @@ if [ "$DATASET" == "cifar10" ]; then
     BATCHSIZE=16; LR=3e-4 OPT_NAME="adam" SCHED_NAME="default"
 
 elif [ "$DATASET" == "cifar100" ]; then
-    MEM_SIZE=2000 ONLINE_ITER=3
+    MEM_SIZE=500 ONLINE_ITER=3
     MODEL_NAME="ours" EVAL_PERIOD=1000
     BATCHSIZE=64; LR=5e-3 OPT_NAME="adam" SCHED_NAME="default"
 
@@ -81,7 +81,7 @@ do
     --note $NOTE --eval_period $EVAL_PERIOD --n_worker 4 --transforms autoaug --rnd_NM \
     --alpha 0.5 --gamma 2. --use_base_ce --use_compensation_ce \
     --no-use_last_layer \
-    --no-use_contrastiv \
-    --no-use_mask
+    --use_contrastiv \
+    --use_mask
     
 done

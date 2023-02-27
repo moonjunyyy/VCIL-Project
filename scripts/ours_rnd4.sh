@@ -1,6 +1,6 @@
 #!/bin/bash
 
-#SBATCH -J Ours_Siblurry_C_M_I_Comp_a_0.5_G1
+#SBATCH -J Ours_Siblurry_Baseline_with_Contrastive
 #SBATCH -p batch_agi
 #SBATCH -w agi2
 #SBATCH --nodes=1
@@ -39,7 +39,7 @@ N=50
 M=10
 GPU_TRANSFORM="--gpu_transform"
 USE_AMP="--use_amp"
-SEEDS="1 2 3 4 5"
+SEEDS="5"
 # SEEDS="1"
 
 
@@ -79,9 +79,9 @@ do
     --lr $LR --batchsize $BATCHSIZE \
     --memory_size $MEM_SIZE $GPU_TRANSFORM --online_iter $ONLINE_ITER --data_dir /local_datasets \
     --note $NOTE --eval_period $EVAL_PERIOD --n_worker 4 --transforms autoaug --rnd_NM \
-    --alpha 0.5 --gamma 1. --use_base_ce --use_compensation_ce \
+    --alpha 0. --gamma 0. --use_base_ce --no-use_compensation_ce \
     --no-use_last_layer \
     --use_contrastiv \
-    --use_mask
+    --no-use_mask
     
 done

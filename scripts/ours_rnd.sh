@@ -1,6 +1,6 @@
 #!/bin/bash
 
-#SBATCH -J Ours_Siblurry_C_M_I_Comp_a_0.5
+#SBATCH -J Ours_Siblurry_Reproduce
 #SBATCH -p batch_agi
 #SBATCH -w agi2
 #SBATCH --nodes=1
@@ -31,7 +31,7 @@ conda --version
 python --version
 
 # CIL CONFIG
-NOTE="Ours_Siblurry_C_M_I_Comp_a_0.5" # Short description of the experiment. (WARNING: logs/results with the same note will be overwritten!)
+NOTE="Ours_Siblurry_Reprodue" # Short description of the experiment. (WARNING: logs/results with the same note will be overwritten!)
 MODE="ours"
 DATASET="cifar100" # cifar10, cifar100, tinyimagenet, imagenet
 N_TASKS=5

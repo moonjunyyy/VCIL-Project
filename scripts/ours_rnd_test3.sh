@@ -1,6 +1,6 @@
 #!/bin/bash
 
-#SBATCH -J Ours_Siblurry_C_M
+#SBATCH -J Ours_rnd_test_M_I_Comp_G1
 #SBATCH -p batch_agi
 #SBATCH -w agi2
 #SBATCH --nodes=1
@@ -31,8 +31,8 @@ conda --version
 python --version
 
 # CIL CONFIG
-NOTE="Ours_Siblurry_C_M" # Short description of the experiment. (WARNING: logs/results with the same note will be overwritten!)
-MODE="ours"
+NOTE="Ours_rnd_test_M_I_Comp_G2" # Short description of the experiment. (WARNING: logs/results with the same note will be overwritten!)
+MODE="ours_test"
 DATASET="cifar100" # cifar10, cifar100, tinyimagenet, imagenet
 N_TASKS=5
 N=50
@@ -79,9 +79,9 @@ do
     --lr $LR --batchsize $BATCHSIZE \
     --memory_size $MEM_SIZE $GPU_TRANSFORM --online_iter $ONLINE_ITER --data_dir /local_datasets \
     --note $NOTE --eval_period $EVAL_PERIOD --n_worker 4 --transforms autoaug --rnd_NM \
-    --alpha 0. --gamma 0. --use_base_ce --no-use_compensation_ce \
+    --alpha 0.5 --gamma 1. --use_base_ce --use_compensation_ce \
     --no-use_last_layer \
-    --use_contrastiv \
+    --no-use_contrastiv \
     --use_mask
     
 done

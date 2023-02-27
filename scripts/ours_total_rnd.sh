@@ -1,6 +1,6 @@
 #!/bin/bash
 
-#SBATCH -J Ours_total_Siblurry_C_M_I_a_0.5_G_2
+#SBATCH -J Ours_total_Siblurry_C_M_I_Comp_New_Last
 #SBATCH -p batch_agi
 #SBATCH -w agi2
 #SBATCH --nodes=1
@@ -31,7 +31,7 @@ conda --version
 python --version
 
 # CIL CONFIG
-NOTE="Ours_total_Siblurry_C_M_a_0.5_G_2" # Short description of the experiment. (WARNING: logs/results with the same note will be overwritten!)
+NOTE="Ours_total_Siblurry_C_M_I_Comp_New_Last" # Short description of the experiment. (WARNING: logs/results with the same note will be overwritten!)
 MODE="Ours_total"
 DATASET="cifar100" # cifar10, cifar100, tinyimagenet, imagenet
 N_TASKS=5
@@ -50,7 +50,7 @@ if [ "$DATASET" == "cifar10" ]; then
 
 elif [ "$DATASET" == "cifar100" ]; then
     MEM_SIZE=2000 ONLINE_ITER=3
-    MODEL_NAME="ours" EVAL_PERIOD=1000
+    MODEL_NAME="ours_total" EVAL_PERIOD=1000
     BATCHSIZE=64; LR=5e-3 OPT_NAME="adam" SCHED_NAME="default"
 
 
@@ -79,7 +79,7 @@ do
     --lr $LR --batchsize $BATCHSIZE \
     --memory_size $MEM_SIZE $GPU_TRANSFORM --online_iter $ONLINE_ITER --data_dir /local_datasets \
     --note $NOTE --eval_period $EVAL_PERIOD --n_worker 4 --transforms autoaug --rnd_NM \
-    --alpha 0.5 --gamma 2. --use_base_ce --no-use_compensation_ce \
+    --alpha 0.5 --gamma 2. --use_base_ce --use_compensation_ce \
     --no-use_last_layer \
     --use_contrastiv \
     --use_mask

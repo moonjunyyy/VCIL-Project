@@ -40,13 +40,13 @@ from methods._trainer import _Trainer
 
 from utils.data_loader import ImageDataset, StreamDataset, MemoryDataset, cutmix_data, get_statistics
 from utils.train_utils import select_model, select_optimizer, select_scheduler
-
+from utils.memory import MemoryBatchSampler
 import timm
 from timm.models import create_model
 from timm.models.registry import register_model
 from timm.models.vision_transformer import _cfg, default_cfgs
 from models.vit import _create_vision_transformer
-
+import torch.distributed as dist
 
 logger = logging.getLogger()
 writer = SummaryWriter("tensorboard")
@@ -90,14 +90,55 @@ class Ours_test(_Trainer):
         _loss, _acc, _iter = 0.0, 0.0, 0
         for j in range(len(labels)):
             labels[j] = self.exposed_classes.index(labels[j].item())
+        self.memory_sampler  = MemoryBatchSampler(self.memory, self.memory_batchsize, self.temp_batchsize * self.online_iter * self.world_size)
+        self.memory_dataloader   = DataLoader(self.train_dataset, batch_size=self.memory_batchsize, sampler=self.memory_sampler, num_workers=0)
+        self.memory_provider     = iter(self.memory_dataloader)
         for _ in range(int(self.online_iter)):
             loss, acc = self.online_train([images.clone(), labels.clone()])
             _loss += loss
             _acc += acc
             _iter += 1
+        self.update_memory(idx, labels)
         del(images, labels)
         gc.collect()
         return _loss / _iter, _acc / _iter
+    
+    def update_memory(self, sample, label):
+        # Update memory
+        if self.distributed:
+            sample = torch.cat(self.all_gather(sample.to(self.device)))
+            label = torch.cat(self.all_gather(label.to(self.device)))
+            sample = sample.cpu()
+            label = label.cpu()
+        idx = []
+        if self.is_main_process():
+            for lbl in label:
+                self.seen += 1
+                if len(self.memory) < self.memory_size:
+                    idx.append(-1)
+                else:
+                    j = torch.randint(0, self.seen, (1,)).item()
+                    if j < self.memory_size:
+                        idx.append(j)
+                    else:
+                        idx.append(self.memory_size)
+        # Distribute idx to all processes
+        if self.distributed:
+            idx = torch.tensor(idx).to(self.device)
+            size = torch.tensor([idx.size(0)]).to(self.device)
+            dist.broadcast(size, 0)
+            if dist.get_rank() != 0:
+                idx = torch.zeros(size.item(), dtype=torch.long).to(self.device)
+            dist.barrier() # wait for all processes to reach this point
+            dist.broadcast(idx, 0)
+            idx = idx.cpu().tolist()
+        # idx = torch.cat(self.all_gather(torch.tensor(idx).to(self.device))).cpu().tolist()
+        for i, index in enumerate(idx):
+            if len(self.memory) >= self.memory_size:
+                if index < self.memory_size:
+                    self.memory.replace_data([sample[i], self.exposed_classes[label[i].item()]], index)
+            else:
+                self.memory.replace_data([sample[i], self.exposed_classes[label[i].item()]])
 
     def online_train(self, data):
         self.model.train()
@@ -106,8 +147,12 @@ class Ours_test(_Trainer):
         ref_fc = copy.deepcopy(self.model.backbone.fc)
         ref_fc.eval()
         x, y = data
-        # for j in range(len(y)):
-        #     y[j] = self.exposed_classes.index(y[j].item())
+        if len(self.memory) > 0 and self.memory_batchsize > 0:
+            memory_images, memory_labels = next(self.memory_provider)
+            for i in range(len(memory_labels)):
+                memory_labels[i] = self.exposed_classes.index(memory_labels[i].item())
+            x = torch.cat([x, memory_images], dim=0)
+            y = torch.cat([y, memory_labels], dim=0)
 
         x = x.to(self.device)
         y = y.to(self.device)
@@ -311,18 +356,9 @@ class Ours_test(_Trainer):
     def _get_loss(self,x,y,str_score,ce_feat,mask,cp_score):
         #*#########################################################################
         #* CE_loss (masking / Compensation)
-        # ce_logit = self.model.forward_head(feat,mask,mass,similarity,topk)
         ce_logit,_ = self.model(x)
-        # ce_logit = ce_logit + self.mask
-        
         
         if self.use_base_CE:
-            loss = (1.-self.alpha)*self.criterion(ce_logit, y.to(torch.int64))
-        # elif self.use_CP_CE:
-        #     ce_feat = self.model.backbone.fc_norm(ce_feat[:,0]*cp_score[:,None])
-        #     ce_logit = self.model.backbone.fc(ce_feat)
-        #     if self.use_mask:
-        #         ce_logit = ce_logit*mask
             loss = (1.-self.alpha)*self.criterion(ce_logit, y.to(torch.int64))
         else:
             loss = torch.zeros(1,device=self.device)

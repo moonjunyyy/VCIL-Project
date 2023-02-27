@@ -1,6 +1,6 @@
 #!/bin/bash
 
-#SBATCH -J Ours_Siblurry_C_M
+#SBATCH -J Ours_Siblurry_ImageNet_R
 #SBATCH -p batch_agi
 #SBATCH -w agi2
 #SBATCH --nodes=1
@@ -31,9 +31,9 @@ conda --version
 python --version
 
 # CIL CONFIG
-NOTE="Ours_Siblurry_C_M" # Short description of the experiment. (WARNING: logs/results with the same note will be overwritten!)
+NOTE="Ours_Siblurry_ImageNet_R" # Short description of the experiment. (WARNING: logs/results with the same note will be overwritten!)
 MODE="ours"
-DATASET="cifar100" # cifar10, cifar100, tinyimagenet, imagenet
+DATASET="imagenet-r" # cifar10, cifar100, tinyimagenet, imagenet-r
 N_TASKS=5
 N=50
 M=10
@@ -55,14 +55,14 @@ elif [ "$DATASET" == "cifar100" ]; then
 
 
 elif [ "$DATASET" == "tinyimagenet" ]; then
-    MEM_SIZE=4000 ONLINE_ITER=3
-    MODEL_NAME="ours" EVAL_PERIOD=100
-    BATCHSIZE=32; LR=3e-4 OPT_NAME="adam" SCHED_NAME="default"
-
-elif [ "$DATASET" == "imagenet" ]; then
-    N_TASKS=10 MEM_SIZE=20000 ONLINE_ITER=0.25
+    MEM_SIZE=2000 ONLINE_ITER=3
     MODEL_NAME="ours" EVAL_PERIOD=1000
-    BATCHSIZE=256; LR=3e-4 OPT_NAME="adam" SCHED_NAME="default"
+    BATCHSIZE=64; LR=5e-3 OPT_NAME="adam" SCHED_NAME="default"
+
+elif [ "$DATASET" == "imagenet-r" ]; then
+    MEM_SIZE=2000 ONLINE_ITER=3
+    MODEL_NAME="ours" EVAL_PERIOD=1000
+    BATCHSIZE=64; LR=5e-3 OPT_NAME="adam" SCHED_NAME="default"
 
 else
     echo "Undefined setting"
@@ -79,7 +79,7 @@ do
     --lr $LR --batchsize $BATCHSIZE \
     --memory_size $MEM_SIZE $GPU_TRANSFORM --online_iter $ONLINE_ITER --data_dir /local_datasets \
     --note $NOTE --eval_period $EVAL_PERIOD --n_worker 4 --transforms autoaug --rnd_NM \
-    --alpha 0. --gamma 0. --use_base_ce --no-use_compensation_ce \
+    --alpha 0.5 --gamma 2. --use_base_ce --use_compensation_ce \
     --no-use_last_layer \
     --use_contrastiv \
     --use_mask

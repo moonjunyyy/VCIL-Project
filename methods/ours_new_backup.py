@@ -137,7 +137,7 @@ class Ours_test(_Trainer):
             # loss = self.criterion(logit, y.to(torch.int64))
             feat,mask = self.model.forward_features(x)
             ign_score,total_batch_g,cp_score = self.get_score(ref_head=ref_fc,feat=feat,y=y,mask=mask)
-            loss,logit = self._get_loss(x,y,ign_score,total_batch_g,mask,cp_score)
+            loss,logit = self._get_loss(x,y,ign_score,feat,mask,cp_score)
             
         return logit, loss
 
@@ -159,10 +159,6 @@ class Ours_test(_Trainer):
                 y = y.to(self.device)
 
                 logit,_ = self.model(x)
-                # if self.use_CP_CE:
-                #     feat,mask = self.model.forward_features(x)
-                #     ign_score,total_batch_g,cp_score = self.get_score(ref_head=ref_fc,feat=feat,y=y,mask=mask)
-                #     pass
                 logit = logit + self.mask
                 loss = self.sample_criterion(logit, y)
                 pred = torch.argmax(logit, dim=-1)
@@ -193,23 +189,9 @@ class Ours_test(_Trainer):
             self.scheduler.step()
             
     def online_before_task(self,task_id):
-        # head_wts =[]
-        # extractor_wts = []
-        # for name, param in self.model.named_parameters():
-        #     if "fc." in name:
-        #         head_wts.append(param)
-        #     else:
-        #         extractor_wts.append(param)
-        
-        # if task_id == 0:
-        #     self.optimizer = optim.Adam([{"params":extractor_wts}, {"params":head_wts,"weight_decay":1e-3}],
-        #                                  lr=self.lr)
-        # Task-Free
-        # self.model_without_ddp.convert_train_task(self.exposed_classes)
         pass
 
     def online_after_task(self, cur_iter):
-        # self.model_without_ddp.convert_train_task(self.exposed_classes)
         pass
 
     def reset_opt(self):
@@ -251,34 +233,16 @@ class Ours_test(_Trainer):
         
         return uncert, sample_g, batch_g, total_batch_g
     
-    def min_max(self,x):
-        min = x.min()
-        max = x.max()
-        denom = max-min
-        minmax= []
-        for i in range(len(x)):
-            minmax.append( (x[i] -min) / denom)
-        minmax = torch.tensor(minmax,device=self.device)+1.
-        if True in torch.isnan(minmax):
-            minmax=None
-        return minmax
-    
     def _get_strength(self,ref_head,feat,y,mask):
         uncert, sample_g, batch_g,total_batch_g = self._compute_grads_uncert(ref_head,feat,y,mask)
         ign_score = torch.max(1. - torch.cosine_similarity(sample_g,batch_g,dim=1),torch.zeros(1,device=self.device)) #B
-        # str_score = self.min_max(str_score)
         
         return ign_score,total_batch_g,sample_g
-    
 
     def _get_compensation(self,y,mask,sample_g):
         idx = torch.arange(len(y))
         head_wts = self.model.backbone.fc.weight[y[idx]].clone().detach()
-        # post_wts = head_wts-sample_g
         cp_score = torch.max(1 - torch.cosine_similarity(head_wts,sample_g,dim=1), torch.ones(1,device=self.device))# B
-        # print("cp_score")
-        # print(cp_score.shape)
-        # print(cp_score)
         return cp_score
 
     def get_score(self,ref_head,feat,y,mask):
@@ -292,38 +256,28 @@ class Ours_test(_Trainer):
         log_p = F.log_softmax(logit,dim=1)
         ce = F.nll_loss(log_p,y,reduction='none')
         loss = (str_score**self.gamma)*ce
-        
+         
         return loss
     
-    def cp_loss(self,feat,y,total_batch_g,mask):
-        peeking_w = self.model.backbone.fc.weight - self.lr*self.beta*total_batch_g    #* B,dim
+    # def cp_loss(self,feat,y,total_batch_g,mask):
+    #     peeking_w = self.model.backbone.fc.weight - self.lr*self.beta*total_batch_g    #* B,dim
         
-        peeking_feat = self.model.backbone.fc_norm(feat[:,0])
+    #     peeking_feat = self.model.backbone.fc_norm(feat[:,0])
         
-        #todo bias 까지 고려하는것도 해보기!
-        peeking_logit = F.linear(peeking_feat,weight=peeking_w,bias=None)
-        if self.use_mask:
-            peeking_logit = peeking_logit*mask
-        cp_loss = self.sample_criterion(peeking_logit+self.mask,y)
+    #     #todo bias 까지 고려하는것도 해보기!
+    #     peeking_logit = F.linear(peeking_feat,weight=peeking_w,bias=None)
+    #     if self.use_mask:
+    #         peeking_logit = peeking_logit*mask
+    #     cp_loss = self.sample_criterion(peeking_logit+self.mask,y)
         
-        return cp_loss
+    #     return cp_loss
     
-    def _get_loss(self,x,y,str_score,total_batch_g,mask,cp_score):
+    def _get_loss(self,x,y,str_score,ce_feat,mask,cp_score):
         #*#########################################################################
         #* CE_loss (masking / Compensation)
-        # ce_logit = self.model.forward_head(feat,mask,mass,similarity,topk)
-        ce_logit,ce_feat = self.model(x)
-        # ce_logit = ce_logit + self.mask
-        
-        
+        ce_logit,_ = self.model(x)
         if self.use_base_CE:
-            loss = (1.-self.alpha)*self.criterion(ce_logit, y.to(torch.int64))
-        # elif self.use_CP_CE:
-        #     ce_feat = self.model.backbone.fc_norm(ce_feat[:,0]*cp_score[:,None])
-        #     ce_logit = self.model.backbone.fc(ce_feat)
-        #     if self.use_mask:
-        #         ce_logit = ce_logit*mask
-            loss = (1.-self.alpha)*self.criterion(ce_logit, y.to(torch.int64))
+            loss = self.criterion(ce_logit, y.to(torch.int64))
         else:
             loss = torch.zeros(1,device=self.device)
         
@@ -332,7 +286,9 @@ class Ours_test(_Trainer):
         if str_score != None and self.alpha != 0.:
             if self.use_CP_CE:
                 ce_feat = ce_feat[:,0]*cp_score[:,None]
-            ign_feat = self.model.backbone.fc_norm(ce_feat[:,0])
+                ign_feat = self.model.backbone.fc_norm(ce_feat)
+            else:
+                ign_feat = self.model.backbone.fc_norm(ce_feat[:,0])
             ign_logit = self.model.backbone.fc(ign_feat)
             if self.use_mask:
                 ign_logit = ign_logit*mask
@@ -340,23 +296,15 @@ class Ours_test(_Trainer):
             loss += self.alpha*str_loss.mean()
         elif str_score == None and self.alpha != 0.:   #* non ignore
             if self.use_CP_CE:
-                ce_feat = self.model.backbone.fc_norm(ce_feat[:,0]*cp_score[:,None])
+                # ce_feat = self.model.backbone.fc_norm(ce_feat[:,0]*cp_score[:,None])
+                ce_feat = ce_feat[:,0]*cp_score[:,None]
             ign_feat = self.model.backbone.fc_norm(ce_feat[:,0])
-            ign_logit = self.model.backbone.fc(ign_feat) + self.mask
+            ign_logit = self.model.backbone.fc(ign_feat)
             if self.use_mask:
                 ign_logit = ign_logit*mask
             loss += self.alpha*self.sample_criterion(ign_logit+self.mask, y).mean()
         else:   #* for the baseline
-            # loss += torch.zeros(1,device=self.device)
             pass
-        
-        #*########################################################################
-        #* compensation_loss
-        # if self.charlie > 0.:
-        #     cp_loss = self.cp_loss(ce_feat,y,total_batch_g,mask)
-        #     cp_loss = cp_loss.mean()
-        # else:
-        #     cp_loss = torch.zeros(1,device=self.device)
         #*########################################################################
         
         # loss = ce_loss + self.alpha*str_loss
@@ -377,5 +325,4 @@ class Ours_test(_Trainer):
         super().setup_distributed_model()
         self.model_without_ddp.use_mask = self.use_mask
         self.model_without_ddp.use_contrastiv = self.use_contrastiv
-        # self.model_without_ddp.use_dyna_exp = self.use_dyna_exp
         self.model_without_ddp.use_last_layer = self.use_last_layer
