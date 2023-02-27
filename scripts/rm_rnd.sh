@@ -6,7 +6,7 @@
 #SBATCH --nodes=1
 #SBATCH --gres=gpu:1
 #SBATCH --cpus-per-gpu=4
-#SBATCH --mem-per-gpu=20G
+#SBATCH --mem-per-gpu=16G
 #SBATCH --time=14-0
 #SBATCH -o %x_%j.log
 
@@ -41,7 +41,7 @@ N=50
 M=10
 GPU_TRANSFORM="--gpu_transform"
 # USE_AMP="--use_amp"
-SEEDS="1 2 3 4 5"
+SEEDS="2 3 4 5"
 OPT="adam"
 
 if [ "$DATASET" == "cifar10" ]; then
@@ -60,7 +60,7 @@ elif [ "$DATASET" == "tinyimagenet" ]; then
     MODEL_NAME="resnet34" EVAL_PERIOD=100
     BATCHSIZE=32; LR=0.05 OPT_NAME=$OPT SCHED_NAME="cos" MEMORY_EPOCH=256
 
-elif [ "$DATASET" == "imagenet" ]; then
+elif [ "$DATASET" == "imagenet-r" ]; then
     N_TASKS=10 MEM_SIZE=20000 ONLINE_ITER=0.25
     MODEL_NAME="resnet34" EVAL_PERIOD=1000
     BATCHSIZE=256; LR=0.05 OPT_NAME=$OPT SCHED_NAME="multistep" MEMORY_EPOCH=100

@@ -170,12 +170,12 @@ class Ours(_Trainer):
         self.optimizer = select_optimizer(self.opt_name, self.lr, self.model, True)
         self.scheduler = select_scheduler(self.sched_name, self.optimizer, self.lr_gamma)
 
-    def _compute_grads(self, feature, y):
+    def _compute_grads(self, feature, y, mask):
         head = copy.deepcopy(self.model_without_ddp.backbone.fc)
         head.zero_grad()
         logit = head(feature.detach())
-        # if self.use_mask:
-        #     logit = logit * mask
+        if self.use_mask:
+            logit = logit * mask.clone().detach()
         logit = logit + self.mask
         
         sample_loss = F.cross_entropy(logit, y, reduction='none')
@@ -197,33 +197,35 @@ class Ours(_Trainer):
         return sample_grad, batch_grad
     
     def _get_ignore(self, sample_grad, batch_grad):
-        ign_score = torch.max(1. - torch.cosine_similarity(sample_grad, batch_grad, dim=1), torch.zeros(1, device=self.device)) #B
+        # ign_score = torch.max(1. - torch.cosine_similarity(sample_grad, batch_grad, dim=1), torch.zeros(1, device=self.device)) #B
+        ign_score = (1. - torch.cosine_similarity(sample_grad, batch_grad, dim=1)) #B
         return ign_score
 
     def _get_compensation(self, y, sample_g):
         head_w = self.model_without_ddp.backbone.fc.weight[y].clone().detach()
-        cps_score = torch.max(1 - torch.cosine_similarity(head_w, sample_g, dim=1), torch.ones(1, device=self.device)) # B
+        # cps_score = torch.max(1 - torch.cosine_similarity(head_w, sample_g, dim=1), torch.ones(1, device=self.device)) # B
+        cps_score = (1. - torch.cosine_similarity(head_w, -sample_g, dim=1)) #B
         return cps_score
 
-    def _get_score(self, feat, y):
-        sample_grad, batch_grad = self._compute_grads(feat, y)
+    def _get_score(self, feat, y, mask):
+        sample_grad, batch_grad = self._compute_grads(feat, y, mask)
         ign_score = self._get_ignore(sample_grad, batch_grad)
         cps_score = self._get_compensation(y, sample_grad)
         return ign_score, cps_score
     
     def loss_fn(self, feature, mask, y):
-        logit = self.model_without_ddp.forward_head(feature)
-        logit = logit * mask
-        logit = logit + self.mask
-        mask_loss = F.cross_entropy(logit, y)
+        # logit = self.model_without_ddp.forward_head(feature)
+        # logit = logit * mask
+        # logit = logit + self.mask
+        # mask_loss = F.cross_entropy(logit, y)
 
-        ign_score, cps_score = self._get_score(feature, y)
-        logit = self.model_without_ddp.forward_head(feature * cps_score.unsqueeze(1))
+        ign_score, cps_score = self._get_score(feature, y, mask)
+        logit = self.model_without_ddp.forward_head(feature * (1 + cps_score.unsqueeze(1)**self.alpha))
         logit = logit * mask
         logit = logit + self.mask
         loss = F.cross_entropy(logit, y, reduction='none')
-        loss = (ign_score ** self.gamma) * loss
-        return mask_loss + loss.mean() + self.model_without_ddp.get_similarity_loss()
+        loss = (1 + ign_score ** self.gamma) * loss
+        return loss.mean() + self.model_without_ddp.get_similarity_loss()
     
     def report_training(self, sample_num, train_loss, train_acc):
         print(

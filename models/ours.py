@@ -176,7 +176,6 @@ class Ours(nn.Module):
         return x
 
     def forward_features(self, inputs : torch.Tensor, **kwargs) -> torch.Tensor:
-
         self.backbone.eval()
         with torch.no_grad():
             x = self.backbone.patch_embed(inputs)
@@ -203,8 +202,8 @@ class Ours(nn.Module):
         mask = self.mask[topk].mean(1).squeeze().clone()
         
         if self.use_contrastiv:
-            key_wise_distance = F.cosine_similarity(self.key.unsqueeze(1), self.key, dim=-1)
-            self.similarity_loss = -((key_wise_distance[topk] / mass[topk]).exp().mean() / ((distance / mass[topk]).exp().mean() + (key_wise_distance[topk] / mass[topk]).exp().mean()) + 1e-6).log()
+            key_wise_distance = 1 - F.cosine_similarity(self.key.unsqueeze(1), self.key, dim=-1)
+            self.similarity_loss = -((key_wise_distance[topk] / mass[topk]).exp().sum() / ((distance / mass[topk]).exp().sum() + (key_wise_distance[topk] / mass[topk]).exp().sum()) + 1e-6).log()
         else:
             self.similarity_loss = distance.mean()
 

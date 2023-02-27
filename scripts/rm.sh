@@ -25,8 +25,8 @@ master_addr=$(scontrol show hostnames "$SLURM_JOB_NODELIST" | head -n 1)
 export MASTER_ADDR=$master_addr
 echo "MASTER_ADDR="$MASTER_ADDR
 
-source /data/keonhee/init.sh
-conda activate torch38gpu
+source /data/moonjunyyy/init.sh
+conda activate iblurry
 
 conda --version
 python --version
@@ -35,7 +35,7 @@ python --version
 NOTE="RM_iblurry_cifar100_N50_M10" # Short description of the experiment. (WARNING: logs/results with the same note will be overwritten!)
 
 MODE="rm"
-DATASET="tinyimagenet" # cifar10, cifar100, tinyimagenet, imagenet
+DATASET="imagenet-r" # cifar10, cifar100, tinyimagenet, imagenet
 N_TASKS=5
 N=50
 M=10
@@ -44,25 +44,20 @@ GPU_TRANSFORM="--gpu_transform"
 SEEDS="1 2 3 4 5"
 OPT="adam"
 
-if [ "$DATASET" == "cifar10" ]; then
-    MEM_SIZE=500 ONLINE_ITER=1
-    MODEL_NAME="resnet18" EVAL_PERIOD=100
-    BATCHSIZE=16; LR=0.05 OPT_NAME=$OPT SCHED_NAME="cos" MEMORY_EPOCH=256
-
-elif [ "$DATASET" == "cifar100" ]; then
-    MEM_SIZE=2000 ONLINE_ITER=3
+if [ "$DATASET" == "cifar100" ]; then
+    MEM_SIZE=500 ONLINE_ITER=3
     MODEL_NAME="vit" EVAL_PERIOD=1000
     BATCHSIZE=64; LR=0.05 OPT_NAME=$OPT SCHED_NAME="cos" MEMORY_EPOCH=256
 
 elif [ "$DATASET" == "tinyimagenet" ]; then
-    MEM_SIZE=2000 ONLINE_ITER=3
+    MEM_SIZE=500 ONLINE_ITER=3
     MODEL_NAME="vit" EVAL_PERIOD=1000
     BATCHSIZE=64; LR=0.05 OPT_NAME=$OPT SCHED_NAME="cos" MEMORY_EPOCH=256
 
-elif [ "$DATASET" == "imagenet" ]; then
-    N_TASKS=10 MEM_SIZE=20000 ONLINE_ITER=0.25
-    MODEL_NAME="resnet34" EVAL_PERIOD=1000
-    BATCHSIZE=256; LR=0.05 OPT_NAME=$OPT SCHED_NAME="multistep" MEMORY_EPOCH=100
+elif [ "$DATASET" == "imagenet-r" ]; then
+    MEM_SIZE=2000 ONLINE_ITER=3
+    MODEL_NAME="vit" EVAL_PERIOD=1000
+    BATCHSIZE=64; LR=0.05 OPT_NAME=$OPT SCHED_NAME="cos" MEMORY_EPOCH=256
 
 else
     echo "Undefined setting"

@@ -32,7 +32,7 @@ python --version
 # CIL CONFIG
 NOTE="CLIB_ViT_iblurry_CIFAR100_N50_M10_RND" # Short description of the experiment. (WARNING: logs/results with the same note will be overwritten!)
 MODE="clib"
-DATASET="imagenet-r" # cifar10, cifar100, tinyimagenet, imagenet
+DATASET="tinyimagenet" # cifar10, cifar100, tinyimagenet, imagenet
 N_TASKS=5
 N=50
 M=10
@@ -40,23 +40,18 @@ GPU_TRANSFORM="--gpu_transform"
 USE_AMP="--use_amp"
 SEEDS="5"
 
-if [ "$DATASET" == "cifar10" ]; then
-    MEM_SIZE=500 ONLINE_ITER=1
-    MODEL_NAME="resnet18" EVAL_PERIOD=100
-    BATCHSIZE=16; LR=3e-4 OPT_NAME="adam" SCHED_NAME="default" IMP_UPDATE_PERIOD=1
-
-elif [ "$DATASET" == "cifar100" ]; then
+if [ "$DATASET" == "cifar100" ]; then
     MEM_SIZE=500 ONLINE_ITER=3
     MODEL_NAME="vit" EVAL_PERIOD=1000
     BATCHSIZE=64; LR=3e-4 OPT_NAME="adam" SCHED_NAME="default" IMP_UPDATE_PERIOD=1
 
 elif [ "$DATASET" == "tinyimagenet" ]; then
-    MEM_SIZE=2000 ONLINE_ITER=3
+    MEM_SIZE=500 ONLINE_ITER=3
     MODEL_NAME="vit" EVAL_PERIOD=1000
     BATCHSIZE=64; LR=3e-4 OPT_NAME="adam" SCHED_NAME="default" IMP_UPDATE_PERIOD=1
 
 elif [ "$DATASET" == "imagenet-r" ]; then
-    MEM_SIZE=2000 ONLINE_ITER=3
+    MEM_SIZE=500 ONLINE_ITER=3
     MODEL_NAME="vit" EVAL_PERIOD=1000
     BATCHSIZE=64; LR=3e-4 OPT_NAME="adam" SCHED_NAME="default" IMP_UPDATE_PERIOD=1
 

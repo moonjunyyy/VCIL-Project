@@ -347,9 +347,9 @@ class _Trainer():
 
             print(f"======== Summary =======")
             print(f"A_auc {A_auc} | A_avg {A_avg} | A_last {A_last} | F_last {F_last}")
-            for i in range(len(cls_acc)):
-                print(f"Task {i}")
-                print(cls_acc[i])
+            # for i in range(len(cls_acc)):
+            #     print(f"Task {i}")
+            #     print(cls_acc[i])
             print(f"="*24)
         
     def add_new_class(self, class_name):
