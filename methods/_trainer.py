@@ -239,7 +239,7 @@ class _Trainer():
             self.setup_for_distributed(self.is_main_process())
         else:
             pass
-
+        
         if self.rnd_seed is not None:
             random.seed(self.rnd_seed)
             np.random.seed(self.rnd_seed)
@@ -271,9 +271,9 @@ class _Trainer():
             if self.mode == "joint" and task_id > 0:
                 return
             
-            if task_id ==0 and not self.debug:
-                print()
-                self.train_data_config(self.n_tasks,self.train_dataset,self.train_sampler)
+            # if task_id ==0 and not self.debug:
+            #     print()
+            #     self.train_data_config(self.n_tasks,self.train_dataset,self.train_sampler)
             
             print("\n" + "#" * 50)
             print(f"# Task {task_id} iteration")
@@ -281,8 +281,6 @@ class _Trainer():
             print("[2-1] Prepare a datalist for the current task")
             
             self.train_sampler.set_task(task_id)
-            # self.online_before_task(task_id)
-
             self.online_before_task(task_id)          
             for i, (images, labels, idx) in enumerate(self.train_dataloader):
                 if self.debug and (i+1) * self.temp_batchsize >= 500:
@@ -416,13 +414,6 @@ class _Trainer():
         __builtin__.print = print
 
     def report_training(self, sample_num, train_loss, train_acc):
-        
-        # #todo =======================================================
-        # sample_num,train_loss,train_acc=self.sync_data(sample_num,train_loss,train_acc)
-        # #todo =======================================================
-        
-        # self.writer.add_scalar(f"train/loss", train_loss, sample_num)
-        # self.writer.add_scalar(f"train/acc", train_acc, sample_num)
         print(
             f"Train | Sample # {sample_num} | train_loss {train_loss:.4f} | train_acc {train_acc:.4f} | "
             f"lr {self.optimizer.param_groups[0]['lr']:.6f} | "
@@ -432,11 +423,6 @@ class _Trainer():
         )
 
     def report_test(self, sample_num, avg_loss, avg_acc):
-        # #todo =======================================================
-        # sample_num,avg_loss,avg_acc=self.sync_data(sample_num,avg_loss,avg_acc)
-        # #todo =======================================================
-        # self.writer.add_scalar(f"test/loss", avg_loss, sample_num)
-        # self.writer.add_scalar(f"test/acc", avg_acc, sample_num)
         print(
             f"Test | Sample # {sample_num} | test_loss {avg_loss:.4f} | test_acc {avg_acc:.4f} | "
         )
