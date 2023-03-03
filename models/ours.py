@@ -45,6 +45,7 @@ class Ours(nn.Module):
                  class_num      : int   = 100,
                  lambd          : float = 1.0,
                  use_mask       : bool  = True,
+                #  use_dyna_exp   : bool  = False,
                  use_contrastiv : bool  = False,
                  use_last_layer : bool  = True,
                  backbone_name  : str   = None,
@@ -58,6 +59,7 @@ class Ours(nn.Module):
         self.class_num   = class_num
         self.task_num    = task_num
         self.use_mask    = use_mask
+        # self.use_dyna_exp    = use_dyna_exp
         self.use_contrastiv  = use_contrastiv
         self.use_last_layer  = use_last_layer
         self.selection_size  = selection_size
@@ -72,6 +74,7 @@ class Ours(nn.Module):
         self.register_buffer('pos_g_prompt', torch.tensor(pos_g_prompt, dtype=torch.int64))
         self.register_buffer('pos_e_prompt', torch.tensor(pos_e_prompt, dtype=torch.int64))
         self.register_buffer('similarity', torch.zeros(1))
+        # self.register_buffer('mask', torch.zeros(class_num))
         
         self.len_g_prompt = len_g_prompt
         self.len_e_prompt = len_e_prompt
@@ -81,6 +84,7 @@ class Ours(nn.Module):
         e_pool = task_num
 
         self.register_buffer('count', torch.zeros(e_pool))
+        # self.register_buffer('key', torch.randn(e_pool, self.backbone.embed_dim))
         self.key     = nn.Parameter(torch.randn(e_pool, self.backbone.embed_dim))
         self.mask    = nn.Parameter(torch.zeros(e_pool, self.class_num) - 1)
 
@@ -104,6 +108,8 @@ class Ours(nn.Module):
     def set_exposed_classes(self, classes):
         len_classes = self.exposed_classes
         self.exposed_classes = len(classes)
+        # self.mask.data[:,len_classes:self.exposed_classes] = 0
+        # self.mask.data[:, self.exposed_classes:] = -torch.inf
     
     def prompt_tuning(self,
                       x        : torch.Tensor,
@@ -175,8 +181,60 @@ class Ours(nn.Module):
             x = x + block.drop_path2(block.ls2(block.mlp(block.norm2(x))))
         return x
 
-    def forward_features(self, inputs : torch.Tensor, **kwargs) -> torch.Tensor:
+    def forward(self, inputs : torch.Tensor, **kwargs):
+        self.backbone.eval()
+        with torch.no_grad():
+            x = self.backbone.patch_embed(inputs)
+            B, N, D = x.size()
 
+            cls_token = self.backbone.cls_token.expand(B, -1, -1)
+            token_appended = torch.cat((cls_token, x), dim=1)
+            x = self.backbone.pos_drop(token_appended + self.backbone.pos_embed)
+            query = x.clone()
+            for n, block in enumerate(self.backbone.blocks):
+                if n == len(self.backbone.blocks) - 1 and not self.use_last_layer: break
+                query = block(query)
+            query = query[:, 0]
+
+        distance = 1 - F.cosine_similarity(query.unsqueeze(1), self.key, dim=-1)
+        
+        if self.use_contrastiv:
+            mass = self.count + 1
+            distance = distance * mass
+            
+        topk = distance.topk(self.selection_size, dim=1, largest=False)[1]
+        distance = distance[torch.arange(topk.size(0), device=topk.device).unsqueeze(1).repeat(1,self.selection_size), topk].squeeze().clone()
+        e_prompts = self.e_prompts[topk].squeeze().clone()
+        mask = self.mask[topk].mean(1).squeeze().clone()
+
+        g_prompts = self.g_prompts[0].repeat(B, 1, 1)
+        if self.training:
+            with torch.no_grad():
+                num = topk.view(-1).bincount(minlength=self.e_prompts.size(0))
+                self.count += num
+
+        x = self.prompt_func(self.backbone.pos_drop(token_appended + self.backbone.pos_embed), g_prompts, e_prompts)
+        feat = self.backbone.norm(x)
+        # x = x.mean(dim=1).squeeze()
+        x = self.backbone.fc_norm(feat[:, 0])
+        x = self.backbone.fc(x)
+
+        if self.use_mask:
+            mask = torch.sigmoid(mask)
+            # mask_prob = mask / mask.sum(dim=1, keepdim=True)
+            mask = mask * 2.0
+
+        if self.use_contrastiv:
+            key_wise_distance = 1 - F.cosine_similarity(self.key.unsqueeze(1), self.key, dim=-1)
+            self.similarity_loss = -((key_wise_distance[topk] / mass[topk]).exp().sum() / ((distance / mass[topk]).exp().sum() + (key_wise_distance[topk] / mass[topk]).exp().sum()) + 1e-6).log()
+        else:
+            self.similarity_loss = distance.mean()
+
+        if self.use_mask:
+            x = x * mask
+        return x,feat
+    
+    def forward_features(self, inputs : torch.Tensor, **kwargs) -> torch.Tensor:
         self.backbone.eval()
         with torch.no_grad():
             x = self.backbone.patch_embed(inputs)
@@ -195,18 +253,12 @@ class Ours(nn.Module):
         if self.use_contrastiv:
             mass = self.count + 1
         else:
-            mass = 1.
-        scaled_distance = distance * mass
-        topk = scaled_distance.topk(self.selection_size, dim=1, largest=False)[1]
+            mass=1.
+        distance = distance * mass
+        topk = distance.topk(self.selection_size, dim=1, largest=False)[1]
         distance = distance[torch.arange(topk.size(0), device=topk.device).unsqueeze(1).repeat(1,self.selection_size), topk].squeeze().clone()
         e_prompts = self.e_prompts[topk].squeeze().clone()
         mask = self.mask[topk].mean(1).squeeze().clone()
-        
-        if self.use_contrastiv:
-            key_wise_distance = F.cosine_similarity(self.key.unsqueeze(1), self.key, dim=-1)
-            self.similarity_loss = -((key_wise_distance[topk] / mass[topk]).exp().mean() / ((distance / mass[topk]).exp().mean() + (key_wise_distance[topk] / mass[topk]).exp().mean()) + 1e-6).log()
-        else:
-            self.similarity_loss = distance.mean()
 
         g_prompts = self.g_prompts[0].repeat(B, 1, 1)
         if self.training:
@@ -215,29 +267,13 @@ class Ours(nn.Module):
                 self.count += num
 
         x = self.prompt_func(self.backbone.pos_drop(token_appended + self.backbone.pos_embed), g_prompts, e_prompts)
-        feature = self.backbone.norm(x)[:, 0]
+        feat = self.backbone.norm(x)
         mask = torch.sigmoid(mask)*2.
-        return feature, mask
+            
+        return feat,mask
     
-    def forward_head(self, feature : torch.Tensor, **kwargs) -> torch.Tensor:
-        x = self.backbone.fc_norm(feature)
-        x = self.backbone.fc(x)
-        # if self.use_mask:
-        #     x = x * mask
-        return x
-    
-    def forward(self, inputs : torch.Tensor, **kwargs) -> torch.Tensor:
-        x, mask = self.forward_features(inputs, **kwargs)
-        x = self.forward_head(x, **kwargs)
-        if self.use_mask:
-            x = x * mask
-        return x
-
     def loss_fn(self, output, target):
-        return F.cross_entropy(output, target) + self.similarity_loss
-
-    def get_similarity_loss(self):
-        return self.similarity_loss
+        return F.cross_entropy(output, target) + self.similarity_loss #+ self.mask_entropy_loss # + self.mask_limit_loss
 
     def get_count(self):
         return self.prompt.update()
