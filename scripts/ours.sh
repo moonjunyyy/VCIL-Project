@@ -41,7 +41,7 @@ N=50
 M=10
 GPU_TRANSFORM="--gpu_transform"
 USE_AMP="--use_amp"
-SEEDS="1 2 3 4 5"
+SEEDS="1"
 
 
 if [ "$DATASET" == "cifar10" ]; then
@@ -52,7 +52,7 @@ if [ "$DATASET" == "cifar10" ]; then
 elif [ "$DATASET" == "cifar100" ]; then
     MEM_SIZE=2000 ONLINE_ITER=3
     MODEL_NAME="ours" EVAL_PERIOD=1000
-    BATCHSIZE=64; LR=1e-2 OPT_NAME="adam" SCHED_NAME="default"
+    BATCHSIZE=64; LR=5e-3 OPT_NAME="adam" SCHED_NAME="default"
 
 elif [ "$DATASET" == "tinyimagenet" ]; then
     MEM_SIZE=2000 ONLINE_ITER=3
@@ -81,8 +81,8 @@ do
     --note $NOTE --eval_period $EVAL_PERIOD --n_worker 4 --transforms autoaug --rnd_NM \
     --use_contrastiv \
     --use_mask \
-    --gamma 1. \
-    --alpha 1. \
+    --gamma 0.51 \
+    --alpha 0.5 \
     # --use_last_layer \
     # --use_dyna_exp
 done

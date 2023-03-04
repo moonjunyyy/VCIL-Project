@@ -57,7 +57,7 @@ elif [ "$DATASET" == "tinyimagenet" ]; then
 elif [ "$DATASET" == "imagenet-r" ]; then
     MEM_SIZE=2000 ONLINE_ITER=3
     MODEL_NAME="vit" EVAL_PERIOD=1000
-    BATCHSIZE=256; LR=3e-4 OPT_NAME=$OPT SCHED_NAME="default" MEMORY_EPOCH=256
+    BATCHSIZE=64; LR=3e-4 OPT_NAME=$OPT SCHED_NAME="default" MEMORY_EPOCH=256
 
 else
     echo "Undefined setting"

@@ -41,7 +41,6 @@ M=10
 GPU_TRANSFORM="--gpu_transform"
 USE_AMP="--use_amp"
 SEEDS="1 2 3 4 5"
-VIT="True"
 OPT="adam"
 
 if [ "$DATASET" == "cifar100" ]; then
@@ -57,16 +56,11 @@ elif [ "$DATASET" == "tinyimagenet" ]; then
 elif [ "$DATASET" == "imagenet-r" ]; then
     MEM_SIZE=2000 ONLINE_ITER=3
     MODEL_NAME="vit_finetune" EVAL_PERIOD=1000
-    BATCHSIZE=256; LR=3e-4 OPT_NAME=$OPT SCHED_NAME="default" MEMORY_EPOCH=256
+    BATCHSIZE=64; LR=3e-4 OPT_NAME=$OPT SCHED_NAME="default" MEMORY_EPOCH=256
 
 else
     echo "Undefined setting"
     exit 1
-fi
-
-if [ "$VIT" == "True" ]; then
-    echo "Vit is used"
-    MODEL_NAME="vit"
 fi
 
 for RND_SEED in $SEEDS

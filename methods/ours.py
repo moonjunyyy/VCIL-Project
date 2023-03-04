@@ -198,19 +198,19 @@ class Ours(_Trainer):
     
     def _get_ignore(self, sample_grad, batch_grad):
         # ign_score = torch.max(1. - torch.cosine_similarity(sample_grad, batch_grad, dim=1), torch.zeros(1, device=self.device)) #B
-        ign_score = (1. - torch.cosine_similarity(sample_grad, batch_grad, dim=1)) #B
+        ign_score = (1. - torch.cosine_similarity(sample_grad, batch_grad, dim=1))#B
         return ign_score
 
-    def _get_compensation(self, y, sample_g):
+    def _get_compensation(self, y, feat):
         head_w = self.model_without_ddp.backbone.fc.weight[y].clone().detach()
         # cps_score = torch.max(1 - torch.cosine_similarity(head_w, sample_g, dim=1), torch.ones(1, device=self.device)) # B
-        cps_score = (1. - torch.cosine_similarity(head_w, -sample_g, dim=1)) #B
+        cps_score = (1. - torch.cosine_similarity(head_w, feat, dim=1) + 0.5)#B
         return cps_score
 
     def _get_score(self, feat, y, mask):
         sample_grad, batch_grad = self._compute_grads(feat, y, mask)
         ign_score = self._get_ignore(sample_grad, batch_grad)
-        cps_score = self._get_compensation(y, sample_grad)
+        cps_score = self._get_compensation(y, feat)
         return ign_score, cps_score
     
     def loss_fn(self, feature, mask, y):
@@ -220,7 +220,7 @@ class Ours(_Trainer):
         # mask_loss = F.cross_entropy(logit, y)
 
         ign_score, cps_score = self._get_score(feature, y, mask)
-        logit = self.model_without_ddp.forward_head(feature * (1 + cps_score.unsqueeze(1)**self.alpha))
+        logit = self.model_without_ddp.forward_head(feature / (cps_score.unsqueeze(1)))
         logit = logit * mask
         logit = logit + self.mask
         loss = F.cross_entropy(logit, y, reduction='none')

@@ -35,22 +35,22 @@ python --version
 NOTE="RM_iblurry_cifar100_N50_M10" # Short description of the experiment. (WARNING: logs/results with the same note will be overwritten!)
 
 MODE="rm"
-DATASET="imagenet-r" # cifar10, cifar100, tinyimagenet, imagenet
+DATASET="cifar100" # cifar10, cifar100, tinyimagenet, imagenet
 N_TASKS=5
 N=50
 M=10
 GPU_TRANSFORM="--gpu_transform"
 # USE_AMP="--use_amp"
-SEEDS="1 2 3 4 5"
+SEEDS="5"
 OPT="adam"
 
 if [ "$DATASET" == "cifar100" ]; then
-    MEM_SIZE=500 ONLINE_ITER=3
+    MEM_SIZE=2000 ONLINE_ITER=3
     MODEL_NAME="vit" EVAL_PERIOD=1000
     BATCHSIZE=64; LR=0.05 OPT_NAME=$OPT SCHED_NAME="cos" MEMORY_EPOCH=256
 
 elif [ "$DATASET" == "tinyimagenet" ]; then
-    MEM_SIZE=500 ONLINE_ITER=3
+    MEM_SIZE=2000 ONLINE_ITER=3
     MODEL_NAME="vit" EVAL_PERIOD=1000
     BATCHSIZE=64; LR=0.05 OPT_NAME=$OPT SCHED_NAME="cos" MEMORY_EPOCH=256
 
