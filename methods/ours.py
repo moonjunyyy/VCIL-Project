@@ -69,9 +69,9 @@ def vit_base_patch16_224(pretrained=False, **kwargs):
     model = _create_vision_transformer('vit_base_patch16_224', pretrained=pretrained, **model_kwargs)
     return model
 
-class Ours(_Trainer):
+class Ours_total(_Trainer):
     def __init__(self, **kwargs):
-        super(Ours, self).__init__(**kwargs)
+        super(Ours_total, self).__init__(**kwargs)
         
         self.use_mask    = kwargs.get("use_mask")
         # self.use_dyna_exp    = kwargs.get("use_dyna_exp")
@@ -252,18 +252,6 @@ class Ours(_Trainer):
         
         return uncert, sample_g, batch_g, total_batch_g
     
-    def min_max(self,x):
-        min = x.min()
-        max = x.max()
-        denom = max-min
-        minmax= []
-        for i in range(len(x)):
-            minmax.append( (x[i] -min) / denom)
-        minmax = torch.tensor(minmax,device=self.device)+1.
-        if True in torch.isnan(minmax):
-            minmax=None
-        return minmax
-    
     def _get_strength(self,ref_head,feat,y,mask):
         uncert, sample_g, batch_g,total_batch_g = self._compute_grads_uncert(ref_head,feat,y,mask)
         ign_score = torch.max(1. - torch.cosine_similarity(sample_g,batch_g,dim=1),torch.zeros(1,device=self.device)) #B
@@ -319,7 +307,17 @@ class Ours(_Trainer):
         ce_logit,_ = self.model(x)
         
         if self.use_base_CE:
-            loss = (1.-self.alpha)*self.criterion(ce_logit, y.to(torch.int64))
+            if self.use_CP_CE:
+                afs_feat = ce_feat[:,0]*cp_score[:,None]
+                afs_feat = self.model.backbone.fc_norm(afs_feat)
+            else:
+                afs_feat = ce_feat
+                
+            afs_logit = self.model.backbone.fc(afs_feat)
+            
+            if self.use_mask:
+                afs_logit = afs_logit*mask
+            loss = (1.-self.alpha)*self.criterion(afs_logit+self.mask, y.to(torch.int64))
         else:
             loss = torch.zeros(1,device=self.device)
         
