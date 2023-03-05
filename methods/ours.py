@@ -69,9 +69,9 @@ def vit_base_patch16_224(pretrained=False, **kwargs):
     model = _create_vision_transformer('vit_base_patch16_224', pretrained=pretrained, **model_kwargs)
     return model
 
-class Ours_total(_Trainer):
+class Ours(_Trainer):
     def __init__(self, **kwargs):
-        super(Ours_total, self).__init__(**kwargs)
+        super(Ours, self).__init__(**kwargs)
         
         self.use_mask    = kwargs.get("use_mask")
         # self.use_dyna_exp    = kwargs.get("use_dyna_exp")
@@ -80,6 +80,7 @@ class Ours_total(_Trainer):
         
         self.alpha  = kwargs.get("alpha")
         self.gamma  = kwargs.get("gamma")
+        self.margin  = kwargs.get("margin")
         self.use_base_CE = kwargs.get("use_base_ce")
         self.use_CP_CE = kwargs.get("use_compensation_ce")
         self.sample_criterion = nn.CrossEntropyLoss(reduction='none')
@@ -268,7 +269,7 @@ class Ours_total(_Trainer):
         # print('feat',feat[:,0].shape)
         #* cp_score = torch.max(1 - torch.cosine_similarity(head_wts,feat[:,0],dim=1), torch.ones(1,device=self.device))# B
         # cp_score = torch.max(1./(1. - torch.cosine_similarity(head_wts,feat[:,0],dim=1)),torch.ones(1,device=self.device))
-        cp_score = 1/(1. - torch.cosine_similarity(head_wts,feat[:,0],dim=1) +0.5)
+        cp_score = 1/(1. - torch.cosine_similarity(head_wts,feat[:,0],dim=1) +self.margin)
         # print("cp_score")
         # print(cp_score.shape)
         # print(cp_score)
