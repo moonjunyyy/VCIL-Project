@@ -280,28 +280,28 @@ class Ours(_Trainer):
         tsne = TSNE(n_components=2, random_state=0)
         X_2d = tsne.fit_transform(self.model_without_ddp.features.detach().cpu().numpy())
         
-        plt.scatter(X_2d[:5000, 0], X_2d[:5000, 1], s = 1, c="cyan")
-        plt.scatter(X_2d[-50:-40, 0], X_2d[-50:-40, 1], s = 30, marker='^', c="red")
+        plt.scatter(X_2d[:5000, 0], X_2d[:5000, 1], s = 1)
+        plt.scatter(X_2d[-50:-40, 0], X_2d[-50:-40, 1], s = 30, marker='^')
         plt.savefig(f'OURS_tsne{self.rnd_seed}_Task1.png')
         plt.clf()
 
-        plt.scatter(X_2d[:5000, 0], X_2d[:5000, 1], s = 1, c="cyan")
-        plt.scatter(X_2d[-40:-30, 0], X_2d[-40:-30, 1], s = 30, marker='^', c="red")
+        plt.scatter(X_2d[:5000, 0], X_2d[:5000, 1], s = 1)
+        plt.scatter(X_2d[-40:-30, 0], X_2d[-40:-30, 1], s = 30, marker='^')
         plt.savefig(f'OURS_tsne{self.rnd_seed}_Task2.png')
         plt.clf()
 
-        plt.scatter(X_2d[:5000, 0], X_2d[:5000, 1], s = 1, c="cyan")
-        plt.scatter(X_2d[-30:-20, 0], X_2d[-30:-20:, 1], s = 30, marker='^', c="red")
+        plt.scatter(X_2d[:5000, 0], X_2d[:5000, 1], s = 1)
+        plt.scatter(X_2d[-30:-20, 0], X_2d[-30:-20:, 1], s = 30, marker='^')
         plt.savefig(f'OURS_tsne{self.rnd_seed}_Task3.png')
         plt.clf()
 
-        plt.scatter(X_2d[:5000, 0], X_2d[:5000, 1], s = 1, c="cyan")
-        plt.scatter(X_2d[-20:-10, 0], X_2d[-20:-10, 1], s = 30, marker='^', c="red")
+        plt.scatter(X_2d[:5000, 0], X_2d[:5000, 1], s = 1)
+        plt.scatter(X_2d[-20:-10, 0], X_2d[-20:-10, 1], s = 30, marker='^')
         plt.savefig(f'OURS_tsne{self.rnd_seed}_Task4.png')
         plt.clf()
 
-        plt.scatter(X_2d[:5000, 0], X_2d[:5000, 1], s = 1, c="cyan")
-        plt.scatter(X_2d[-10:, 0], X_2d[-10:, 1], s = 30, marker='^', c="red")
+        plt.scatter(X_2d[:5000, 0], X_2d[:5000, 1], s = 1)
+        plt.scatter(X_2d[-10:, 0], X_2d[-10:, 1], s = 30, marker='^')
         plt.savefig(f'OURS_tsne{self.rnd_seed}_Task5.png')
         plt.clf()
         

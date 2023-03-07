@@ -236,7 +236,7 @@ class DualPrompt(nn.Module):
             query = self.backbone.blocks(x)
             query = self.backbone.norm(query)[:, 0]
 
-        self.features = torch.cat((self.features, query.detach().cpu()), dim = 0)
+        # self.features = torch.cat((self.features, query.detach().cpu()), dim = 0)
 
         if self.g_prompt is not None:
             g_p = self.g_prompt.prompts[0].expand(B, -1, -1)
