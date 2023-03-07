@@ -46,7 +46,8 @@ from timm.models import create_model
 from timm.models.registry import register_model
 from timm.models.vision_transformer import _cfg, default_cfgs
 from models.vit import _create_vision_transformer
-
+from sklearn.manifold import TSNE
+import matplotlib.pyplot as plt
 
 logger = logging.getLogger()
 writer = SummaryWriter("tensorboard")
@@ -77,7 +78,7 @@ class DualPrompt(_Trainer):
             self.lr_gamma = 0.99995
         else:
             self.lr_gamma = 0.9999
-        
+    
         self.class_mask = None
         self.class_mask_dict={}
     
@@ -184,12 +185,49 @@ class DualPrompt(_Trainer):
             
     def online_before_task(self,train_loader):
         # Task-Free
-        # self.model_without_ddp.convert_train_task(self.exposed_classes)
         pass
 
     def online_after_task(self, cur_iter):
+        self.model_without_ddp.keys = torch.cat([self.model_without_ddp.keys, self.model_without_ddp.e_prompt.key.detach().cpu()], dim=0)
         pass
 
     def reset_opt(self):
         self.optimizer = select_optimizer(self.opt_name, self.lr, self.model, True)
         self.scheduler = select_scheduler(self.sched_name, self.optimizer, self.lr_gamma)
+
+    def main_worker(self, gpu) -> None:
+        super(DualPrompt, self).main_worker(gpu)
+        
+        idx = torch.randperm(self.model_without_ddp.features.shape[0])
+
+        self.model_without_ddp.features = torch.cat([self.model_without_ddp.features[idx[:5000]], self.model_without_ddp.keys], dim=0)
+        self.model_without_ddp.features = F.normalize(self.model_without_ddp.features, dim=1)
+
+        tsne = TSNE(n_components=2, random_state=0)
+        X_2d = tsne.fit_transform(self.model_without_ddp.features.detach().cpu().numpy())
+        
+        plt.scatter(X_2d[:5000, 0], X_2d[:5000, 1], s = 1, c="cyan")
+        plt.scatter(X_2d[-50:-40, 0], X_2d[-50:-40, 1], s = 30, marker='^', c="red")
+        plt.savefig(f'OURS_tsne{self.rnd_seed}_Task1.png')
+        plt.clf()
+
+        plt.scatter(X_2d[:5000, 0], X_2d[:5000, 1], s = 1, c="cyan")
+        plt.scatter(X_2d[-40:-30, 0], X_2d[-40:-30, 1], s = 30, marker='^', c="red")
+        plt.savefig(f'OURS_tsne{self.rnd_seed}_Task2.png')
+        plt.clf()
+
+        plt.scatter(X_2d[:5000, 0], X_2d[:5000, 1], s = 1, c="cyan")
+        plt.scatter(X_2d[-30:-20, 0], X_2d[-30:-20:, 1], s = 30, marker='^', c="red")
+        plt.savefig(f'OURS_tsne{self.rnd_seed}_Task3.png')
+        plt.clf()
+
+        plt.scatter(X_2d[:5000, 0], X_2d[:5000, 1], s = 1, c="cyan")
+        plt.scatter(X_2d[-20:-10, 0], X_2d[-20:-10, 1], s = 30, marker='^', c="red")
+        plt.savefig(f'OURS_tsne{self.rnd_seed}_Task4.png')
+        plt.clf()
+
+        plt.scatter(X_2d[:5000, 0], X_2d[:5000, 1], s = 1, c="cyan")
+        plt.scatter(X_2d[-10:, 0], X_2d[-10:, 1], s = 30, marker='^', c="red")
+        plt.savefig(f'OURS_tsne{self.rnd_seed}_Task5.png')
+        plt.clf()
+        

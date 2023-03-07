@@ -107,6 +107,9 @@ class DualPrompt(nn.Module):
                  **kwargs):
         super().__init__()
 
+        self.features = torch.empty(0)
+        self.keys     = torch.empty(0)
+
         if backbone_name is None:
             raise ValueError('backbone_name must be specified')
 
@@ -232,6 +235,8 @@ class DualPrompt(nn.Module):
             x = self.backbone.pos_drop(token_appended + self.backbone.pos_embed)
             query = self.backbone.blocks(x)
             query = self.backbone.norm(query)[:, 0]
+
+        self.features = torch.cat((self.features, query.detach().cpu()), dim = 0)
 
         if self.g_prompt is not None:
             g_p = self.g_prompt.prompts[0].expand(B, -1, -1)

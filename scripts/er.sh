@@ -1,11 +1,11 @@
 #!/bin/bash
 
-#SBATCH -J DP_tinyimagenet_MEM500
+#SBATCH -J DP_IMGR_MEM500_SEED4
 #SBATCH -p batch
 #SBATCH --nodes=1
 #SBATCH --gres=gpu:1
 #SBATCH --cpus-per-gpu=8
-#SBATCH --mem-per-gpu=16G
+#SBATCH --mem-per-gpu=24G
 #SBATCH --time=3-0
 #SBATCH -o %x_%j.log
 
@@ -30,29 +30,29 @@ conda --version
 python --version
 
 # CIL CONFIG
-NOTE="DP_tinyimagenet_MEM500" # Short description of the experiment. (WARNING: logs/results with the same note will be overwritten!)
+NOTE="DP_IMGR_MEM500_SEED4" # Short description of the experiment. (WARNING: logs/results with the same note will be overwritten!)
 
 MODE="er"
-DATASET="tinyimagenet" # cifar10, cifar100, tinyimagenet, imagenet
+DATASET="imagenet-r" # cifar10, cifar100, tinyimagenet, imagenet
 N_TASKS=5
 N=50
 M=10
 GPU_TRANSFORM="--gpu_transform"
 USE_AMP="--use_amp"
-SEEDS="5"
+SEEDS="4"
 
 if [ "$DATASET" == "cifar100" ]; then
-    MEM_SIZE=2000 ONLINE_ITER=3
+    MEM_SIZE=500 ONLINE_ITER=3
     MODEL_NAME="DualPrompt" EVAL_PERIOD=1000
     BATCHSIZE=64; LR=5e-3 OPT_NAME="adam" SCHED_NAME="default"
 
 elif [ "$DATASET" == "tinyimagenet" ]; then
-    MEM_SIZE=2000 ONLINE_ITER=3
+    MEM_SIZE=500 ONLINE_ITER=3
     MODEL_NAME="DualPrompt" EVAL_PERIOD=1000
     BATCHSIZE=64; LR=5e-3 OPT_NAME="adam" SCHED_NAME="default"
 
 elif [ "$DATASET" == "imagenet-r" ]; then
-    MEM_SIZE=2000 ONLINE_ITER=3
+    MEM_SIZE=500 ONLINE_ITER=3
     MODEL_NAME="DualPrompt" EVAL_PERIOD=1000
     BATCHSIZE=64; LR=5e-3 OPT_NAME="adam" SCHED_NAME="default"
 

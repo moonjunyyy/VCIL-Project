@@ -1,6 +1,6 @@
 #!/bin/bash
 
-#SBATCH -J iblurry_cifar100_N50_M10
+#SBATCH -J iblurry_cifar100
 #SBATCH -p batch
 #SBATCH --nodes=1
 #SBATCH --gres=gpu:1
@@ -33,15 +33,15 @@ conda --version
 python --version
 
 # CIL CONFIG
-NOTE="iblurry_cifar100_N50_M10" # Short description of the experiment. (WARNING: logs/results with the same note will be overwritten!)
+NOTE="iblurry_cifar100" # Short description of the experiment. (WARNING: logs/results with the same note will be overwritten!)
 MODE="ours"
-DATASET="cifar100" # cifar10, cifar100, tinyimagenet, imagenet
+DATASET="imagenet-r" # cifar10, cifar100, tinyimagenet, imagenet
 N_TASKS=5
 N=50
 M=10
 GPU_TRANSFORM="--gpu_transform"
 USE_AMP="--use_amp"
-SEEDS="1"
+SEEDS="1 2 3 4 5"
 
 
 if [ "$DATASET" == "cifar10" ]; then
@@ -57,12 +57,12 @@ elif [ "$DATASET" == "cifar100" ]; then
 elif [ "$DATASET" == "tinyimagenet" ]; then
     MEM_SIZE=2000 ONLINE_ITER=3
     MODEL_NAME="ours" EVAL_PERIOD=1000
-    BATCHSIZE=64; LR=1e-2 OPT_NAME="adam" SCHED_NAME="default"
+    BATCHSIZE=64; LR=5e-3 OPT_NAME="adam" SCHED_NAME="default"
 
 elif [ "$DATASET" == "imagenet-r" ]; then
     MEM_SIZE=2000 ONLINE_ITER=3
     MODEL_NAME="ours" EVAL_PERIOD=1000
-    BATCHSIZE=64; LR=1e-2 OPT_NAME="adam" SCHED_NAME="default"
+    BATCHSIZE=64; LR=5e-3 OPT_NAME="adam" SCHED_NAME="default"
 
 else
     echo "Undefined setting"
@@ -81,8 +81,10 @@ do
     --note $NOTE --eval_period $EVAL_PERIOD --n_worker 4 --transforms autoaug --rnd_NM \
     --use_contrastiv \
     --use_mask \
-    --gamma 0.51 \
-    --alpha 0.5 \
+    --use_afs \
+    --use_mcr \
+    --gamma 2.0 \
+    # --alpha 0.5 \
     # --use_last_layer \
     # --use_dyna_exp
 done

@@ -116,28 +116,21 @@ def base_parser():
 
     # MIR
     parser.add_argument('--mir_cands', type=int, default=50, help='# candidates to use for MIR')
+
     # Prompt-based (ViT)
-     # Ours
+    # Ours
     parser.add_argument('--use_mask', action='store_true', help='use mask for our method')
     parser.add_argument('--use_contrastiv', action='store_true', help='use contrastive loss for our method')
     parser.add_argument('--use_last_layer', action='store_true', help='use last layer for our method')
     # parser.add_argument('--use_dyna_exp', action='store_true', help='use dynamic expand for our method')
     
-    parser.add_argument('--no-use_mask', dest='use_mask', action='store_false', help='use mask for our method')
-    parser.add_argument('--no-use_contrastiv', dest='use_contrastiv', action='store_false', help='use contrastive loss for our method')
-    parser.add_argument('--no-use_last_layer', dest='use_last_layer', action='store_false', help='use last layer for our method')
-    # parser.add_argument('--no-use_dyna_exp', action='store_false', help='use dynamic expand for our method')
-    
-    parser.add_argument('--use_base_ce', action='store_true', help='use mask for our method')
-    parser.add_argument('--no-use_base_ce', dest='use_baseline', action='store_false', help='use mask for our method')
-    
-    parser.add_argument('--use_compensation_ce', action='store_true', help='use mask for our method')
-    parser.add_argument('--no-use_compensation_ce', dest='use_compensation_ce', action='store_false', help='use mask for our method')
-    # use_compensation_ce
+    parser.add_argument('--use_afs', action='store_true', help='enable Adaptive Feature Scaling (AFS) in ours')
+    parser.add_argument('--use_mcr', action='store_true', help='enable Minor-Class Reinforcement (MCR) in ours')
     
     parser.add_argument('--selection_size', type=int, default=1, help='# candidates to use for ViT_Prompt')
-    parser.add_argument('--alpha', type=float, default=0., help='# candidates to use for STR hyperparameter')
+    parser.add_argument('--alpha', type=float, default=0.5, help='# candidates to use for STR hyperparameter')
     parser.add_argument('--gamma', type=float, default=1., help='# candidates to use for STR hyperparameter')
+    parser.add_argument('--margin', type=float, default=0.5, help='# candidates to use for STR hyperparameter')
     # parser.add_argument('--beta', type=float, default=0., help='# candidates to use for peeking into the updated head')
     # parser.add_argument('--charlie', type=float, default=0., help='# candidates to use for CP hyperparameter')
     

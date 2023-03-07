@@ -28,6 +28,9 @@ from timm.models.registry import register_model
 from timm.models.vision_transformer import _cfg, default_cfgs
 from models.vit import _create_vision_transformer
 
+from sklearn.manifold import TSNE
+import matplotlib.pyplot as plt
+
 
 logger = logging.getLogger()
 writer = SummaryWriter("tensorboard")
@@ -54,14 +57,16 @@ class Ours(_Trainer):
     def __init__(self, **kwargs):
         super(Ours, self).__init__(**kwargs)
         
+        self.mask_viz = torch.empty(0)
         self.use_mask    = kwargs.get("use_mask")
         self.use_contrastiv  = kwargs.get("use_contrastiv")
         self.use_last_layer  = kwargs.get("use_last_layer")
+        self.use_afs  = kwargs.get("use_afs")
+        self.use_mcr  = kwargs.get("use_mcr")
         
         self.alpha  = kwargs.get("alpha")
         self.gamma  = kwargs.get("gamma")
-        self.use_base_CE = kwargs.get("use_base_ce")
-        self.use_CP_CE = kwargs.get("use_compensation_ce")
+        self.margin  = kwargs.get("margin")
     
     def online_step(self, images, labels, idx):
         self.add_new_class(labels)
@@ -164,6 +169,8 @@ class Ours(_Trainer):
         pass
 
     def online_after_task(self, cur_iter):
+        self.model_without_ddp.keys = torch.cat([self.model_without_ddp.keys, self.model_without_ddp.key.detach().cpu()], dim=0)
+        self.mask_viz = torch.cat([self.mask_viz, self.model_without_ddp.mask.detach().cpu()], dim=0)
         pass
 
     def reset_opt(self):
@@ -204,7 +211,7 @@ class Ours(_Trainer):
     def _get_compensation(self, y, feat):
         head_w = self.model_without_ddp.backbone.fc.weight[y].clone().detach()
         # cps_score = torch.max(1 - torch.cosine_similarity(head_w, sample_g, dim=1), torch.ones(1, device=self.device)) # B
-        cps_score = (1. - torch.cosine_similarity(head_w, feat, dim=1) + 0.5)#B
+        cps_score = (1. - torch.cosine_similarity(head_w, feat, dim=1) + self.margin)#B
         return cps_score
 
     def _get_score(self, feat, y, mask):
@@ -214,18 +221,34 @@ class Ours(_Trainer):
         return ign_score, cps_score
     
     def loss_fn(self, feature, mask, y):
-        # logit = self.model_without_ddp.forward_head(feature)
-        # logit = logit * mask
-        # logit = logit + self.mask
+        ign_score, cps_score = self._get_score(feature.detach(), y, mask)
+
+        if self.use_afs:
+            logit = self.model_without_ddp.forward_head(feature)
+            logit = self.model_without_ddp.forward_head(feature / (cps_score.unsqueeze(1)))
+        else:
+            logit = self.model_without_ddp.forward_head(feature)
+        if self.use_mask:
+            logit = logit * mask
+        logit = logit + self.mask
+        log_p = F.log_softmax(logit, dim=1)
+        mask_loss = F.nll_loss(log_p, y)
         # mask_loss = F.cross_entropy(logit, y)
 
-        ign_score, cps_score = self._get_score(feature, y, mask)
-        logit = self.model_without_ddp.forward_head(feature / (cps_score.unsqueeze(1)))
-        logit = logit * mask
+        if self.use_afs:
+            logit = self.model_without_ddp.forward_head(feature / (cps_score.unsqueeze(1)))
+        else:
+            logit = self.model_without_ddp.forward_head(feature)
+        if self.use_mask:
+            logit = logit * mask
         logit = logit + self.mask
-        loss = F.cross_entropy(logit, y, reduction='none')
-        loss = (1 + ign_score ** self.gamma) * loss
-        return loss.mean() + self.model_without_ddp.get_similarity_loss()
+        log_p = F.log_softmax(logit, dim=1)
+        loss = F.nll_loss(log_p, y, reduction='none')
+        # loss = F.cross_entropy(logit, y, reduction='none')
+        if self.use_mcr:
+            loss = (ign_score ** self.gamma) * loss
+        # return loss.mean() + self.model_without_ddp.get_similarity_loss()
+        return (1-self.alpha)*mask_loss + self.alpha*loss.mean() + self.model_without_ddp.get_similarity_loss()
     
     def report_training(self, sample_num, train_loss, train_acc):
         print(
@@ -243,3 +266,42 @@ class Ours(_Trainer):
         self.model_without_ddp.use_mask = self.use_mask
         self.model_without_ddp.use_contrastiv = self.use_contrastiv
         self.model_without_ddp.use_last_layer = self.use_last_layer
+
+
+    def main_worker(self, gpu) -> None:
+        super(Ours, self).main_worker(gpu)
+        
+        torch.save(self.mask_viz, f"mask_viz_{self.rnd_seed}.pth")
+        idx = torch.randperm(self.model_without_ddp.features.shape[0])
+
+        self.model_without_ddp.features = torch.cat([self.model_without_ddp.features[idx[:5000]], self.model_without_ddp.keys], dim=0)
+        self.model_without_ddp.features = F.normalize(self.model_without_ddp.features, dim=1)
+
+        tsne = TSNE(n_components=2, random_state=0)
+        X_2d = tsne.fit_transform(self.model_without_ddp.features.detach().cpu().numpy())
+        
+        plt.scatter(X_2d[:5000, 0], X_2d[:5000, 1], s = 1, c="cyan")
+        plt.scatter(X_2d[-50:-40, 0], X_2d[-50:-40, 1], s = 30, marker='^', c="red")
+        plt.savefig(f'OURS_tsne{self.rnd_seed}_Task1.png')
+        plt.clf()
+
+        plt.scatter(X_2d[:5000, 0], X_2d[:5000, 1], s = 1, c="cyan")
+        plt.scatter(X_2d[-40:-30, 0], X_2d[-40:-30, 1], s = 30, marker='^', c="red")
+        plt.savefig(f'OURS_tsne{self.rnd_seed}_Task2.png')
+        plt.clf()
+
+        plt.scatter(X_2d[:5000, 0], X_2d[:5000, 1], s = 1, c="cyan")
+        plt.scatter(X_2d[-30:-20, 0], X_2d[-30:-20:, 1], s = 30, marker='^', c="red")
+        plt.savefig(f'OURS_tsne{self.rnd_seed}_Task3.png')
+        plt.clf()
+
+        plt.scatter(X_2d[:5000, 0], X_2d[:5000, 1], s = 1, c="cyan")
+        plt.scatter(X_2d[-20:-10, 0], X_2d[-20:-10, 1], s = 30, marker='^', c="red")
+        plt.savefig(f'OURS_tsne{self.rnd_seed}_Task4.png')
+        plt.clf()
+
+        plt.scatter(X_2d[:5000, 0], X_2d[:5000, 1], s = 1, c="cyan")
+        plt.scatter(X_2d[-10:, 0], X_2d[-10:, 1], s = 30, marker='^', c="red")
+        plt.savefig(f'OURS_tsne{self.rnd_seed}_Task5.png')
+        plt.clf()
+        
