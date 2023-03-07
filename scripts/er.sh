@@ -1,6 +1,6 @@
 #!/bin/bash
 
-#SBATCH -J DP_CIFAR100_MEM2000_SEED5
+#SBATCH -J DP_CIFAR100_MEM2000_SEED1
 #SBATCH -p batch
 #SBATCH --nodes=1
 #SBATCH --gres=gpu:1
@@ -30,7 +30,7 @@ conda --version
 python --version
 
 # CIL CONFIG
-NOTE="DP_CIFAR100_MEM2000_SEED5" # Short description of the experiment. (WARNING: logs/results with the same note will be overwritten!)
+NOTE="DP_CIFAR100_MEM2000_SEED1" # Short description of the experiment. (WARNING: logs/results with the same note will be overwritten!)
 
 MODE="er"
 DATASET="tinyimagenet" # cifar10, cifar100, tinyimagenet, imagenet
@@ -39,7 +39,7 @@ N=50
 M=10
 GPU_TRANSFORM="--gpu_transform"
 USE_AMP="--use_amp"
-SEEDS="5"
+SEEDS="1"
 
 if [ "$DATASET" == "cifar100" ]; then
     MEM_SIZE=2000 ONLINE_ITER=3

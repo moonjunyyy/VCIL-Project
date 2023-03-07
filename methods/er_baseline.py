@@ -37,7 +37,7 @@ class ER(_Trainer):
         for j in range(len(labels)):
             labels[j] = self.exposed_classes.index(labels[j].item())
         self.memory_sampler  = MemoryBatchSampler(self.memory, self.memory_batchsize, self.temp_batchsize * self.online_iter * self.world_size)
-        self.memory_dataloader   = DataLoader(self.train_dataset, batch_size=self.memory_batchsize, sampler=self.memory_sampler, num_workers=0)
+        self.memory_dataloader   = DataLoader(self.train_dataset, batch_size=self.memory_batchsize, sampler=self.memory_sampler, num_workers=4)
         self.memory_provider     = iter(self.memory_dataloader)
         # train with augmented batches
         _loss, _acc, _iter = 0.0, 0.0, 0

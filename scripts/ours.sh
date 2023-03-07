@@ -1,6 +1,6 @@
 #!/bin/bash
 
-#SBATCH -J iblurry_cifar100
+#SBATCH -J ABLATION_cifar100
 #SBATCH -p batch
 #SBATCH --nodes=1
 #SBATCH --gres=gpu:1
@@ -33,9 +33,9 @@ conda --version
 python --version
 
 # CIL CONFIG
-NOTE="iblurry_cifar100" # Short description of the experiment. (WARNING: logs/results with the same note will be overwritten!)
+NOTE="ABLATION_cifar100" # Short description of the experiment. (WARNING: logs/results with the same note will be overwritten!)
 MODE="ours"
-DATASET="imagenet-r" # cifar10, cifar100, tinyimagenet, imagenet
+DATASET="cifar100" # cifar10, cifar100, tinyimagenet, imagenet
 N_TASKS=5
 N=50
 M=10
@@ -79,11 +79,11 @@ do
     --lr $LR --batchsize $BATCHSIZE \
     --memory_size $MEM_SIZE $GPU_TRANSFORM --online_iter $ONLINE_ITER --data_dir /local_datasets \
     --note $NOTE --eval_period $EVAL_PERIOD --n_worker 4 --transforms autoaug --rnd_NM \
-    --use_contrastiv \
-    --use_mask \
-    --use_afs \
-    --use_mcr \
     --gamma 2.0 \
+    # --use_contrastiv \
+    # --use_mask \
+    # --use_mcr \
+    # --use_afs \
     # --alpha 0.5 \
     # --use_last_layer \
     # --use_dyna_exp

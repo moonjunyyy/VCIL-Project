@@ -232,23 +232,23 @@ class Ours(_Trainer):
             logit = logit * mask
         logit = logit + self.mask
         log_p = F.log_softmax(logit, dim=1)
-        mask_loss = F.nll_loss(log_p, y)
+        loss = F.nll_loss(log_p, y)
         # mask_loss = F.cross_entropy(logit, y)
 
-        if self.use_afs:
-            logit = self.model_without_ddp.forward_head(feature / (cps_score.unsqueeze(1)))
-        else:
-            logit = self.model_without_ddp.forward_head(feature)
-        if self.use_mask:
-            logit = logit * mask
-        logit = logit + self.mask
-        log_p = F.log_softmax(logit, dim=1)
-        loss = F.nll_loss(log_p, y, reduction='none')
+        # if self.use_afs:
+        #     logit = self.model_without_ddp.forward_head(feature / (cps_score.unsqueeze(1)))
+        # else:
+        #     logit = self.model_without_ddp.forward_head(feature)
+        # if self.use_mask:
+        #     logit = logit * mask
+        # logit = logit + self.mask
+        # log_p = F.log_softmax(logit, dim=1)
+        # loss = F.nll_loss(log_p, y, reduction='none')
         # loss = F.cross_entropy(logit, y, reduction='none')
         if self.use_mcr:
-            loss = (ign_score ** self.gamma) * loss
+            loss = self.alpha * (1 + ign_score ** self.gamma) * loss
         # return loss.mean() + self.model_without_ddp.get_similarity_loss()
-        return (1-self.alpha)*mask_loss + self.alpha*loss.mean() + self.model_without_ddp.get_similarity_loss()
+        return loss.mean() + self.model_without_ddp.get_similarity_loss()
     
     def report_training(self, sample_num, train_loss, train_acc):
         print(

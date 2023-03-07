@@ -1,6 +1,6 @@
 #!/bin/bash
 
-#SBATCH -J Ours_MEM500_SEED
+#SBATCH -J ABLATION_MEM2000_SEED1
 #SBATCH -p batch
 #SBATCH --nodes=1
 #SBATCH --gres=gpu:1
@@ -30,30 +30,30 @@ conda --version
 python --version
 
 # CIL CONFIG
-NOTE="DP_IMGR_MEM500_SEED4" # Short description of the experiment. (WARNING: logs/results with the same note will be overwritten!)
+NOTE="ABLATION_MEM2000_SEED1" # Short description of the experiment. (WARNING: logs/results with the same note will be overwritten!)
 
 MODE="er"
-DATASET="tinyimagenet" # cifar10, cifar100, tinyimagenet, imagenet
+DATASET="cifar100" # cifar10, cifar100, tinyimagenet, imagenet
 N_TASKS=5
 N=50
 M=10
 GPU_TRANSFORM="--gpu_transform"
 USE_AMP="--use_amp"
-SEEDS="4"
+SEEDS="1"
 
 if [ "$DATASET" == "cifar100" ]; then
-    MEM_SIZE=500 ONLINE_ITER=3
-    MODEL_NAME="Ours" EVAL_PERIOD=1000
+    MEM_SIZE=2000 ONLINE_ITER=3
+    MODEL_NAME="ours" EVAL_PERIOD=1000
     BATCHSIZE=64; LR=5e-3 OPT_NAME="adam" SCHED_NAME="default"
 
 elif [ "$DATASET" == "tinyimagenet" ]; then
-    MEM_SIZE=500 ONLINE_ITER=3
-    MODEL_NAME="Ours" EVAL_PERIOD=1000
+    MEM_SIZE=2000 ONLINE_ITER=3
+    MODEL_NAME="ours" EVAL_PERIOD=1000
     BATCHSIZE=64; LR=5e-3 OPT_NAME="adam" SCHED_NAME="default"
 
 elif [ "$DATASET" == "imagenet-r" ]; then
-    MEM_SIZE=500 ONLINE_ITER=3
-    MODEL_NAME="Ours" EVAL_PERIOD=1000
+    MEM_SIZE=2000 ONLINE_ITER=3
+    MODEL_NAME="ours" EVAL_PERIOD=1000
     BATCHSIZE=64; LR=5e-3 OPT_NAME="adam" SCHED_NAME="default"
 
 else
@@ -70,5 +70,12 @@ do
     --model_name $MODEL_NAME --opt_name $OPT_NAME --sched_name $SCHED_NAME \
     --lr $LR --batchsize $BATCHSIZE \
     --memory_size $MEM_SIZE $GPU_TRANSFORM --online_iter $ONLINE_ITER --data_dir /local_datasets \
-    --note $NOTE --eval_period $EVAL_PERIOD --n_worker 4 --rnd_NM
+    --note $NOTE --eval_period $EVAL_PERIOD --n_worker 4 --rnd_NM \
+    --gamma 2.0 \
+    --use_mcr \
+    # --use_afs \
+    # --use_contrastiv \
+    # --alpha 0.5 \
+    # --use_last_layer \
+    # --use_dyna_exp
 done
