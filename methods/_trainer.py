@@ -1,4 +1,5 @@
 import os
+import sys
 import random
 import time
 import datetime
@@ -20,7 +21,10 @@ from utils.augment import Cutout
 from utils.data_loader import get_statistics
 from datasets import *
 from utils.train_utils import select_model, select_optimizer, select_scheduler
-from utils.memory import Memory
+from utils.memory import Memory, DummyMemory
+import torch.cuda.profiler as profiler
+import pyprof
+pyprof.init()
 
 ########################################################################################################################
 # This is trainer with a DistributedDataParallel                                                                       #
@@ -57,7 +61,6 @@ class _Trainer():
         self.transforms  = kwargs.get("transforms")
 
         self.reg_coef    = kwargs.get("reg_coef")
-
         self.data_dir    = kwargs.get("data_dir")
         self.debug   = kwargs.get("debug")
         self.note    = kwargs.get("note")
@@ -68,7 +71,8 @@ class _Trainer():
         # self.beta = kwargs.get("beta")
         # self.charlie = kwargs.get("charlie")
         # self.use_baseline = kwargs.get("use_baseline")
-        
+
+        self.profile = kwargs.get("profile")        
         
         self.eval_period     = kwargs.get("eval_period")
         self.temp_batchsize  = kwargs.get("temp_batchsize")
@@ -210,12 +214,17 @@ class _Trainer():
         print(f"Learnable Parameters :\t{n_params}")
         print("")
 
+        # self.memory = DummyMemory(datasize=self.memory_size, shape=(3,224,224))
+
     def run(self):
-        # Distributed Launch
-        if self.ngpus_per_nodes > 1:
-            mp.spawn(self.main_worker, nprocs=self.ngpus_per_nodes, join=True)
+        if self.profile:
+            self.profile_worker(0)
         else:
-            self.main_worker(0)
+            # Distributed Launch
+            if self.ngpus_per_nodes > 1:
+                mp.spawn(self.main_worker, nprocs=self.ngpus_per_nodes, join=True)
+            else:
+                self.main_worker(0)
     
     def main_worker(self, gpu) -> None:
         self.gpu    = gpu % self.ngpus_per_nodes
@@ -265,6 +274,12 @@ class _Trainer():
         eval_results = defaultdict(list)
         samples_cnt = 0
 
+        # macs, params = ptflops.get_model_complexity_info(self.model, (3, 224, 224), as_strings=True,
+        #                                     print_per_layer_stat=True, verbose=True, flops_units='flops')
+        # print('{:<30}  {:<8}'.format('Computational complexity: ', macs))
+        # print('{:<30}  {:<8}'.format('Number of parameters: ', params))
+
+
         num_eval = self.eval_period
         
         for task_id in range(self.n_tasks):
@@ -286,6 +301,7 @@ class _Trainer():
                 if self.debug and (i+1) * self.temp_batchsize >= 500:
                     break
                 samples_cnt += images.size(0) * self.world_size
+
                 loss, acc = self.online_step(images, labels, idx)
                 self.report_training(samples_cnt, loss, acc)
 
@@ -305,6 +321,7 @@ class _Trainer():
                             eval_results["data_cnt"].append(num_eval)
                             self.report_test(num_eval, eval_dict["avg_loss"], eval_dict['avg_acc'])
                         num_eval += self.eval_period
+                sys.stdout.flush()
             self.online_after_task(task_id)
             
             test_sampler = OnlineTestSampler(self.test_dataset, self.exposed_classes)
@@ -352,6 +369,62 @@ class _Trainer():
             #     print(cls_acc[i])
             print(f"="*24)
         
+
+
+    def profile_worker(self, gpu) -> None:
+        self.memory = DummyMemory(datasize=self.memory_size, shape=(3,224,224))
+
+        self.gpu    = gpu % self.ngpus_per_nodes
+        self.device = torch.device(self.gpu)
+        if self.distributed:
+            self.local_rank = self.gpu
+            if 'SLURM_PROCID' in os.environ.keys():
+                self.rank = int(os.environ['SLURM_PROCID']) * self.ngpus_per_nodes + self.gpu
+                print(f"| Init Process group {os.environ['SLURM_PROCID']} : {self.local_rank}")
+            else :
+                self.rank = self.gpu
+                print(f"| Init Process group 0 : {self.local_rank}")
+            if 'MASTER_ADDR' not in os.environ.keys():
+                os.environ['MASTER_ADDR'] = '127.0.0.1'
+                os.environ['MASTER_PORT'] = '12701'
+            torch.cuda.set_device(self.gpu)
+            time.sleep(self.rank * 0.1) # prevent port collision
+            dist.init_process_group(backend=self.dist_backend, init_method=self.dist_url,
+                                    world_size=self.world_size, rank=self.rank)
+            torch.distributed.barrier()
+            self.setup_for_distributed(self.is_main_process())
+        else:
+            pass
+        
+        if self.rnd_seed is not None:
+            random.seed(self.rnd_seed)
+            np.random.seed(self.rnd_seed)
+            torch.manual_seed(self.rnd_seed)
+            torch.cuda.manual_seed(self.rnd_seed)
+            torch.cuda.manual_seed_all(self.rnd_seed) # if use multi-GPU
+            cudnn.deterministic = True
+        cudnn.benchmark = False
+
+        self.setup_distributed_dataset()
+        self.total_samples = len(self.train_dataset)
+
+        self.setup_distributed_model()
+
+        task_records = defaultdict(list)
+        eval_results = defaultdict(list)
+        samples_cnt = 0
+
+        num_eval = self.eval_period
+        
+        self.train_sampler.set_task(0)
+        self.online_before_task(0)          
+        for i, (images, labels, idx) in enumerate(self.train_dataloader):
+            samples_cnt += images.size(0) * self.world_size
+            loss, acc = self.online_step(images, labels, idx)
+            self.report_training(samples_cnt, loss, acc)
+            break
+        self.online_after_task(0)        
+
     def add_new_class(self, class_name):
         exposed_classes = []
         for label in class_name:

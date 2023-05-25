@@ -67,6 +67,8 @@ class Ours(_Trainer):
         self.alpha  = kwargs.get("alpha")
         self.gamma  = kwargs.get("gamma")
         self.margin  = kwargs.get("margin")
+
+        self.labels = torch.empty(0)
     
     def online_step(self, images, labels, idx):
         self.add_new_class(labels)
@@ -88,6 +90,8 @@ class Ours(_Trainer):
         total_loss, total_correct, total_num_data = 0.0, 0.0, 0.0
 
         x, y = data
+
+        self.labels = torch.cat((self.labels, y), 0)
 
         x = x.to(self.device)
         y = y.to(self.device)
@@ -169,8 +173,8 @@ class Ours(_Trainer):
         pass
 
     def online_after_task(self, cur_iter):
-        self.model_without_ddp.keys = torch.cat([self.model_without_ddp.keys, self.model_without_ddp.key.detach().cpu()], dim=0)
-        self.mask_viz = torch.cat([self.mask_viz, self.model_without_ddp.mask.detach().cpu()], dim=0)
+        # self.model_without_ddp.keys = torch.cat([self.model_without_ddp.keys, self.model_without_ddp.key.detach().cpu()], dim=0)
+        # self.mask_viz = torch.cat([self.mask_viz, self.model_without_ddp.mask.detach().cpu()], dim=0)
         pass
 
     def reset_opt(self):
@@ -246,7 +250,7 @@ class Ours(_Trainer):
         # loss = F.nll_loss(log_p, y, reduction='none')
         # loss = F.cross_entropy(logit, y, reduction='none')
         if self.use_mcr:
-            loss = self.alpha * (1 + ign_score ** self.gamma) * loss
+            loss = (1-self.alpha)* loss + self.alpha * (ign_score ** self.gamma) * loss
         # return loss.mean() + self.model_without_ddp.get_similarity_loss()
         return loss.mean() + self.model_without_ddp.get_similarity_loss()
     
@@ -268,40 +272,58 @@ class Ours(_Trainer):
         self.model_without_ddp.use_last_layer = self.use_last_layer
 
 
-    def main_worker(self, gpu) -> None:
-        super(Ours, self).main_worker(gpu)
+    # def main_worker(self, gpu) -> None:
+    #     super(Ours, self).main_worker(gpu)
         
-        torch.save(self.mask_viz, f"mask_viz_{self.rnd_seed}.pth")
-        idx = torch.randperm(self.model_without_ddp.features.shape[0])
+        # torch.save(self.mask_viz, f"mask_viz_{self.rnd_seed}.pth")
+        # idx = torch.randperm(self.model_without_ddp.features.shape[0])
 
-        self.model_without_ddp.features = torch.cat([self.model_without_ddp.features[idx[:5000]], self.model_without_ddp.keys], dim=0)
-        self.model_without_ddp.features = F.normalize(self.model_without_ddp.features, dim=1)
+        # print(self.labels.size())
+        # print(self.model_without_ddp.features.shape)
+        # labels = self.labels[idx[:10000]]
 
-        tsne = TSNE(n_components=2, random_state=0)
-        X_2d = tsne.fit_transform(self.model_without_ddp.features.detach().cpu().numpy())
+        # self.model_without_ddp.features = torch.cat([self.model_without_ddp.features[idx[:10000]], self.model_without_ddp.keys], dim=0)
+        # self.model_without_ddp.features = F.normalize(self.model_without_ddp.features, dim=1)
+
+        # tsne = TSNE(n_components=2, random_state=0)
+        # X_2d = tsne.fit_transform(self.model_without_ddp.features.detach().cpu().numpy())
         
-        plt.scatter(X_2d[:5000, 0], X_2d[:5000, 1], s = 1)
-        plt.scatter(X_2d[-50:-40, 0], X_2d[-50:-40, 1], s = 30, marker='^')
-        plt.savefig(f'OURS_tsne{self.rnd_seed}_Task1.png')
-        plt.clf()
+        # for i in range(100):
+        #     plt.scatter(X_2d[:10000][labels==i, 0], X_2d[:10000][labels==i, 1], s = 1, alpha=0.2)
+        # plt.scatter(X_2d[-50:-40, 0], X_2d[-50:-40, 1], s = 50, marker='^', c='black')
+        # for i in range(10):
+        #     plt.text(X_2d[-50:-40, 0][i] + 0.1, X_2d[-50:-40, 1][i], "{}".format(i), fontsize=10)
+        # plt.savefig(f'OURS_tsne{self.rnd_seed}_Task1.png')
+        # plt.clf()
 
-        plt.scatter(X_2d[:5000, 0], X_2d[:5000, 1], s = 1)
-        plt.scatter(X_2d[-40:-30, 0], X_2d[-40:-30, 1], s = 30, marker='^')
-        plt.savefig(f'OURS_tsne{self.rnd_seed}_Task2.png')
-        plt.clf()
+        # for i in range(100):
+        #     plt.scatter(X_2d[:10000][labels==i, 0], X_2d[:10000][labels==i, 1], s = 1, alpha=0.2)
+        # plt.scatter(X_2d[-40:-30, 0], X_2d[-40:-30, 1], s = 50, marker='^', c='black')
+        # for i in range(10):
+        #     plt.text(X_2d[-50:-40, 0][i] + 0.1, X_2d[-50:-40, 1][i], "{}".format(i), fontsize=10)
+        # plt.savefig(f'OURS_tsne{self.rnd_seed}_Task2.png')
+        # plt.clf()
 
-        plt.scatter(X_2d[:5000, 0], X_2d[:5000, 1], s = 1)
-        plt.scatter(X_2d[-30:-20, 0], X_2d[-30:-20:, 1], s = 30, marker='^')
-        plt.savefig(f'OURS_tsne{self.rnd_seed}_Task3.png')
-        plt.clf()
+        # for i in range(100):
+        #     plt.scatter(X_2d[:10000][labels==i, 0], X_2d[:10000][labels==i, 1], s = 1, alpha=0.2)
+        # plt.scatter(X_2d[-30:-20, 0], X_2d[-30:-20:, 1], s = 50, marker='^', c='black')
+        # for i in range(10):
+        #     plt.text(X_2d[-50:-40, 0][i] + 0.1, X_2d[-50:-40, 1][i], "{}".format(i), fontsize=10)
+        # plt.savefig(f'OURS_tsne{self.rnd_seed}_Task3.png')
+        # plt.clf()
 
-        plt.scatter(X_2d[:5000, 0], X_2d[:5000, 1], s = 1)
-        plt.scatter(X_2d[-20:-10, 0], X_2d[-20:-10, 1], s = 30, marker='^')
-        plt.savefig(f'OURS_tsne{self.rnd_seed}_Task4.png')
-        plt.clf()
+        # for i in range(100):
+        #     plt.scatter(X_2d[:10000][labels==i, 0], X_2d[:10000][labels==i, 1], s = 1, alpha=0.2)
+        # plt.scatter(X_2d[-20:-10, 0], X_2d[-20:-10, 1], s = 50, marker='^', c='black')
+        # for i in range(10):
+        #     plt.text(X_2d[-50:-40, 0][i] + 0.1, X_2d[-50:-40, 1][i], "{}".format(i), fontsize=10)
+        # plt.savefig(f'OURS_tsne{self.rnd_seed}_Task4.png')
+        # plt.clf()
 
-        plt.scatter(X_2d[:5000, 0], X_2d[:5000, 1], s = 1)
-        plt.scatter(X_2d[-10:, 0], X_2d[-10:, 1], s = 30, marker='^')
-        plt.savefig(f'OURS_tsne{self.rnd_seed}_Task5.png')
-        plt.clf()
-        
+        # for i in range(100):
+        #     plt.scatter(X_2d[:10000][labels==i, 0], X_2d[:10000][labels==i, 1], s = 1, alpha=0.2)
+        # plt.scatter(X_2d[-10:, 0], X_2d[-10:, 1], s = 50, marker='^', c='black')
+        # for i in range(10):
+        #     plt.text(X_2d[-50:-40, 0][i] + 0.1, X_2d[-50:-40, 1][i], "{}".format(i), fontsize=10)
+        # plt.savefig(f'OURS_tsne{self.rnd_seed}_Task5.png')
+        # plt.clf()

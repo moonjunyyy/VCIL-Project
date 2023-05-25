@@ -1,14 +1,14 @@
 #!/bin/bash
 
-#SBATCH -J ABLATION_cifar100
+#SBATCH -J Ours_Siblurry_F
 #SBATCH -p batch
 #SBATCH --nodes=1
 #SBATCH --gres=gpu:1
-#SBATCH --cpus-per-gpu=4
+#SBATCH --cpus-per-gpu=8
 #SBATCH --mem-per-gpu=16G
-#SBATCH --time=7-0
-#SBATCH -o %x_%j.out
-#SBATCH -e %x_%j.err
+#SBATCH --time=6-0
+#SBATCH -o %x_%j_%a.out
+#SBATCH -e %x_%j_%a.err
 
 date
 # seeds=(1 21 42 3473 10741 32450 93462 85015 64648 71950 87557 99668 55552 4811 10741)
@@ -33,16 +33,16 @@ conda --version
 python --version
 
 # CIL CONFIG
-NOTE="ABLATION_cifar100" # Short description of the experiment. (WARNING: logs/results with the same note will be overwritten!)
+NOTE="Ours_Siblurry_F" # Short description of the experiment. (WARNING: logs/results with the same note will be overwritten!)
 MODE="ours"
-DATASET="cifar100" # cifar10, cifar100, tinyimagenet, imagenet
+DATASET="imagenet-r" # cifar10, cifar100, tinyimagenet, imagenet
 N_TASKS=5
 N=50
 M=10
 GPU_TRANSFORM="--gpu_transform"
 USE_AMP="--use_amp"
-SEEDS="1 2 3 4 5"
-
+SEEDS=$SLURM_ARRAY_TASK_ID
+echo "SEEEDS="$SEEDS
 
 if [ "$DATASET" == "cifar10" ]; then
     MEM_SIZE=500 ONLINE_ITER=1
@@ -71,6 +71,7 @@ fi
 
 for RND_SEED in $SEEDS
 do
+    echo "RND_SEED="$RND_SEED
     python main.py --mode $MODE \
     --dataset $DATASET \
     --n_tasks $N_TASKS --m $M --n $N \
@@ -78,12 +79,12 @@ do
     --model_name $MODEL_NAME --opt_name $OPT_NAME --sched_name $SCHED_NAME \
     --lr $LR --batchsize $BATCHSIZE \
     --memory_size $MEM_SIZE $GPU_TRANSFORM --online_iter $ONLINE_ITER --data_dir /local_datasets \
-    --note $NOTE --eval_period $EVAL_PERIOD --n_worker 4 --transforms autoaug --rnd_NM \
+    --note $NOTE --eval_period $EVAL_PERIOD --n_worker 8 --transforms autoaug --rnd_NM \
     --gamma 2.0 \
-    # --use_contrastiv \
-    # --use_mask \
-    # --use_mcr \
+    --use_mcr \
     # --use_afs \
+    # --use_mask \
+    # --use_contrastiv \
     # --alpha 0.5 \
     # --use_last_layer \
     # --use_dyna_exp

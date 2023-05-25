@@ -112,18 +112,19 @@ class OnlineSampler(Sampler):
             # Randomly shuffle M% of blurry indices
             blurred = []
             num_blurred = num_blurred * m // 100
-            num_blurred = [0] + torch.randint(0, num_blurred, (num_tasks-1,), generator=self.generator).sort().values.tolist() + [num_blurred]
+            if num_blurred > 0:
+                num_blurred = [0] + torch.randint(0, num_blurred, (num_tasks-1,), generator=self.generator).sort().values.tolist() + [num_blurred]
 
-            for i in range(num_tasks):
-                blurred += self.blurry_indices[i][:num_blurred[i + 1] - num_blurred[i]]
-                self.blurry_indices[i] = self.blurry_indices[i][num_blurred[i + 1] - num_blurred[i]:]
-            blurred = torch.tensor(blurred)
-            blurred = blurred[torch.randperm(len(blurred), generator=self.generator)].tolist()
-            print("blurry indices: ", len(blurred))
-            # num_blurred = len(blurred) // num_tasks
-            for i in range(num_tasks):
-                self.blurry_indices[i] += blurred[:num_blurred[i + 1] - num_blurred[i]]
-                blurred = blurred[num_blurred[i + 1] - num_blurred[i]:]
+                for i in range(num_tasks):
+                    blurred += self.blurry_indices[i][:num_blurred[i + 1] - num_blurred[i]]
+                    self.blurry_indices[i] = self.blurry_indices[i][num_blurred[i + 1] - num_blurred[i]:]
+                blurred = torch.tensor(blurred)
+                blurred = blurred[torch.randperm(len(blurred), generator=self.generator)].tolist()
+                print("blurry indices: ", len(blurred))
+                # num_blurred = len(blurred) // num_tasks
+                for i in range(num_tasks):
+                    self.blurry_indices[i] += blurred[:num_blurred[i + 1] - num_blurred[i]]
+                    blurred = blurred[num_blurred[i + 1] - num_blurred[i]:]
             
             self.indices = [[] for _ in range(num_tasks)]
             for i in range(num_tasks):

@@ -1,14 +1,12 @@
 #!/bin/bash
 
-#SBATCH -J DP_Si_id_X_prefix
-#SBATCH -p batch_agi
-#SBATCH  -w agi2
-#SBATCH --nodes=1
+#SBATCH -J DP_Siblurry
 #SBATCH --gres=gpu:1
-#SBATCH --cpus-per-gpu=4
+#SBATCH --cpus-per-gpu=8
 #SBATCH --mem-per-gpu=16G
-#SBATCH -t 7-0
-#SBATCH -o %x_%j.log
+#SBATCH -t 6-0
+#SBATCH -o %x_%j_%a.log
+#SBATCH -e %x_%j_%a.err
 
 date
 ulimit -n 65536
@@ -31,15 +29,16 @@ conda --version
 python --version
 
 # CIL CONFIG
-NOTE="DP_iblurry_cifar100_N50_M10_RND" # Short description of the experiment. (WARNING: logs/results with the same note will be overwritten!)
+NOTE="DP_Siblurry" # Short description of the experiment. (WARNING: logs/results with the same note will be overwritten!)
 MODE="DualPrompt"
-DATASET="cifar100" # cifar10, cifar100, tinyimagenet, imagenet
+DATASET="imagenet-r" # cifar10, cifar100, tinyimagenet, imagenet
 N_TASKS=5
 N=50
 M=10
 GPU_TRANSFORM="--gpu_transform"
 USE_AMP="--use_amp"
-SEEDS="4 2 3 1 5"
+SEEDS=($SLURM_ARRAY_TASK_ID)
+echo "SEEEDS="$SEEDS
 
 OPT="adam"
 
@@ -71,7 +70,7 @@ do
     --n_tasks $N_TASKS --m $M --n $N \
     --rnd_seed $RND_SEED \
     --model_name $MODEL_NAME --opt_name $OPT_NAME --sched_name $SCHED_NAME \
-    --lr $LR --batchsize $BATCHSIZE --n_worker 4 \
+    --lr $LR --batchsize $BATCHSIZE \
     --memory_size $MEM_SIZE $GPU_TRANSFORM --online_iter $ONLINE_ITER --data_dir /local_datasets \
-    --note $NOTE --eval_period $EVAL_PERIOD --transforms autoaug --memory_epoch $MEMORY_EPOCH --n_worker 4 --rnd_NM
+    --note $NOTE --eval_period $EVAL_PERIOD --transforms autoaug --memory_epoch $MEMORY_EPOCH --n_worker 8 --rnd_NM
 done

@@ -49,6 +49,13 @@ from timm.models.registry import register_model
 from timm.models.vision_transformer import _cfg, default_cfgs
 from models.vit import _create_vision_transformer
 
+import timm
+from timm.models import create_model
+from timm.models.registry import register_model
+from timm.models.vision_transformer import _cfg, default_cfgs
+from models.vit import _create_vision_transformer
+from sklearn.manifold import TSNE
+import matplotlib.pyplot as plt
 logger = logging.getLogger()
 writer = SummaryWriter("tensorboard")
 
@@ -78,6 +85,7 @@ class L2P(ER):
             self.lr_gamma = 0.99995
         else:
             self.lr_gamma = 0.9999
+        self.labels = torch.empty(0)
         
         # self.class_mask = None
         # self.class_mask_dict={}
@@ -106,6 +114,7 @@ class L2P(ER):
         #     y = torch.cat([y, memory_labels], dim=0)
         for j in range(len(y)):
             y[j] = self.exposed_classes.index(y[j].item())
+        self.labels = torch.cat((self.labels, y), 0)
         x = x.to(self.device)
         y = y.to(self.device)
 
@@ -185,8 +194,63 @@ class L2P(ER):
 
     def online_after_task(self, cur_iter):
         # self.class_mask_dict[cur_iter]=self.class_mask
+        self.model_without_ddp.keys = torch.cat([self.model_without_ddp.keys, self.model_without_ddp.prompt.key.clone().detach().cpu()], dim=0)
         pass
 
     def reset_opt(self):
         self.optimizer = select_optimizer(self.opt_name, self.lr, self.model, True)
         self.scheduler = select_scheduler(self.sched_name, self.optimizer, self.lr_gamma)
+
+    def main_worker(self, gpu) -> None:
+        super(L2P, self).main_worker(gpu)
+        
+        idx = torch.randperm(self.model_without_ddp.features.shape[0])
+        print(self.labels.size())
+        print(self.model_without_ddp.features.shape)
+        labels = self.labels[idx[:10000]]
+
+        self.model_without_ddp.features = torch.cat([self.model_without_ddp.features[idx[:10000]], self.model_without_ddp.keys], dim=0)
+        self.model_without_ddp.features = F.normalize(self.model_without_ddp.features, dim=1)
+
+        tsne = TSNE(n_components=2, random_state=0)
+        X_2d = tsne.fit_transform(self.model_without_ddp.features.detach().cpu().numpy())
+        
+        for i in range(100):
+            plt.scatter(X_2d[:10000][labels==i, 0], X_2d[:10000][labels==i, 1], s = 1, alpha=0.2)
+        plt.scatter(X_2d[-50:-40, 0], X_2d[-50:-40, 1], s = 50, marker='^', c='black')
+        for i in range(10):
+            plt.text(X_2d[-50:-40, 0][i] + 0.1, X_2d[-50:-40, 1][i], "{}".format(i), fontsize=10)
+        plt.savefig(f'L2P_tsne{self.rnd_seed}_Task1.png')
+        plt.clf()
+
+        for i in range(100):
+            plt.scatter(X_2d[:10000][labels==i, 0], X_2d[:10000][labels==i, 1], s = 1, alpha=0.2)
+        plt.scatter(X_2d[-40:-30, 0], X_2d[-40:-30, 1], s = 50, marker='^', c='black')
+        for i in range(10):
+            plt.text(X_2d[-50:-40, 0][i] + 0.1, X_2d[-50:-40, 1][i], "{}".format(i), fontsize=10)
+        plt.savefig(f'L2P_tsne{self.rnd_seed}_Task2.png')
+        plt.clf()
+
+        for i in range(100):
+            plt.scatter(X_2d[:10000][labels==i, 0], X_2d[:10000][labels==i, 1], s = 1, alpha=0.2)
+        plt.scatter(X_2d[-30:-20, 0], X_2d[-30:-20:, 1], s = 50, marker='^', c='black')
+        for i in range(10):
+            plt.text(X_2d[-50:-40, 0][i] + 0.1, X_2d[-50:-40, 1][i], "{}".format(i), fontsize=10)
+        plt.savefig(f'L2P_tsne{self.rnd_seed}_Task3.png')
+        plt.clf()
+
+        for i in range(100):
+            plt.scatter(X_2d[:10000][labels==i, 0], X_2d[:10000][labels==i, 1], s = 1, alpha=0.2)
+        plt.scatter(X_2d[-20:-10, 0], X_2d[-20:-10, 1], s = 50, marker='^', c='black')
+        for i in range(10):
+            plt.text(X_2d[-50:-40, 0][i] + 0.1, X_2d[-50:-40, 1][i], "{}".format(i), fontsize=10)
+        plt.savefig(f'L2P_tsne{self.rnd_seed}_Task4.png')
+        plt.clf()
+
+        for i in range(100):
+            plt.scatter(X_2d[:10000][labels==i, 0], X_2d[:10000][labels==i, 1], s = 1, alpha=0.2)
+        plt.scatter(X_2d[-10:, 0], X_2d[-10:, 1], s = 50, marker='^', c='black')
+        for i in range(10):
+            plt.text(X_2d[-50:-40, 0][i] + 0.1, X_2d[-50:-40, 1][i], "{}".format(i), fontsize=10)
+        plt.savefig(f'L2P_tsne{self.rnd_seed}_Task5.png')
+        plt.clf()

@@ -108,6 +108,9 @@ class L2P(nn.Module):
 
         super().__init__()
         
+        self.features = torch.empty(0)
+        self.keys     = torch.empty(0)
+
         if backbone_name is None:
             raise ValueError('backbone_name must be specified')
         if pool_size < selection_size:
@@ -144,6 +147,7 @@ class L2P(nn.Module):
         self.register_buffer('unsimmilarity', torch.zeros(1), persistent=False)
     
     def forward(self, inputs : torch.Tensor, **kwargs) -> torch.Tensor:
+        self.backbone.eval()
         x = self.backbone.patch_embed(inputs)
         B, N, D = x.size()
         cls_token = self.backbone.cls_token.expand(B, -1, -1)
@@ -152,6 +156,8 @@ class L2P(nn.Module):
             x = self.backbone.pos_drop(token_appended + self.backbone.pos_embed)
             query = self.backbone.blocks(x)
             query = self.backbone.norm(query)[:, 0].clone()
+        if self.training:
+            self.features = torch.cat((self.features, query.detach().cpu()), dim = 0)
         simmilarity, prompts = self.prompt(query)
         simmilarity = simmilarity.mean()
         prompts = prompts.contiguous().view(B, self.selection_size * self.prompt_len, D)
@@ -180,13 +186,13 @@ class L2P(nn.Module):
     def get_count(self):
         return self.prompt.update()
 
-    def train(self: T, mode : bool = True, **kwargs):
-        ten = super().train()
-        self.backbone.eval()
-        return ten
+    # def train(self: T, mode : bool = True, **kwargs):
+    #     ten = super().train()
+    #     self.backbone.eval()
+    #     return ten
     
-    def eval(self: T, mode : bool = True, **kwargs):
-        ten = super().eval()
-        self.backbone.eval()
-        return ten
+    # def eval(self: T, mode : bool = True, **kwargs):
+    #     ten = super().eval()
+    #     self.backbone.eval()
+    #     return ten
     

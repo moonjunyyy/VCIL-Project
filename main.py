@@ -29,6 +29,7 @@ def main():
     args = config.base_parser()
     print(args)
     trainer = methods[args.mode](**vars(args))
+
     trainer.run()
 
 if __name__ == "__main__":

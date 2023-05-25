@@ -12,3 +12,5 @@ temp/
 *.png
 *.tar
 test.py
+*.pth
+*.csv

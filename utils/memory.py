@@ -97,6 +97,19 @@ class Memory:
             labels.append(self.labels[i])
         return torch.cat(images), torch.tensor(labels)
 
+class DummyMemory(Memory):
+    def __init__(self, data_source=None, shape=(3,224,224), datasize=2000) -> None:
+        super(DummyMemory, self).__init__(data_source)
+        self.shape = shape
+        self.datasize = datasize
+        self.images = torch.rand(self.datasize, *self.shape)
+        self.labels = torch.randint(0, 10, (self.datasize,))
+        self.cls_list = torch.unique(self.labels)
+        self.cls_count = torch.zeros(len(self.cls_list))
+        self.cls_train_cnt = torch.zeros(len(self.cls_list))
+        self.others_loss_decrease = torch.zeros(self.datasize)
+
+
 class MemoryBatchSampler(torch.utils.data.Sampler):
     def __init__(self, memory: Memory, batch_size: int, iterations: int = 1) -> None:
         self.memory = memory

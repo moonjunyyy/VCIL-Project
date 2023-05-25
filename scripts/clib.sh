@@ -67,7 +67,8 @@ fi
 
 for RND_SEED in $SEEDS
 do
-    python main.py --mode $MODE \
+    nsys profile -f true -o net --export sqlite \
+    python main.py --mode $MODE  --profile\
     --dataset $DATASET \
     --n_tasks $N_TASKS --m $M --n $N \
     --rnd_seed $RND_SEED \
@@ -75,4 +76,7 @@ do
     --lr $LR --batchsize $BATCHSIZE \
     --memory_size $MEM_SIZE $GPU_TRANSFORM --online_iter $ONLINE_ITER --data_dir ./data \
     --note $NOTE --eval_period $EVAL_PERIOD --imp_update_period $IMP_UPDATE_PERIOD --n_worker 4
+
+    python -m pyprof.parse net.sqlite > net.dict
+    python -m pyprof.prof --csv net.dict > net.csv
 done
