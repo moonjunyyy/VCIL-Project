@@ -5,6 +5,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import logging
+import torch.distributed as dist
 import copy
 
 import numpy as np
@@ -41,6 +42,8 @@ from methods._trainer import _Trainer
 from utils.data_loader import ImageDataset, StreamDataset, MemoryDataset, cutmix_data, get_statistics
 from utils.train_utils import select_model, select_optimizer, select_scheduler
 
+from utils.memory import MemoryBatchSampler
+from torch.utils.data import DataLoader
 import timm
 from timm.models import create_model
 from timm.models.registry import register_model
@@ -88,11 +91,17 @@ class DualPrompt(_Trainer):
         self.add_new_class(labels)
         # train with augmented batches
         _loss, _acc, _iter = 0.0, 0.0, 0
+
+        self.memory_sampler  = MemoryBatchSampler(self.memory, self.memory_batchsize, self.temp_batchsize * self.online_iter * self.world_size)
+        self.memory_dataloader   = DataLoader(self.train_dataset, batch_size=self.memory_batchsize, sampler=self.memory_sampler, num_workers=4)
+        self.memory_provider     = iter(self.memory_dataloader)
+
         for _ in range(int(self.online_iter)):
             loss, acc = self.online_train([images.clone(), labels.clone()])
             _loss += loss
             _acc += acc
             _iter += 1
+        self.update_memory(idx, labels)
         del(images, labels)
         gc.collect()
         return _loss / _iter, _acc / _iter
@@ -100,10 +109,18 @@ class DualPrompt(_Trainer):
     def online_train(self, data):
         self.model.train()
         total_loss, total_correct, total_num_data = 0.0, 0.0, 0.0
+
         x, y = data
+
+        if len(self.memory) > 0 and self.memory_batchsize > 0:
+            memory_images, memory_labels = next(self.memory_provider)
+            for i in range(len(memory_labels)):
+                memory_labels[i] = self.exposed_classes.index(memory_labels[i].item())
+            x = torch.cat([x, memory_images], dim=0)
+            y = torch.cat([y, memory_labels], dim=0)
+
         for j in range(len(y)):
             y[j] = self.exposed_classes.index(y[j].item())
-        self.labels = torch.cat((self.labels, y), 0)
 
         x = x.to(self.device)
         y = y.to(self.device)
@@ -251,3 +268,40 @@ class DualPrompt(_Trainer):
         #     plt.text(X_2d[-10:, 0][i] + 0.1, X_2d[-10:, 1][i], "{}".format(i), fontsize=10)
         # plt.savefig(f'DP_tsne{self.rnd_seed}_Task5.png')
         # plt.clf()
+
+    def update_memory(self, sample, label):
+        # Update memory
+        if self.distributed:
+            sample = torch.cat(self.all_gather(sample.to(self.device)))
+            label = torch.cat(self.all_gather(label.to(self.device)))
+            sample = sample.cpu()
+            label = label.cpu()
+        idx = []
+        if self.is_main_process():
+            for lbl in label:
+                self.seen += 1
+                if len(self.memory) < self.memory_size:
+                    idx.append(-1)
+                else:
+                    j = torch.randint(0, self.seen, (1,)).item()
+                    if j < self.memory_size:
+                        idx.append(j)
+                    else:
+                        idx.append(self.memory_size)
+        # Distribute idx to all processes
+        if self.distributed:
+            idx = torch.tensor(idx).to(self.device)
+            size = torch.tensor([idx.size(0)]).to(self.device)
+            dist.broadcast(size, 0)
+            if dist.get_rank() != 0:
+                idx = torch.zeros(size.item(), dtype=torch.long).to(self.device)
+            dist.barrier() # wait for all processes to reach this point
+            dist.broadcast(idx, 0)
+            idx = idx.cpu().tolist()
+        # idx = torch.cat(self.all_gather(torch.tensor(idx).to(self.device))).cpu().tolist()
+        for i, index in enumerate(idx):
+            if len(self.memory) >= self.memory_size:
+                if index < self.memory_size:
+                    self.memory.replace_data([sample[i], self.exposed_classes[label[i].item()]], index)
+            else:
+                self.memory.replace_data([sample[i], self.exposed_classes[label[i].item()]])

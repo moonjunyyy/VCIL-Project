@@ -3,6 +3,7 @@ from typing import TypeVar
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+import torch.distributed as dist
 import logging
 import copy
 
@@ -27,6 +28,8 @@ from utils.train_utils import select_optimizer, select_scheduler
 from timm.models.registry import register_model
 from timm.models.vision_transformer import _cfg, default_cfgs
 from models.vit import _create_vision_transformer
+from utils.memory import MemoryBatchSampler
+from torch.utils.data import DataLoader
 
 from sklearn.manifold import TSNE
 import matplotlib.pyplot as plt
@@ -74,13 +77,19 @@ class Ours(_Trainer):
         self.add_new_class(labels)
         # train with augmented batches
         _loss, _acc, _iter = 0.0, 0.0, 0
-        for j in range(len(labels)):
-            labels[j] = self.exposed_classes.index(labels[j].item())
+        # for j in range(len(labels)):
+        #     labels[j] = self.exposed_classes.index(labels[j].item())
+
+        self.memory_sampler  = MemoryBatchSampler(self.memory, self.memory_batchsize, self.temp_batchsize * self.online_iter * self.world_size)
+        self.memory_dataloader   = DataLoader(self.train_dataset, batch_size=self.memory_batchsize, sampler=self.memory_sampler, num_workers=4)
+        self.memory_provider     = iter(self.memory_dataloader)
+
         for _ in range(int(self.online_iter)):
             loss, acc = self.online_train([images.clone(), labels.clone()])
             _loss += loss
             _acc += acc
             _iter += 1
+        self.update_memory(idx, labels)
         del(images, labels)
         gc.collect()
         return _loss / _iter, _acc / _iter
@@ -92,6 +101,16 @@ class Ours(_Trainer):
         x, y = data
 
         self.labels = torch.cat((self.labels, y), 0)
+        
+        if len(self.memory) > 0 and self.memory_batchsize > 0:
+            memory_images, memory_labels = next(self.memory_provider)
+            for i in range(len(memory_labels)):
+                memory_labels[i] = self.exposed_classes.index(memory_labels[i].item())
+            x = torch.cat([x, memory_images], dim=0)
+            y = torch.cat([y, memory_labels], dim=0)
+
+        for j in range(len(y)):
+            y[j] = self.exposed_classes.index(y[j].item())
 
         x = x.to(self.device)
         y = y.to(self.device)
@@ -173,8 +192,8 @@ class Ours(_Trainer):
         pass
 
     def online_after_task(self, cur_iter):
-        # self.model_without_ddp.keys = torch.cat([self.model_without_ddp.keys, self.model_without_ddp.key.detach().cpu()], dim=0)
-        # self.mask_viz = torch.cat([self.mask_viz, self.model_without_ddp.mask.detach().cpu()], dim=0)
+        self.model_without_ddp.keys = torch.cat([self.model_without_ddp.keys, self.model_without_ddp.key.detach().cpu()], dim=0)
+        self.mask_viz = torch.cat([self.mask_viz, self.model_without_ddp.mask.detach().cpu()], dim=0)
         pass
 
     def reset_opt(self):
@@ -274,7 +293,27 @@ class Ours(_Trainer):
 
     # def main_worker(self, gpu) -> None:
     #     super(Ours, self).main_worker(gpu)
-        
+
+    #     vis_sel = torch.randperm(self.model_without_ddp.features.shape[0])[:10000]
+    #     self.model_without_ddp.features = torch.cat([self.model_without_ddp.features[vis_sel], self.model_without_ddp.keys], dim=0)
+    #     self.model_without_ddp.features = F.normalize(self.model_without_ddp.features, dim=1)
+
+    #     tsne = TSNE(n_components=2, random_state=0)
+    #     X_2d = tsne.fit_transform(self.model_without_ddp.features.detach().cpu().numpy())
+
+    #     for t in range(5):
+    #         for m in range(10):
+    #             for i in range(100):
+    #                 if torch.sigmoid(self.mask_viz[t*10+m][i]) > 0.5:
+    #                     plt.scatter(X_2d[:10000][self.labels[vis_sel]==i, 0], X_2d[:10000][self.labels[vis_sel]==i, 1], s = 1, alpha=1)
+    #                 else:
+    #                     plt.scatter(X_2d[:10000][self.labels[vis_sel]==i, 0], X_2d[:10000][self.labels[vis_sel]==i, 1], s = 1, alpha=0.2)
+    #             plt.scatter(X_2d[-50:-40, 0], X_2d[-50:-40, 1], s = 50, marker='^', c='black')
+    #             for i in range(10):
+    #                 plt.text(X_2d[-50:-40, 0][i] + 0.1, X_2d[-50:-40, 1][i], "{}".format(i), fontsize=10)
+    #             plt.savefig(f'OURS_tsne{self.rnd_seed}_Task{t+1}_mask{m}.png')
+    #             plt.clf()
+                    
         # torch.save(self.mask_viz, f"mask_viz_{self.rnd_seed}.pth")
         # idx = torch.randperm(self.model_without_ddp.features.shape[0])
 
@@ -327,3 +366,40 @@ class Ours(_Trainer):
         #     plt.text(X_2d[-50:-40, 0][i] + 0.1, X_2d[-50:-40, 1][i], "{}".format(i), fontsize=10)
         # plt.savefig(f'OURS_tsne{self.rnd_seed}_Task5.png')
         # plt.clf()
+       
+    def update_memory(self, sample, label):
+        # Update memory
+        if self.distributed:
+            sample = torch.cat(self.all_gather(sample.to(self.device)))
+            label = torch.cat(self.all_gather(label.to(self.device)))
+            sample = sample.cpu()
+            label = label.cpu()
+        idx = []
+        if self.is_main_process():
+            for lbl in label:
+                self.seen += 1
+                if len(self.memory) < self.memory_size:
+                    idx.append(-1)
+                else:
+                    j = torch.randint(0, self.seen, (1,)).item()
+                    if j < self.memory_size:
+                        idx.append(j)
+                    else:
+                        idx.append(self.memory_size)
+        # Distribute idx to all processes
+        if self.distributed:
+            idx = torch.tensor(idx).to(self.device)
+            size = torch.tensor([idx.size(0)]).to(self.device)
+            dist.broadcast(size, 0)
+            if dist.get_rank() != 0:
+                idx = torch.zeros(size.item(), dtype=torch.long).to(self.device)
+            dist.barrier() # wait for all processes to reach this point
+            dist.broadcast(idx, 0)
+            idx = idx.cpu().tolist()
+        # idx = torch.cat(self.all_gather(torch.tensor(idx).to(self.device))).cpu().tolist()
+        for i, index in enumerate(idx):
+            if len(self.memory) >= self.memory_size:
+                if index < self.memory_size:
+                    self.memory.replace_data([sample[i], self.exposed_classes[label[i].item()]], index)
+            else:
+                self.memory.replace_data([sample[i], self.exposed_classes[label[i].item()]])

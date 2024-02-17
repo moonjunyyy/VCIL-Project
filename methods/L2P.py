@@ -49,6 +49,8 @@ from timm.models.registry import register_model
 from timm.models.vision_transformer import _cfg, default_cfgs
 from models.vit import _create_vision_transformer
 
+from utils.memory import MemoryBatchSampler
+from torch.utils.data import DataLoader
 import timm
 from timm.models import create_model
 from timm.models.registry import register_model
@@ -94,11 +96,17 @@ class L2P(ER):
         self.add_new_class(labels)
         # train with augmented batches
         _loss, _acc, _iter = 0.0, 0.0, 0
+
+        self.memory_sampler  = MemoryBatchSampler(self.memory, self.memory_batchsize, self.temp_batchsize * self.online_iter * self.world_size)
+        self.memory_dataloader   = DataLoader(self.train_dataset, batch_size=self.memory_batchsize, sampler=self.memory_sampler, num_workers=4)
+        self.memory_provider     = iter(self.memory_dataloader)
+
         for _ in range(int(self.online_iter)):
             loss, acc = self.online_train([images.clone(), labels.clone()])
             _loss += loss
             _acc += acc
             _iter += 1
+        self.update_memory(idx, labels)
         del(images, labels)
         gc.collect()
         return _loss / _iter, _acc / _iter
@@ -108,10 +116,13 @@ class L2P(ER):
         total_loss, total_correct, total_num_data = 0.0, 0.0, 0.0
         x, y = data
             
-        # if len(self.memory) > 0 and self.memory_batchsize > 0:
-        #     memory_images, memory_labels = next(self.memory_provider)
-        #     x = torch.cat([x, memory_images], dim=0)
-        #     y = torch.cat([y, memory_labels], dim=0)
+        if len(self.memory) > 0 and self.memory_batchsize > 0:
+            memory_images, memory_labels = next(self.memory_provider)
+            for i in range(len(memory_labels)):
+                memory_labels[i] = self.exposed_classes.index(memory_labels[i].item())
+            x = torch.cat([x, memory_images], dim=0)
+            y = torch.cat([y, memory_labels], dim=0)
+
         for j in range(len(y)):
             y[j] = self.exposed_classes.index(y[j].item())
         self.labels = torch.cat((self.labels, y), 0)
@@ -201,56 +212,56 @@ class L2P(ER):
         self.optimizer = select_optimizer(self.opt_name, self.lr, self.model, True)
         self.scheduler = select_scheduler(self.sched_name, self.optimizer, self.lr_gamma)
 
-    def main_worker(self, gpu) -> None:
-        super(L2P, self).main_worker(gpu)
+    # def main_worker(self, gpu) -> None:
+    #     super(L2P, self).main_worker(gpu)
         
-        idx = torch.randperm(self.model_without_ddp.features.shape[0])
-        print(self.labels.size())
-        print(self.model_without_ddp.features.shape)
-        labels = self.labels[idx[:10000]]
+    #     idx = torch.randperm(self.model_without_ddp.features.shape[0])
+    #     print(self.labels.size())
+    #     print(self.model_without_ddp.features.shape)
+    #     labels = self.labels[idx[:10000]]
 
-        self.model_without_ddp.features = torch.cat([self.model_without_ddp.features[idx[:10000]], self.model_without_ddp.keys], dim=0)
-        self.model_without_ddp.features = F.normalize(self.model_without_ddp.features, dim=1)
+    #     self.model_without_ddp.features = torch.cat([self.model_without_ddp.features[idx[:10000]], self.model_without_ddp.keys], dim=0)
+    #     self.model_without_ddp.features = F.normalize(self.model_without_ddp.features, dim=1)
 
-        tsne = TSNE(n_components=2, random_state=0)
-        X_2d = tsne.fit_transform(self.model_without_ddp.features.detach().cpu().numpy())
+    #     tsne = TSNE(n_components=2, random_state=0)
+    #     X_2d = tsne.fit_transform(self.model_without_ddp.features.detach().cpu().numpy())
         
-        for i in range(100):
-            plt.scatter(X_2d[:10000][labels==i, 0], X_2d[:10000][labels==i, 1], s = 1, alpha=0.2)
-        plt.scatter(X_2d[-50:-40, 0], X_2d[-50:-40, 1], s = 50, marker='^', c='black')
-        for i in range(10):
-            plt.text(X_2d[-50:-40, 0][i] + 0.1, X_2d[-50:-40, 1][i], "{}".format(i), fontsize=10)
-        plt.savefig(f'L2P_tsne{self.rnd_seed}_Task1.png')
-        plt.clf()
+    #     for i in range(100):
+    #         plt.scatter(X_2d[:10000][labels==i, 0], X_2d[:10000][labels==i, 1], s = 1, alpha=0.2)
+    #     plt.scatter(X_2d[-50:-40, 0], X_2d[-50:-40, 1], s = 50, marker='^', c='black')
+    #     for i in range(10):
+    #         plt.text(X_2d[-50:-40, 0][i] + 0.1, X_2d[-50:-40, 1][i], "{}".format(i), fontsize=10)
+    #     plt.savefig(f'L2P_tsne{self.rnd_seed}_Task1.png')
+    #     plt.clf()
 
-        for i in range(100):
-            plt.scatter(X_2d[:10000][labels==i, 0], X_2d[:10000][labels==i, 1], s = 1, alpha=0.2)
-        plt.scatter(X_2d[-40:-30, 0], X_2d[-40:-30, 1], s = 50, marker='^', c='black')
-        for i in range(10):
-            plt.text(X_2d[-50:-40, 0][i] + 0.1, X_2d[-50:-40, 1][i], "{}".format(i), fontsize=10)
-        plt.savefig(f'L2P_tsne{self.rnd_seed}_Task2.png')
-        plt.clf()
+    #     for i in range(100):
+    #         plt.scatter(X_2d[:10000][labels==i, 0], X_2d[:10000][labels==i, 1], s = 1, alpha=0.2)
+    #     plt.scatter(X_2d[-40:-30, 0], X_2d[-40:-30, 1], s = 50, marker='^', c='black')
+    #     for i in range(10):
+    #         plt.text(X_2d[-50:-40, 0][i] + 0.1, X_2d[-50:-40, 1][i], "{}".format(i), fontsize=10)
+    #     plt.savefig(f'L2P_tsne{self.rnd_seed}_Task2.png')
+    #     plt.clf()
 
-        for i in range(100):
-            plt.scatter(X_2d[:10000][labels==i, 0], X_2d[:10000][labels==i, 1], s = 1, alpha=0.2)
-        plt.scatter(X_2d[-30:-20, 0], X_2d[-30:-20:, 1], s = 50, marker='^', c='black')
-        for i in range(10):
-            plt.text(X_2d[-50:-40, 0][i] + 0.1, X_2d[-50:-40, 1][i], "{}".format(i), fontsize=10)
-        plt.savefig(f'L2P_tsne{self.rnd_seed}_Task3.png')
-        plt.clf()
+    #     for i in range(100):
+    #         plt.scatter(X_2d[:10000][labels==i, 0], X_2d[:10000][labels==i, 1], s = 1, alpha=0.2)
+    #     plt.scatter(X_2d[-30:-20, 0], X_2d[-30:-20:, 1], s = 50, marker='^', c='black')
+    #     for i in range(10):
+    #         plt.text(X_2d[-50:-40, 0][i] + 0.1, X_2d[-50:-40, 1][i], "{}".format(i), fontsize=10)
+    #     plt.savefig(f'L2P_tsne{self.rnd_seed}_Task3.png')
+    #     plt.clf()
 
-        for i in range(100):
-            plt.scatter(X_2d[:10000][labels==i, 0], X_2d[:10000][labels==i, 1], s = 1, alpha=0.2)
-        plt.scatter(X_2d[-20:-10, 0], X_2d[-20:-10, 1], s = 50, marker='^', c='black')
-        for i in range(10):
-            plt.text(X_2d[-50:-40, 0][i] + 0.1, X_2d[-50:-40, 1][i], "{}".format(i), fontsize=10)
-        plt.savefig(f'L2P_tsne{self.rnd_seed}_Task4.png')
-        plt.clf()
+    #     for i in range(100):
+    #         plt.scatter(X_2d[:10000][labels==i, 0], X_2d[:10000][labels==i, 1], s = 1, alpha=0.2)
+    #     plt.scatter(X_2d[-20:-10, 0], X_2d[-20:-10, 1], s = 50, marker='^', c='black')
+    #     for i in range(10):
+    #         plt.text(X_2d[-50:-40, 0][i] + 0.1, X_2d[-50:-40, 1][i], "{}".format(i), fontsize=10)
+    #     plt.savefig(f'L2P_tsne{self.rnd_seed}_Task4.png')
+    #     plt.clf()
 
-        for i in range(100):
-            plt.scatter(X_2d[:10000][labels==i, 0], X_2d[:10000][labels==i, 1], s = 1, alpha=0.2)
-        plt.scatter(X_2d[-10:, 0], X_2d[-10:, 1], s = 50, marker='^', c='black')
-        for i in range(10):
-            plt.text(X_2d[-50:-40, 0][i] + 0.1, X_2d[-50:-40, 1][i], "{}".format(i), fontsize=10)
-        plt.savefig(f'L2P_tsne{self.rnd_seed}_Task5.png')
-        plt.clf()
+    #     for i in range(100):
+    #         plt.scatter(X_2d[:10000][labels==i, 0], X_2d[:10000][labels==i, 1], s = 1, alpha=0.2)
+    #     plt.scatter(X_2d[-10:, 0], X_2d[-10:, 1], s = 50, marker='^', c='black')
+    #     for i in range(10):
+    #         plt.text(X_2d[-50:-40, 0][i] + 0.1, X_2d[-50:-40, 1][i], "{}".format(i), fontsize=10)
+    #     plt.savefig(f'L2P_tsne{self.rnd_seed}_Task5.png')
+    #     plt.clf()

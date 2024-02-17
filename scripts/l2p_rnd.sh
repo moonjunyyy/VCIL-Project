@@ -1,11 +1,11 @@
 #!/bin/bash
 
-#SBATCH -J L2P_VIZ
+#SBATCH -J L2P_Siblurry_CIFAR_500
 #SBATCH --nodes=1
 #SBATCH --gres=gpu:1
 #SBATCH --cpus-per-gpu=8
 #SBATCH --mem-per-gpu=16G
-#SBATCH -t 7-0
+#SBATCH -t 6-0
 #SBATCH -o %x_%j_%a.log
 #SBATCH -e %x_%j_%a.err
 
@@ -30,7 +30,7 @@ conda --version
 python --version
 
 # CIL CONFIG
-NOTE="L2P_VIZ" # Short description of the experiment. (WARNING: logs/results with the same note will be overwritten!)
+NOTE="L2P_Siblurry_CIFAR_500" # Short description of the experiment. (WARNING: logs/results with the same note will be overwritten!)
 MODE="L2P"
 DATASET="cifar100" # cifar10, cifar100, tinyimagenet, imagenet
 N_TASKS=5
@@ -43,7 +43,7 @@ SEEDS=$SLURM_ARRAY_TASK_ID
 OPT="adam"
 
 if [ "$DATASET" == "cifar100" ]; then
-    MEM_SIZE=2000 ONLINE_ITER=3
+    MEM_SIZE=500 ONLINE_ITER=3
     MODEL_NAME="L2P" EVAL_PERIOD=1000
     BATCHSIZE=64; LR=3e-2 OPT_NAME="adam" SCHED_NAME="default" MEMORY_EPOCH=256
 

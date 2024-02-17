@@ -1,6 +1,6 @@
 #!/bin/bash
 
-#SBATCH -J Ours_Siblurry_F
+#SBATCH -J Ours_Siblurry_CIFAR_500
 #SBATCH -p batch
 #SBATCH --nodes=1
 #SBATCH --gres=gpu:1
@@ -33,9 +33,9 @@ conda --version
 python --version
 
 # CIL CONFIG
-NOTE="Ours_Siblurry_F" # Short description of the experiment. (WARNING: logs/results with the same note will be overwritten!)
+NOTE="Ours_Siblurry_CIFAR_500" # Short description of the experiment. (WARNING: logs/results with the same note will be overwritten!)
 MODE="ours"
-DATASET="imagenet-r" # cifar10, cifar100, tinyimagenet, imagenet
+DATASET="cifar100" # cifar10, cifar100, tinyimagenet, imagenet
 N_TASKS=5
 N=50
 M=10
@@ -50,7 +50,7 @@ if [ "$DATASET" == "cifar10" ]; then
     BATCHSIZE=16; LR=3e-4 OPT_NAME="adam" SCHED_NAME="default"
 
 elif [ "$DATASET" == "cifar100" ]; then
-    MEM_SIZE=2000 ONLINE_ITER=3
+    MEM_SIZE=500 ONLINE_ITER=3
     MODEL_NAME="ours" EVAL_PERIOD=1000
     BATCHSIZE=64; LR=5e-3 OPT_NAME="adam" SCHED_NAME="default"
 
@@ -82,9 +82,9 @@ do
     --note $NOTE --eval_period $EVAL_PERIOD --n_worker 8 --transforms autoaug --rnd_NM \
     --gamma 2.0 \
     --use_mcr \
-    # --use_afs \
-    # --use_mask \
-    # --use_contrastiv \
+    --use_afs \
+    --use_mask \
+    --use_contrastiv \
     # --alpha 0.5 \
     # --use_last_layer \
     # --use_dyna_exp

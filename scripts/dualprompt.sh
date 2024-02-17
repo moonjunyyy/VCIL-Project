@@ -1,6 +1,6 @@
 #!/bin/bash
 
-#SBATCH -J DP_Siblurry
+#SBATCH -J DP_Siblurry_CIFAR_500
 #SBATCH --gres=gpu:1
 #SBATCH --cpus-per-gpu=8
 #SBATCH --mem-per-gpu=16G
@@ -29,9 +29,9 @@ conda --version
 python --version
 
 # CIL CONFIG
-NOTE="DP_Siblurry" # Short description of the experiment. (WARNING: logs/results with the same note will be overwritten!)
+NOTE="DP_Siblurry_CIFAR_500" # Short description of the experiment. (WARNING: logs/results with the same note will be overwritten!)
 MODE="DualPrompt"
-DATASET="imagenet-r" # cifar10, cifar100, tinyimagenet, imagenet
+DATASET="cifar100" # cifar10, cifar100, tinyimagenet, imagenet
 N_TASKS=5
 N=50
 M=10
@@ -43,12 +43,12 @@ echo "SEEEDS="$SEEDS
 OPT="adam"
 
 if [ "$DATASET" == "cifar100" ]; then
-    MEM_SIZE=2000 ONLINE_ITER=3
+    MEM_SIZE=500 ONLINE_ITER=3
     MODEL_NAME="DualPrompt" EVAL_PERIOD=1000
     BATCHSIZE=64; LR=5e-3 OPT_NAME="adam" SCHED_NAME="default" MEMORY_EPOCH=256
 
 elif [ "$DATASET" == "tinyimagenet" ]; then
-    MEM_SIZE=2000 ONLINE_ITER=3
+    MEM_SIZE=500 ONLINE_ITER=3
     MODEL_NAME="DualPrompt" EVAL_PERIOD=1000
     BATCHSIZE=64; LR=5e-3 OPT_NAME="adam" SCHED_NAME="default" MEMORY_EPOCH=256
 

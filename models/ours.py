@@ -52,8 +52,8 @@ class Ours(nn.Module):
 
         super().__init__()
         
-        # self.features = torch.empty(0)
-        # self.keys     = torch.empty(0)
+        self.features = torch.empty(0)
+        self.keys     = torch.empty(0)
 
         if backbone_name is None:
             raise ValueError('backbone_name must be specified')
@@ -192,8 +192,8 @@ class Ours(nn.Module):
                 if n == len(self.backbone.blocks) - 1 and not self.use_last_layer: break
                 query = block(query)
             query = query[:, 0]
-        # if self.training:
-        #     self.features = torch.cat((self.features, query.detach().cpu()), dim = 0)
+        if self.training:
+            self.features = torch.cat((self.features, query.detach().cpu()), dim = 0)
 
         distance = 1 - F.cosine_similarity(query.unsqueeze(1), self.key, dim=-1)
         if self.use_contrastiv:
